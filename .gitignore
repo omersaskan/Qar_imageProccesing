@@ -11,10 +11,11 @@ dist/
 
 # Project Data (Large assets and session-specific files)
 data/captures/
-data/reconstructions/
-data/registry/blobs/
 data/sessions/*.json
 !data/sessions/.gitkeep
+data/reconstructions/*/
+data/registry/meta/*.json
+tmp/
 
 # IDEs
 .vscode/

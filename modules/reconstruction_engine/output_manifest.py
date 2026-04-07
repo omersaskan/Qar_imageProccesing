@@ -18,4 +18,6 @@ class OutputManifest(BaseModel):
     processing_time_seconds: float
     mesh_metadata: MeshMetadata = Field(default_factory=MeshMetadata)
     checksum: Optional[str] = None # SHA-256 of the mesh file
+    engine_type: str = "unknown"
+    is_stub: bool = False
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

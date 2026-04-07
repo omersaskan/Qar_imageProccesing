@@ -5,9 +5,32 @@ from shared_contracts.models import ReconstructionJobDraft, ReconstructionJob
 from shared_contracts.lifecycle import ReconstructionStatus
 from reconstruction_engine.job_manager import JobManager
 from reconstruction_engine.runner import ReconstructionRunner
+from reconstruction_engine.adapter import SimulatedAdapter, COLMAPAdapter
 from reconstruction_engine.failures import InsufficientInputError, MissingArtifactError
+import os
 
-def test_runner_success(tmp_path):
+def test_runner_production_guard(tmp_path, monkeypatch):
+    monkeypatch.setenv("ENV", "production")
+    monkeypatch.setenv("RECON_ENGINE", "simulated")
+    
+    # Attempting to use simulated in production should fail
+    with pytest.raises(RuntimeError, match="strictly prohibited"):
+        ReconstructionRunner()
+
+def test_runner_production_missing_path(tmp_path, monkeypatch):
+    monkeypatch.setenv("ENV", "production")
+    monkeypatch.setenv("RECON_ENGINE", "colmap")
+    monkeypatch.delenv("RECON_ENGINE_PATH", raising=False)
+    
+    # COLMAP without path in production should fail
+    # Note: COLMAPAdapter will raise RuntimeError if path is missing during initialization 
+    # if it's called by runner.
+    with pytest.raises(RuntimeError, match="must be configured"):
+        ReconstructionRunner()
+
+def test_runner_success(tmp_path, monkeypatch):
+    monkeypatch.setenv("ENV", "development") # Ensure dev mode
+    monkeypatch.setenv("RECON_ENGINE", "simulated") # Use stub for runner testing
     manager = JobManager(data_root=str(tmp_path))
     draft = ReconstructionJobDraft(
         job_id="RJ_003",
@@ -22,7 +45,7 @@ def test_runner_success(tmp_path):
     
     assert manifest.job_id == "RJ_003"
     assert "raw_mesh.obj" in manifest.mesh_path
-    assert manifest.mesh_metadata.vertex_count == 1500
+    assert manifest.mesh_metadata.vertex_count == 3
     assert (Path(job.job_dir) / "manifest.json").exists()
 
 def test_runner_insufficient_input(tmp_path):

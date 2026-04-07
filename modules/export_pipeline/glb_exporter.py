@@ -1,4 +1,5 @@
 import os
+import trimesh
 from pathlib import Path
 from typing import Dict, Any
 
@@ -8,19 +9,29 @@ class GLBExporter:
 
     def export(self, mesh_path: str, output_path: str, profile_name: str) -> Dict[str, Any]:
         """
-        STUB: Simulates GLB generation.
-        Produces a minimal valid-format placeholder.
+        Real GLB generation using trimesh.
+        Loads the provided mesh and exports it as a valid GLB 2.0 file.
         """
         if not os.path.exists(mesh_path):
-            raise FileNotFoundError(f"Cleaned mesh not found for GLB export: {mesh_path}")
+            raise FileNotFoundError(f"Source mesh not found for GLB export: {mesh_path}")
 
-        # Stub: Generate placeholder GLB file
-        with open(output_path, "wb") as f:
-            f.write(b"glTF\x02\x00\x00\x00\x00\x00\x00\x00") # Minimal binary glTF header
+        # 1. Load the mesh (OBJ/PLY/etc)
+        scene_or_mesh = trimesh.load(mesh_path)
+        
+        # 2. Export as GLB
+        scene_or_mesh.export(output_path, file_type='glb')
+
+        # 3. Collect Metadata
+        is_point_cloud = isinstance(scene_or_mesh, trimesh.PointCloud)
+        vertex_count = len(scene_or_mesh.vertices) if hasattr(scene_or_mesh, 'vertices') else 0
+        face_count = len(scene_or_mesh.faces) if hasattr(scene_or_mesh, 'faces') else 0
 
         return {
             "format": "GLB",
             "profile": profile_name,
-            "stub": True,
-            "filesize": os.path.getsize(output_path)
+            "stub": False,
+            "is_point_cloud": is_point_cloud,
+            "filesize": os.path.getsize(output_path),
+            "vertex_count": vertex_count,
+            "face_count": face_count
         }

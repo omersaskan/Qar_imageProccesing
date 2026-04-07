@@ -13,6 +13,8 @@ from modules.asset_registry.registry import AssetRegistry
 from modules.capture_workflow.session_manager import SessionManager
 from modules.operations.logging_config import get_component_logger
 from modules.shared_contracts.lifecycle import AssetStatus, assert_transition
+from modules.reconstruction_engine.output_manifest import OutputManifest
+from modules.export_pipeline.glb_exporter import GLBExporter
 
 # Custom exceptions for clearer flow control
 class WorkerError(Exception): pass
@@ -197,43 +199,76 @@ class IngestionWorker:
             raise
         except TimeoutError:
             raise RecoverableError(f"Lock timeout for session {session.session_id}. Retrying...")
-        except Exception as e:
-            logger.error(f"Reconstruction engine failed for {session.session_id}: {e}")
+        except (RuntimeError, Exception) as e:
+            msg = str(e)
+            # Check for configuration/guard failures which should be IRRECOVERABLE
+            if "not configured" in msg or "prohibited" in msg or "VIOLATION" in msg:
+                logger.error(f"🛑 CRITICAL CONFIGURATION FAILURE: {msg}")
+                raise IrrecoverableError(f"Engine configuration error: {msg}")
+            
+            if isinstance(e, RuntimeError):
+                logger.error(f"Reconstruction engine failed for {session.session_id}: {e}")
+            else:
+                logger.error(f"Unexpected reconstruction failure for {session.session_id}: {e}")
+                
             raise RecoverableError(f"Engine failure: {e}")
 
     def _finalize_ingestion(self, session: CaptureSession):
-        """Turns the session into a registered asset with a valid placeholder."""
-        logger.info(f"🏁 Finalizing ingestion: Creating asset registry record for {session.product_id}...", extra={"job_id": session.session_id})
+        """Turns the session into a registered asset with a valid 3D model."""
+        logger.info(f"🏁 Finalizing ingestion: Processing assets for {session.product_id}...", extra={"job_id": session.session_id})
         
-        # 1. Create Metadata
+        # 1. Load Reconstruction Manifest
+        job_id = f"job_{session.session_id}"
+        job_dir = Path("data/reconstructions") / job_id
+        manifest_path = job_dir / "manifest.json"
+        
+        if not manifest_path.exists():
+             raise IrrecoverableError(f"Reconstruction manifest missing for {session.session_id} at {manifest_path}")
+        
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            manifest_data = json.load(f)
+            manifest = OutputManifest.model_validate(manifest_data)
+
+        # 2. Export GLB
         timestamp = int(time.time())
         asset_id = f"{session.product_id}_{timestamp}"
+        blob_path = self.blobs_dir / f"{asset_id}.glb"
+        
+        logger.info(f"📦 Exporting GLB from {manifest.mesh_path}...")
+        exporter = GLBExporter()
+        try:
+            export_result = exporter.export(
+                mesh_path=manifest.mesh_path,
+                output_path=str(blob_path),
+                profile_name="standard"
+            )
+            logger.info(f"✅ GLB Export successful: {export_result['filesize']} bytes")
+        except Exception as e:
+            raise IrrecoverableError(f"GLB Export failed: {e}")
+
+        # 3. Register in Registry
         metadata = AssetMetadata(
             asset_id=asset_id,
             product_id=session.product_id,
             version=f"v{random.randint(1,5)}.0" 
         )
         
-        # 2. Register in Registry
         self.registry.register_asset(metadata)
         self.registry.set_active_version(session.product_id, asset_id)
-        self.registry.update_publish_state(asset_id, "published")
         
-        # 3. Create dummy GLB blob (Valid placeholder instead of 0-byte)
-        try:
-            from modules.operations.placeholder_engine import write_placeholder_glb
-            blob_path = self.blobs_dir / f"{asset_id}.glb"
-            write_placeholder_glb(blob_path)
-            logger.info(f"Generated valid placeholder GLB for {asset_id}")
-        except Exception as e:
-            logger.error(f"Failed to generate GLB placeholder: {e}")
+        # Policy: If stub, do NOT flag as 'published' for production
+        if manifest.is_stub:
+            logger.warning(f"⚠️ CAPTURE {session.session_id} yielded a STUB mesh. Marking as 'draft' instead of 'published'.")
+            self.registry.update_publish_state(asset_id, "draft")
+        else:
+            self.registry.update_publish_state(asset_id, "published")
         
         # 4. Clean up session
         try:
             session_file = Path("data/sessions") / f"{session.session_id}.json"
             if session_file.exists():
                 session_file.unlink()
-            logger.info(f"✅ Success! {session.product_id} is now registered as {asset_id}. Model available in 3D Viewer.")
+            logger.info(f"✅ Success! {session.product_id} is now registered as {asset_id}.")
         except Exception as e:
             logger.error(f"Worker cleanup failed: {str(e)}")
 

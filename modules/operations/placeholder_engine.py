@@ -1,3 +1,7 @@
+"""
+WARNING: This module is for DEBUG/TEST purposes ONLY.
+Do NOT use in production reconstruction flows.
+"""
 import struct
 from pathlib import Path
 
