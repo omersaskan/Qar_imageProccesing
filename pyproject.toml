@@ -1,0 +1,19 @@
+[project]
+name = "meshysiz-asset-factory"
+version = "0.1.0"
+description = "3D Asset Factory for Product Visualization"
+authors = [{ name = "Meshysiz Team" }]
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.0.0",
+    "Pillow>=10.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["modules/*/tests"]
+pythonpath = ["modules"]

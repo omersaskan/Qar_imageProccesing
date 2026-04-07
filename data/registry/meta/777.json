@@ -1,0 +1,29 @@
+{
+  "assets": {
+    "777_1775586898": {
+      "metadata": {
+        "asset_id": "777_1775586898",
+        "product_id": "777",
+        "version": "v4.0",
+        "bbox": {},
+        "pivot_offset": {},
+        "quality_grade": "C",
+        "created_at": "2026-04-07T18:34:58.573033Z"
+      },
+      "publish_state": "published",
+      "is_approved": false,
+      "rework_required": false,
+      "created_at": "2026-04-07T18:34:58.573990+00:00"
+    }
+  },
+  "audit_logs": [
+    {
+      "asset_id": "777_1775586898",
+      "timestamp": "2026-04-07T18:34:58.573990+00:00",
+      "action": "registered",
+      "details": {
+        "version": "v4.0"
+      }
+    }
+  ]
+}

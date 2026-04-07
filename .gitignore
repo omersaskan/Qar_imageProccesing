@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+.venv/
+env/
+venv/
+build/
+dist/
+
+# Project Data (Large assets and session-specific files)
+data/captures/
+data/reconstructions/
+data/registry/blobs/
+data/sessions/*.json
+!data/sessions/.gitkeep
+
+# IDEs
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

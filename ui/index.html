@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meshysiz Asset Factory | Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
+</head>
+<body class="dark-mode">
+    <nav class="glass-nav">
+        <div class="logo">
+            <span class="brand">MESHYSIS</span>
+            <span class="sub">Asset Factory</span>
+        </div>
+        <div class="nav-actions">
+            <button id="open-upload" class="btn-primary">+ New Capture</button>
+            <div class="status-badge" id="api-status">
+                <span class="dot"></span> Online
+            </div>
+        </div>
+    </nav>
+
+    <main class="container">
+        <header class="dashboard-header">
+            <h1>Registry Dashboard</h1>
+            <p>Production-ready asset tracking & version management</p>
+        </header>
+
+        <section class="stats-grid">
+            <div class="stat-card glass">
+                <span class="label">Total Products</span>
+                <span class="value" id="total-products">0</span>
+            </div>
+            <div class="stat-card glass">
+                <span class="label">Active Versions</span>
+                <span class="value" id="active-versions">0</span>
+            </div>
+            <div class="stat-card glass">
+                <span class="label">Success Rate</span>
+                <span class="value">99.8%</span>
+            </div>
+        </section>
+
+        <section class="main-content">
+            <div class="product-explorer">
+                <div class="section-header">
+                    <h2>Product Explorer</h2>
+                    <input type="text" id="search-input" placeholder="Search product ID..." class="glass-input">
+                </div>
+                <div class="product-grid" id="product-grid">
+                    <!-- Product cards will be injected here -->
+                    <div class="loader"></div>
+                </div>
+            </div>
+
+            <div class="side-panel">
+                <h2>Operational Logs</h2>
+                <div class="log-stream glass" id="log-stream">
+                    <!-- Logs will be injected here -->
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Modal for Product Details -->
+    <div id="modal-backdrop" class="modal-backdrop hidden">
+        <div class="modal glass">
+            <header class="modal-header">
+                <h2 id="modal-title">Product History</h2>
+                <button id="close-modal" class="close-btn">&times;</button>
+            </header>
+            <div class="modal-content">
+                <div id="history-container"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for Upload -->
+    <div id="upload-modal-backdrop" class="modal-backdrop hidden">
+        <div class="modal glass">
+            <header class="modal-header">
+                <h2>Import New Video Asset</h2>
+                <button id="close-upload" class="close-btn">&times;</button>
+            </header>
+            <form id="upload-form" class="upload-container">
+                <div class="input-group">
+                    <label>Product ID</label>
+                    <input type="text" id="upload-product-id" placeholder="e.g. stool_wooden" class="glass-input" required>
+                </div>
+                <div id="drop-zone" class="drop-zone">
+                    <span class="drop-text">Drag & drop video or click to select</span>
+                    <input type="file" id="video-input" accept="video/mp4,video/mov,video/quicktime" hidden>
+                </div>
+                <div id="file-info" class="file-info hidden">
+                    <span id="file-name"></span>
+                </div>
+                <div id="upload-progress-container" class="progress-container hidden">
+                    <div class="progress-bar" id="upload-progress"></div>
+                </div>
+                <button type="submit" class="btn-primary w-full" id="submit-upload">Start Ingestion</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal for 3D Viewer -->
+    <div id="viewer-modal-backdrop" class="modal-backdrop hidden">
+        <div class="modal glass viewer-modal">
+            <header class="modal-header">
+                <h2 id="viewer-title">3D Preview</h2>
+                <button id="close-viewer" class="close-btn">&times;</button>
+            </header>
+            <div class="viewer-container" style="background: #000; border-radius: 12px; overflow: hidden; margin-bottom: 15px;">
+                <model-viewer id="main-viewer" 
+                    camera-controls 
+                    auto-rotate 
+                    auto-rotate-delay="0"
+                    shadow-intensity="1" 
+                    environment-image="neutral"
+                    exposure="1"
+                    interaction-prompt="auto"
+                    style="width: 100%; height: 500px; display: block; background: #111;">
+                </model-viewer>
+            </div>
+            <div class="viewer-footer">
+                <p id="viewer-status" style="color: #888; font-size: 0.9rem;">Interact with the model to inspect details</p>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
