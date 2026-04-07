@@ -12,6 +12,12 @@ from modules.shared_contracts.lifecycle import AssetStatus
 from modules.asset_registry.registry import AssetRegistry
 from modules.capture_workflow.session_manager import SessionManager
 from modules.operations.logging_config import get_component_logger
+from modules.shared_contracts.lifecycle import AssetStatus, assert_transition
+
+# Custom exceptions for clearer flow control
+class WorkerError(Exception): pass
+class RecoverableError(WorkerError): pass
+class IrrecoverableError(WorkerError): pass
 
 logger = get_component_logger("worker")
 
@@ -49,7 +55,7 @@ class IngestionWorker:
             time.sleep(self.interval)
 
     def _process_pending_sessions(self):
-        """Scans session directory for items in 'created' status and advances them."""
+        """Scans session directory for items in 'created', 'captured', or 'reconstructed' status."""
         sessions_dir = Path("data/sessions")
         if not sessions_dir.exists(): return
         
@@ -66,15 +72,37 @@ class IngestionWorker:
                     self._advance_session(session, AssetStatus.RECONSTRUCTED, "Reconstructing 3D geometry...")
                 elif session.status == AssetStatus.RECONSTRUCTED:
                     self._finalize_ingestion(session)
+                elif session.status == AssetStatus.FAILED:
+                    # User requirement: FAILED is terminal, don't re-process
+                    continue
+            except IrrecoverableError as ie:
+                logger.error(f"💀 Irrecoverable error for {file.name}: {ie}")
+                self._mark_session_failed(file.stem, str(ie))
+            except RecoverableError as re:
+                logger.warn(f"⏳ Transient error for {file.name}, will retry: {re}")
             except Exception as e:
-                logger.error(f"Failed to handle session file {file.name}: {str(e)}")
+                logger.error(f"❌ Unexpected failure handling {file.name}: {str(e)}")
+                # For safety, consider unknown exceptions as recoverable for 1-2 cycles 
+                # but here we log and continue to next file.
+
+    def _mark_session_failed(self, session_id: str, reason: str):
+        """Moves session to FAILED state with a reason."""
+        try:
+            session = self.session_manager.get_session(session_id)
+            if session:
+                session.failure_reason = reason
+                self.session_manager.save_session(session)
+                self.session_manager.update_session_status(session_id, AssetStatus.FAILED)
+                logger.info(f"🚫 Session {session_id} marked as FAILED. Reason: {reason}")
+        except Exception as e:
+            logger.error(f"Failed to mark session {session_id} as FAILED: {e}")
 
     def _advance_session(self, session: CaptureSession, next_status: AssetStatus, log_msg: str):
         """Advances session to next status with local processing if needed."""
         try:
             logger.info(f"🚀 PIPELINE START: {log_msg} ({session.session_id})", extra={"job_id": session.session_id})
             
-            # --- Real Local Processing (P10) ---
+            # --- Real Local Processing ---
             if next_status == AssetStatus.CAPTURED:
                 self._handle_frame_extraction(session)
             elif next_status == AssetStatus.RECONSTRUCTED:
@@ -84,12 +112,11 @@ class IngestionWorker:
             self.session_manager.update_session_status(session.session_id, next_status)
             logger.info(f"✅ PIPELINE STEP COMPLETE: {session.session_id} is now {next_status.value}")
 
+        except (RecoverableError, IrrecoverableError):
+            raise # Re-raise to be handled by _process_pending_sessions
         except Exception as e:
-            error_msg = f"❌ PIPELINE ERROR in step '{log_msg}': {str(e)}"
-            logger.error(error_msg, extra={"job_id": session.session_id})
-            logger.error(traceback.format_exc())
-            # We don't advance the status on error to prevent moving to broken states
-            raise e
+            # Wrap unknown exceptions
+            raise RecoverableError(f"Unexpected error: {str(e)}")
 
     def _handle_frame_extraction(self, session: CaptureSession):
         """Internal helper for frame extraction step."""
@@ -103,13 +130,16 @@ class IngestionWorker:
                 logger.info(f"🛠️ Starting CV2 frame extraction for {session.session_id}...", extra={"job_id": session.session_id})
                 frames = extractor.extract_keyframes(str(video_path), str(output_dir))
                 if not frames:
-                     raise RuntimeError(f"Frame extraction produced 0 frames for {session.session_id}")
+                     raise IrrecoverableError(f"Frame extraction produced 0 frames for {session.session_id}. Quality or sequence issue.")
                 logger.info(f"📸 Extraction successful: {len(frames)} frames saved.", extra={"job_id": session.session_id})
             else:
-                raise FileNotFoundError(f"Video file missing at {video_path}. Cannot proceed to CAPTURED status.")
+                raise IrrecoverableError(f"Video file missing at {video_path}. Reference broken.")
+        except IrrecoverableError:
+            raise
+        except TimeoutError:
+            raise RecoverableError("Lock timeout during frame extraction. Retrying...")
         except Exception as e:
-            logger.error(f"Frame extraction failed: {e}", extra={"job_id": session.session_id})
-            raise e
+            raise RecoverableError(f"Frame extraction failed: {e}")
 
     def _handle_reconstruction(self, session: CaptureSession):
         """Orchestrates the 3D reconstruction using the actual engine."""
@@ -120,6 +150,15 @@ class IngestionWorker:
             
             # 1. Prepare Inputs
             frames_dir = Path("data/captures") / session.session_id / "frames"
+            
+            # Pre-check folder
+            if not frames_dir.exists():
+                logger.warning(f"⚠️ Frames directory missing for {session.session_id}. Attempting recovery...")
+                try:
+                    self._handle_frame_extraction(session)
+                except Exception as e:
+                    raise IrrecoverableError(f"Failed to recover missing frames directory: {e}")
+
             input_frames = [str(f) for f in frames_dir.glob("*.jpg")]
             
             if not input_frames:
@@ -128,13 +167,10 @@ class IngestionWorker:
                     self._handle_frame_extraction(session)
                     input_frames = [str(f) for f in frames_dir.glob("*.jpg")]
                 except Exception as re_ext_err:
-                    logger.error(f"Emergency re-extraction failed: {re_ext_err}")
+                    raise IrrecoverableError(f"Emergency re-extraction failed: {re_ext_err}")
             
             if not input_frames:
-                # If still no frames, we have a problem. 
-                # To prevent endless loop spam, we could move to a manual intervention state if we had one.
-                # For now, just raise with a clear message.
-                raise RuntimeError(f"No frames found for reconstruction in {session.session_id} even after retry. Please check video file.")
+                raise IrrecoverableError(f"No frames available for reconstruction in {session.session_id} after retry.")
 
             # 2. Initialize Engine
             manager = JobManager()
@@ -157,10 +193,13 @@ class IngestionWorker:
             manager.update_job_status(job.job_id, "completed")
             logger.info(f"✨ Reconstruction successful: {manifest.processing_time_seconds:.2f}s, {manifest.mesh_metadata.vertex_count} vertices.")
             
+        except IrrecoverableError:
+            raise
+        except TimeoutError:
+            raise RecoverableError(f"Lock timeout for session {session.session_id}. Retrying...")
         except Exception as e:
-            logger.error(f"Reconstruction failed for {session.session_id}: {e}")
-            # Optional: throttle retries for this specific session?
-            raise e
+            logger.error(f"Reconstruction engine failed for {session.session_id}: {e}")
+            raise RecoverableError(f"Engine failure: {e}")
 
     def _finalize_ingestion(self, session: CaptureSession):
         """Turns the session into a registered asset with a valid placeholder."""

@@ -10,6 +10,7 @@ class AssetStatus(str, Enum):
     EXPORTED = "exported"
     VALIDATED = "validated"
     PUBLISHED = "published"
+    FAILED = "failed"
 
 class ReconstructionStatus(str, Enum):
     QUEUED = "queued"
@@ -20,12 +21,14 @@ class ReconstructionStatus(str, Enum):
 # Define allowed transitions
 _ALLOWED_TRANSITIONS: Dict[AssetStatus, Set[AssetStatus]] = {
     AssetStatus.CREATED: {AssetStatus.CAPTURED},
-    AssetStatus.CAPTURED: {AssetStatus.RECONSTRUCTED, AssetStatus.CAPTURED}, # Retry capture
-    AssetStatus.RECONSTRUCTED: {AssetStatus.CLEANED, AssetStatus.CAPTURED}, # Fail/Retry capture
+    AssetStatus.CAPTURED: {AssetStatus.RECONSTRUCTED, AssetStatus.CAPTURED, AssetStatus.FAILED}, # Retry capture or fail
+    AssetStatus.RECONSTRUCTED: {AssetStatus.CLEANED, AssetStatus.CAPTURED, AssetStatus.FAILED}, # Fail/Retry capture or fail
     AssetStatus.CLEANED: {AssetStatus.EXPORTED, AssetStatus.RECONSTRUCTED}, # Redo cleanup or redo reconstruction
     AssetStatus.EXPORTED: {AssetStatus.VALIDATED, AssetStatus.CLEANED}, # Re-export or redo cleanup
     AssetStatus.VALIDATED: {AssetStatus.PUBLISHED, AssetStatus.EXPORTED}, # Publish or re-export
     AssetStatus.PUBLISHED: {AssetStatus.VALIDATED}, # Rollback to validated state
+    AssetStatus.CREATED: {AssetStatus.CAPTURED, AssetStatus.FAILED}, # Allow initial failure
+    AssetStatus.FAILED: set(), # Terminal state
 }
 
 def can_transition(from_status: AssetStatus, to_status: AssetStatus) -> bool:

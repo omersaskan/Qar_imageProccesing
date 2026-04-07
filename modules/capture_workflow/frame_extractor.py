@@ -30,6 +30,13 @@ class FrameExtractor:
         frame_count = 0
         last_extracted_hist = None
         
+        # Diagnostics
+        rejection_counts = {
+            "blur_or_exposure": 0,
+            "similarity": 0,
+            "sampling": 0
+        }
+        
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
 
@@ -40,12 +47,14 @@ class FrameExtractor:
             
             # 1. Time-based sampling
             if frame_count % self.thresholds.frame_sample_rate != 0:
+                rejection_counts["sampling"] += 1
                 frame_count += 1
                 continue
             
             # 2. Quality filter (blur/exposure)
             analysis = self.quality_analyzer.analyze_frame(frame)
             if not analysis["overall_pass"]:
+                rejection_counts["blur_or_exposure"] += 1
                 reasons = ", ".join(analysis.get("failure_reasons", []))
                 logger.debug(f"Frame {frame_count} rejected: {reasons}")
                 frame_count += 1
@@ -56,6 +65,7 @@ class FrameExtractor:
             if last_extracted_hist is not None:
                 similarity = cv2.compareHist(last_extracted_hist, current_hist, cv2.HISTCMP_CORREL)
                 if similarity > self.thresholds.min_similarity_score:
+                    rejection_counts["similarity"] += 1
                     frame_count += 1
                     continue
             
@@ -78,10 +88,18 @@ class FrameExtractor:
             frame_count += 1
 
         cap.release()
+        
+        # Diagnostic summary
+        logger.info(f"📊 EXTRACTION SUMMARY for {Path(video_path).name}:")
+        logger.info(f"   - Total frames read: {frame_count}")
+        logger.info(f"   - Rejected by quality (blur/exposure): {rejection_counts['blur_or_exposure']}")
+        logger.info(f"   - Rejected by similarity: {rejection_counts['similarity']}")
+        logger.info(f"   - Skipped by sampling: {rejection_counts['sampling']}")
+        logger.info(f"   - ✅ TOTAL SAVED: {len(extracted_paths)}")
+
         if not extracted_paths:
             logger.warning(f"❌ ZERO valid keyframes extracted from {video_path}! Check quality settings or video content.")
         
-        logger.info(f"Completed extraction for {video_path}. Total read: {frame_count}, Total saved: {len(extracted_paths)}")
         return extracted_paths
 
     def _get_histogram(self, frame: np.ndarray) -> np.ndarray:

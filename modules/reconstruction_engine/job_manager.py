@@ -60,20 +60,33 @@ class JobManager:
         atomic_write_json(file_path, job.model_dump(mode="json"))
 
     def get_job(self, job_id: str) -> Optional[ReconstructionJob]:
-        """Loads job.json from the job's directory."""
+        """Loads job.json from the job's directory with validation."""
+        job_id = validate_identifier(job_id, "Job ID")
         file_path = os.path.join(self.reconstructions_dir, job_id, "job.json")
+        
         if not os.path.exists(file_path):
+            logger.error(f"Job file not found: {file_path}")
             return None
-        with open(file_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            return ReconstructionJob.model_validate(data)
+            
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return ReconstructionJob.model_validate(data)
+        except Exception as e:
+            logger.error(f"Failed to load job {job_id}: {e}")
+            return None
 
     def update_job_status(self, job_id: str, status: ReconstructionStatus, failure_reason: Optional[str] = None) -> ReconstructionJob:
+        job_id = validate_identifier(job_id, "Job ID")
         file_path = os.path.join(self.reconstructions_dir, job_id, "job.json")
+        
         with FileLock(file_path):
             job = self.get_job(job_id)
             if not job:
-                raise ValueError(f"Job {job_id} not found.")
+                # User requirement: report failure clearly, don't just crash
+                err_msg = f"Reconstruction job {job_id} not found in storage. Cannot update status to {status}."
+                logger.error(err_msg)
+                raise FileNotFoundError(err_msg)
 
             job.status = status
             if status == ReconstructionStatus.RUNNING:

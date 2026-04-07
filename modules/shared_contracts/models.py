@@ -17,6 +17,7 @@ class CaptureSession(BaseModel):
     source_video_url: Optional[HttpUrl] = None
     extracted_frames: List[HttpUrl] = Field(default_factory=list)
     coverage_score: float = Field(0.0, ge=0.0, le=1.0)
+    failure_reason: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     @field_validator("status", mode="before")
