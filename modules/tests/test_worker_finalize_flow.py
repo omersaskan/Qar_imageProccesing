@@ -144,16 +144,19 @@ class TestWorkerFinalizeFlow(unittest.TestCase):
         self.assertEqual(len(history), 1)
         self.assertEqual(history[0]['status'], "published")
 
+    @patch("modules.operations.worker.GLBExporter")
     @patch("modules.operations.worker.AssetCleaner")
     @patch("modules.operations.worker.AssetValidator")
-    def test_finalize_ingestion_gate_fails(self, MockValidatorClass, MockCleanerClass):
+    def test_finalize_ingestion_gate_fails(self, MockValidatorClass, MockCleanerClass, MockExporterClass):
         import trimesh
         # Setup mocks
         mock_cleaner = MockCleanerClass.return_value
         mock_validator = MockValidatorClass.return_value
+        mock_exporter = MockExporterClass.return_value
         
         self.worker.cleaner = mock_cleaner
         self.worker.validator = mock_validator
+        self.worker.exporter = mock_exporter
         
         from modules.asset_cleanup_pipeline.normalizer import NormalizedMetadata
         mock_metadata = NormalizedMetadata(
@@ -199,10 +202,13 @@ class TestWorkerFinalizeFlow(unittest.TestCase):
         self.assertIn("ground_offset", validation_input)
         self.assertAlmostEqual(validation_input["ground_offset"], 10.0, places=6)
         
-        # 2. Mark session failed called
+        # 2. Orchestration Assertion: Exporter should NOT be called on failure
+        mock_exporter.export.assert_not_called()
+        
+        # 3. Mark session failed called
         self.worker._mark_session_failed.assert_called_once()
         
-        # 3. Registry should NOT have a published asset
+        # 4. Registry should NOT have a published asset
         prod_data = self.worker.registry._load_product_data(self.product_id)
         self.assertEqual(len(prod_data["assets"]), 0)
 
