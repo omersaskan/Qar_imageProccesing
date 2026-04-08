@@ -103,16 +103,18 @@ class TestWorkerFinalizeFlow(unittest.TestCase):
         
         # Mocking validator return
         from modules.shared_contracts.models import ValidationReport
-        mock_report = ValidationReport(
-            asset_id="test_asset",
-            poly_count=100,
+        mock_validator.validate.return_value = ValidationReport(
+            asset_id="test_product_123",
+            poly_count=5000,
             texture_status="complete",
             bbox_reasonable=True,
             ground_aligned=True,
             mobile_performance_grade="A",
-            final_decision="pass"
+            final_decision="pass",
+            flatness_score=1.0,
+            compactness_score=1.0,
+            selected_component_score=1.0
         )
-        mock_validator.validate.return_value = mock_report
         
         # Mocking exporter
         mock_exporter.export.return_value = {"filesize": 1024}

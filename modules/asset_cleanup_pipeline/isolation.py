@@ -28,26 +28,34 @@ class MeshIsolator:
             "removed_plane_vertices": 0
         }
 
-        # 1. Remove dominant planes (Table/Floor)
+        # 1. Remove dominant planes (Table/Floor) - Robust Iterative
         current_mesh = mesh.copy()
         
-        for i in range(2):
+        for i in range(3): # Increased iterations for complex scenes
             try:
-                # Find plane using vertices
-                plane_origin, plane_normal = trimesh.points.plane_fit(current_mesh.vertices)
+                # Use a larger sample for plane fitting in messy scenes
+                if len(current_mesh.vertices) < 500: break
+                
+                # Sample points for robust RANSAC-like plane search (simulated here with better fit)
+                pts = current_mesh.vertices[np.random.choice(len(current_mesh.vertices), min(2000, len(current_mesh.vertices)), replace=False)]
+                plane_origin, plane_normal = trimesh.points.plane_fit(pts)
+                
                 # Filter points close to the plane
                 distances = np.abs(np.dot(current_mesh.vertices - plane_origin, plane_normal))
-                inliers = np.where(distances < 0.05)[0] # 5cm threshold for plane
                 
-                if len(inliers) > len(current_mesh.vertices) * 0.1: # If plane contains >10% of vertices
-                    logger.info(f"Removing dominant plane with {len(inliers)} vertices.")
-                    
-                    # Track faces to be removed for stats
-                    # A face is removed if any of its vertices are in the plane
+                # Adaptive threshold based on mesh scale, but capped to prevent removing products
+                bbox_diag = np.linalg.norm(current_mesh.bounds[1] - current_mesh.bounds[0])
+                # Product-safe threshold: 0.5% of diagonal or 1cm, whichever is smaller
+                threshold = min(0.01, bbox_diag * 0.005) 
+                
+                inliers = np.where(distances < threshold)[0]
+                
+                if len(inliers) > len(current_mesh.vertices) * 0.05: # >5% check
+                    # Track faces to be removed
                     face_mask = np.any(np.isin(current_mesh.faces, inliers), axis=1)
                     stats["removed_plane_faces"] += int(np.sum(face_mask))
                     
-                    # Effective removal
+                    # Remove vertices
                     vertex_mask = np.ones(len(current_mesh.vertices), dtype=bool)
                     vertex_mask[inliers] = False
                     stats["removed_plane_vertices"] += len(inliers)
@@ -67,28 +75,43 @@ class MeshIsolator:
         logger.info(f"Found {len(components)} connected components.")
         
         # 3. Score components to find the product
-        # Criteria: Centrality, Face Count, Non-flatness
+        # Phase 3: Enhanced Scoring (Face Count, Centrality, Flatness Penalty, Compactness)
         best_comp = None
         best_score = -1.0
         
         for comp in components:
             f_count = len(comp.faces)
-            if f_count < 100: # Ignore tiny noise
+            if f_count < 200: # Increased noise threshold
                 stats["removed_islands"] += 1
                 continue
                 
-            # Score
+            # A. Face Score
+            face_score = min(1.0, f_count / 10000.0)
+            
+            # B. Centrality (Relative to original mesh center/centroid)
             center_dist = np.linalg.norm(comp.centroid)
-            occupancy = comp.area # Surface area as a proxy for size
+            centrality_score = np.exp(-center_dist / 0.5) # Decay faster
             
-            # Heuristic score: higher is better
-            # Prefers central and substantial objects
-            score = (f_count * 0.5) * np.exp(-center_dist / 5.0)
-            
-            # Penalty for being too flat (planes)
+            # C. Compactness (Volume/BBoxVolume)
             bbox = comp.bounds[1] - comp.bounds[0]
-            if np.min(bbox) < 0.02 or np.min(bbox) / np.max(bbox) < 0.1:
-                score *= 0.1 # Severe penalty for thin slabs
+            bbox_vol = np.prod(bbox)
+            # Use convex hull volume for non-watertight meshes
+            compactness = comp.convex_hull.volume / bbox_vol if bbox_vol > 0 else 0
+            
+            # D. Flatness Penalty (Is it a forgotten plane segment or a slab?)
+            # bbox_aspect = min_dim / max_dim
+            min_dim = np.min(bbox)
+            max_dim = np.max(bbox)
+            aspect_ratio = min_dim / max_dim if max_dim > 0 else 0
+            flatness_penalty = 1.0 if aspect_ratio > 0.1 else (aspect_ratio * 10.0)
+            
+            # Weighted Score
+            score = (
+                face_score * 0.3 +
+                centrality_score * 0.3 +
+                compactness * 0.2 +
+                flatness_penalty * 0.2
+            )
             
             if score > best_score:
                 best_score = score
@@ -98,10 +121,15 @@ class MeshIsolator:
             logger.warning("No suitable product component found! Returning largest component as fallback.")
             best_comp = max(components, key=lambda c: len(c.faces))
 
-        stats["final_faces"] = len(best_comp.faces)
-        stats["final_vertices"] = len(best_comp.vertices)
-        stats["component_count"] = len(components)
-        stats["island_count"] = len(components) - 1
+        stats.update({
+            "final_faces": len(best_comp.faces),
+            "final_vertices": len(best_comp.vertices),
+            "component_count": len(components),
+            "island_count": len(components) - 1,
+            "selected_component_score": float(best_score),
+            "compactness_score": float(compactness if 'compactness' in locals() else 0),
+            "flatness_score": float(aspect_ratio if 'aspect_ratio' in locals() else 0)
+        })
         
         # Calculate Ratios
         stats["removed_plane_face_share"] = stats["removed_plane_faces"] / stats["initial_faces"] if stats["initial_faces"] > 0 else 0

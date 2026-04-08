@@ -28,19 +28,27 @@ class GLBExporter:
             mesh = mesh.dump(concatenate=True)
             
         # 2. Add Texture (Visuals)
+        has_uv = hasattr(mesh.visual, 'uv') and mesh.visual.uv is not None
+        has_material = hasattr(mesh.visual, 'material') and mesh.visual.material is not None
+        texture_applied = False
+        
         if texture_path and os.path.exists(texture_path):
-            try:
-                from PIL import Image
-                tex_image = Image.open(texture_path)
-                material = trimesh.visual.material.PBRMaterial(
-                    baseColorTexture=tex_image,
-                    metallicFactor=0.0,
-                    roughnessFactor=1.0
-                )
-                # We assume UVs exist in the mesh (COLMAP/OpenMVS typically provide them)
-                mesh.visual = trimesh.visual.TextureVisuals(uv=mesh.visual.uv, material=material)
-            except Exception as e:
-                print(f"Warning: Failed to apply texture {texture_path}: {e}")
+            if not has_uv:
+                print(f"CRITICAL WARNING: Texture path provided ({texture_path}) but mesh has NO UV coordinates. Texture cannot be applied.")
+            else:
+                try:
+                    from PIL import Image
+                    tex_image = Image.open(texture_path)
+                    material = trimesh.visual.material.PBRMaterial(
+                        baseColorTexture=tex_image,
+                        metallicFactor=0.0,
+                        roughnessFactor=1.0
+                    )
+                    mesh.visual = trimesh.visual.TextureVisuals(uv=mesh.visual.uv, material=material)
+                    texture_applied = True
+                    has_material = True
+                except Exception as e:
+                    print(f"Warning: Failed to apply texture {texture_path}: {e}")
         else:
             # Fallback to vertex colors or default material
             if hasattr(mesh.visual, 'vertex_colors'):
@@ -62,5 +70,9 @@ class GLBExporter:
             "filesize": os.path.getsize(output_path),
             "vertex_count": len(mesh.vertices),
             "face_count": len(mesh.faces),
-            "has_texture": bool(texture_path and os.path.exists(texture_path))
+            "has_texture": bool(texture_path and os.path.exists(texture_path)),
+            "has_uv": has_uv,
+            "has_material": has_material,
+            "used_texture_path": texture_path if texture_applied else None,
+            "texture_applied_successfully": texture_applied
         }

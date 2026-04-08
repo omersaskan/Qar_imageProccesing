@@ -81,6 +81,11 @@ class ValidationReport(BaseModel):
     contamination_report: Dict[str, Any] = Field(default_factory=dict)
     
     final_decision: str # pass, fail, review
+    
+    # Phase 3: New Robust Scoring
+    flatness_score: float = 1.0
+    compactness_score: float = 1.0
+    selected_component_score: float = 1.0
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class AssetPackage(BaseModel):

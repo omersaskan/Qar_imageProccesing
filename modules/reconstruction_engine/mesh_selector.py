@@ -46,19 +46,22 @@ class MeshSelector:
             flatness = eigenvalues[0] / eigenvalues[2]
         else:
             flatness = 0
-        flatness_penalty = 1.0 - np.exp(-flatness * 10) # Low score if very flat
+            
+        # Product flatness: Most products have some depth. 
+        # Tables/Walls have extremely low depth ratio.
+        flatness_penalty = 1.0 if flatness > 0.05 else (flatness * 20.0)
 
         # 5. Connected Components Score
         components = mesh.split(only_watertight=False)
         comp_count = len(components)
-        # If there are many small fragments, this might be a messy reconstruction
-        fragment_penalty = 1.0 / comp_count if comp_count > 0 else 0
+        # Extreme fragmentation is a bad sign for a 'product'
+        fragment_penalty = np.exp(-(comp_count - 1) / 5.0)
 
         total_score = (
-            face_score * 0.3 +
+            face_score * 0.2 +
             compactness * 0.2 +
             centrality_score * 0.2 +
-            flatness_penalty * 0.2 +
+            flatness_penalty * 0.3 + # Increased weight for product-likeness
             fragment_penalty * 0.1
         )
 

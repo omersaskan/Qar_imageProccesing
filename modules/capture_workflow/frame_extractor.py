@@ -49,6 +49,9 @@ class FrameExtractor:
         
         masks_dir = output_path / "masks"
         masks_dir.mkdir(parents=True, exist_ok=True)
+        
+        crops_dir = output_path / "crops"
+        crops_dir.mkdir(parents=True, exist_ok=True)
 
         while True:
             ret, frame = cap.read()
@@ -64,7 +67,7 @@ class FrameExtractor:
             # 2. Object Masking
             mask, mask_meta = self.object_masker.generate_mask(frame)
             
-            # 3. Quality filter (blur/exposure/product framing)
+            # 3. Quality filter (blur/exposure/product framing/mask confidence)
             analysis = self.quality_analyzer.analyze_frame(frame, mask)
             if not analysis["overall_pass"]:
                 rejection_counts["object_isolation"] += 1
@@ -78,6 +81,7 @@ class FrameExtractor:
             if last_extracted_hist is not None:
                 similarity = cv2.compareHist(last_extracted_hist, current_hist, cv2.HISTCMP_CORREL)
                 if similarity > self.thresholds.min_similarity_score:
+                    # Also check for bbox drift if available
                     rejection_counts["similarity"] += 1
                     frame_count += 1
                     continue
@@ -89,6 +93,13 @@ class FrameExtractor:
             
             cv2.imwrite(str(frame_path), frame)
             cv2.imwrite(str(mask_path), mask)
+            
+            # Phase 2: Produce padded ROI crop
+            bbox = mask_meta.get("bbox", (0, 0, w, h))
+            crop = self._produce_padded_crop(frame, bbox)
+            if crop is not None:
+                crop_path = crops_dir / frame_filename
+                cv2.imwrite(str(crop_path), crop)
             
             extracted_paths.append(str(frame_path))
             last_extracted_hist = current_hist
@@ -125,3 +136,37 @@ class FrameExtractor:
         hist = cv2.calcHist([hsv], [0, 1], mask, [180, 256], [0, 180, 0, 256])
         cv2.normalize(hist, hist, 0, 1, cv2.NORM_MINMAX)
         return hist
+
+    def _produce_padded_crop(self, frame: np.ndarray, bbox: tuple) -> Optional[np.ndarray]:
+        """
+        Produces a padded ROI crop.
+        Padding: 12-15% of bbox dimensions.
+        Clamped to image bounds, preserving aspect ratio.
+        No upscaling, downscale only if long edge > 1600px.
+        """
+        h, w = frame.shape[:2]
+        bx, by, bw, bh = bbox
+        
+        if bw == 0 or bh == 0:
+            return None
+            
+        # 1. Padding (15%)
+        pad_x = int(bw * 0.15)
+        pad_y = int(bh * 0.15)
+        
+        x1, y1 = max(0, bx - pad_x), max(0, by - pad_y)
+        x2, y2 = min(w, bx + bw + pad_x), min(h, by + bh + pad_y)
+        
+        crop = frame[y1:y2, x1:x2]
+        
+        # 2. Downscaling check (Long edge > 1536-1600px)
+        ch, cw = crop.shape[:2]
+        long_edge = max(ch, cw)
+        target_limit = 1536
+        
+        if long_edge > target_limit:
+            scale = target_limit / long_edge
+            new_w, new_h = int(cw * scale), int(ch * scale)
+            crop = cv2.resize(crop, (new_w, new_h), interpolation=cv2.INTER_AREA)
+            
+        return crop

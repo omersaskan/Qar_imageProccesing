@@ -64,6 +64,12 @@ class AssetCleaner:
         metadata = self.normalizer.generate_metadata(bbox_min, bbox_max, pivot_offset, final_polycount)
         self.normalizer.save_metadata(metadata, str(metadata_path))
         
+        # Phase 1: Check texture preservation
+        # Reload mesh to check visuals after all processing
+        final_mesh = trimesh.load(str(cleaned_mesh_path))
+        uv_preserved = hasattr(final_mesh.visual, 'uv') and final_mesh.visual.uv is not None
+        material_preserved = hasattr(final_mesh.visual, 'material') and final_mesh.visual.material is not None
+
         # Cleanup temp
         if isolation_temp_path.exists():
             isolation_temp_path.unlink()
@@ -81,7 +87,9 @@ class AssetCleaner:
             "bbox_min": bbox_min,
             "bbox_max": bbox_max,
             "cleaned_mesh_path": str(cleaned_mesh_path),
-            "metadata_path": str(metadata_path)
+            "metadata_path": str(metadata_path),
+            "uv_preserved": uv_preserved,
+            "material_preserved": material_preserved
         }
 
         return metadata, cleanup_stats, str(cleaned_mesh_path)

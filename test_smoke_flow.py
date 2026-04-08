@@ -57,8 +57,11 @@ def test_cleanup_orchestration():
         metadata, stats, cleaned_mesh_path = cleaner.process_cleanup("test_job", temp_raw, CleanupProfileType.MOBILE_DEFAULT)
         print(f"Cleanup Metadata: {metadata}")
         print(f"Final Polycount: {stats['final_polycount']}")
+        print(f"UV Preserved: {stats.get('uv_preserved', False)}")
+        
         assert stats['final_polycount'] > 0
         assert metadata.final_polycount == stats['final_polycount']
+        # For a sphere without UVs, this will be False, which is fine to print
         print("[SUCCESS] Cleanup Orchestration Passed")
     finally:
         if os.path.exists(temp_raw): os.remove(temp_raw)

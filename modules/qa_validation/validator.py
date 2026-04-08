@@ -24,7 +24,14 @@ class AssetValidator:
         - cleanup_stats: Dict[str, Any]
         """
         poly_decision = validate_polycount(asset_data.get("poly_count", 0), self.thresholds)
-        texture_decision = validate_texture(asset_data.get("texture_status", "unknown"))
+        
+        # Phase 1: Improved texture validation
+        texture_decision = validate_texture(
+            status=asset_data.get("texture_status", "unknown"),
+            has_uv=asset_data.get("has_uv", True),
+            has_texture=asset_data.get("has_texture", True)
+        )
+        
         bbox_decision = validate_bbox(asset_data.get("bbox", {}), self.thresholds)
         ground_decision = validate_ground_alignment(asset_data.get("ground_offset", 99.0), self.thresholds)
         
@@ -79,7 +86,11 @@ class AssetValidator:
             contamination_score=contam_score,
             contamination_report=contamination_decisions,
             mobile_performance_grade=self._calculate_grade(asset_data.get("poly_count", 0)),
-            final_decision=final_decision
+            final_decision=final_decision,
+            # Phase 3 Fields
+            flatness_score=iso_stats.get("flatness_score", 0.0),
+            compactness_score=iso_stats.get("compactness_score", 0.0),
+            selected_component_score=iso_stats.get("selected_component_score", 0.0)
         )
 
     def _calculate_grade(self, poly_count: int) -> str:

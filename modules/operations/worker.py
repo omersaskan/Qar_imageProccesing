@@ -244,11 +244,20 @@ class IngestionWorker:
         # 2. Cleanup & Artifact Processing
         logger.info(f"🧹 Starting mesh cleanup for {session.session_id}...")
         try:
+            # Carry texture_path from manifest if it exists
+            raw_texture_path = manifest.texture_path if hasattr(manifest, 'texture_path') else None
+            
             metadata, cleanup_stats, cleaned_mesh_path = self.cleaner.process_cleanup(
                 job_id=job_id,
                 raw_mesh_path=manifest.mesh_path,
                 profile_type=CleanupProfileType.MOBILE_DEFAULT
             )
+            
+            # Phase 1: Determine texture status more robustly
+            texture_exists = False
+            if raw_texture_path and Path(raw_texture_path).exists():
+                texture_exists = True
+                
         except Exception as e:
             raise IrrecoverableError(f"Mesh cleanup failed: {e}")
             
@@ -270,12 +279,17 @@ class IngestionWorker:
         
         ground_residual = abs(float(cleaned_mesh.bounds[0][2]))
         
+        # Phase 1: Enrich validation input with actual texture/UV status
+        has_uv = hasattr(cleaned_mesh.visual, 'uv') and cleaned_mesh.visual.uv is not None
+        
         validation_input = {
             "poly_count": metadata.final_polycount,
-            "texture_status": "complete" if not manifest.is_stub else "missing",
+            "texture_status": "complete" if (texture_exists and has_uv) else ("missing_uv" if texture_exists else "missing"),
             "bbox": dimensions,
             "ground_offset": ground_residual,
-            "cleanup_stats": cleanup_stats
+            "cleanup_stats": cleanup_stats,
+            "has_uv": has_uv,
+            "has_texture": texture_exists
         }
         
         timestamp = int(time.time())
@@ -285,25 +299,33 @@ class IngestionWorker:
         logger.info(f"📊 Validation Decision: {report.final_decision.upper()}")
         
         if report.final_decision == "fail":
-            logger.error(f"❌ Asset FAILED validation: {report.contamination_report}")
-            # Policy: Move to registry as 'failed', but don't publish
-            # We still might want the GLB for inspection in some flows, but usually we stop here
-            # For this pipeline, we advance to FAILED state and don't publish.
+            logger.error(f"❌ Asset FAILED validation for {session.session_id}:")
+            logger.error(f"   - Rules: {report.contamination_report}")
+            logger.error(f"   - Score: {report.contamination_score:.2f}")
+            logger.error(f"   - Flatness: {report.flatness_score:.2f}")
+            logger.error(f"   - Compactness: {report.compactness_score:.2f}")
+            
             self._mark_session_failed(session.session_id, f"Validation Failed: {report.contamination_report}")
             return
+            
+        if report.final_decision == "review":
+            logger.warning(f"⚠️ Asset requires REVIEW for {session.session_id}:")
+            logger.warning(f"   - Indicators: {report.contamination_report}")
 
         # 4. Export GLB (using CLEANED mesh)
         blob_path = self.blobs_dir / f"{asset_id}.glb"
         
         logger.info(f"📦 Exporting CLEANED GLB from {cleaned_mesh_path}...")
         try:
+            # Phase 1: Pass texture_path to export
             export_result = self.exporter.export(
                 mesh_path=cleaned_mesh_path,
                 output_path=str(blob_path),
                 profile_name="standard",
+                texture_path=raw_texture_path,
                 metadata=metadata
             )
-            logger.info(f"✅ GLB Export successful: {export_result['filesize']} bytes")
+            logger.info(f"✅ GLB Export successful: {export_result['filesize']} bytes. Texture: {export_result.get('texture_applied_successfully', False)}")
         except Exception as e:
             raise IrrecoverableError(f"GLB Export failed: {e}")
 

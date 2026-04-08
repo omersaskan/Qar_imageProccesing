@@ -13,6 +13,11 @@ class ValidationThresholds(BaseModel):
     max_component_count: int = Field(5, ge=1)
     max_plane_face_share: float = Field(0.2, ge=0, le=1.0)
     max_plane_vertex_ratio: float = Field(0.3, ge=0, le=1.0)
+    
+    # Phase 3: New Robust Thresholds
+    min_compactness: float = Field(0.01, ge=0) # Products shouldn't be too sparse
+    min_flatness: float = Field(0.02, ge=0)    # Products shouldn't be paper thin slabs
+    max_bbox_aspect_ratio: float = Field(20.0, ge=0) # Sanity check for extremely long assets
 
 def validate_polycount(count: int, thresholds: ValidationThresholds) -> str:
     if count <= thresholds.polycount_pass:
@@ -54,23 +59,44 @@ def validate_contamination(stats: Dict[str, Any], thresholds: ValidationThreshol
     plane_share = iso_stats.get("removed_plane_face_share", 0.0)
     plane_v_ratio = iso_stats.get("removed_plane_vertex_ratio", 0.0)
     
-    # Pass if both measures are within pass thresholds
     if plane_share <= thresholds.max_plane_face_share and plane_v_ratio <= thresholds.max_plane_vertex_ratio:
         results["plane_contamination"] = "pass"
-    # Review if either exceeds slightly
     elif plane_share <= thresholds.max_plane_face_share * 1.5 or plane_v_ratio <= thresholds.max_plane_vertex_ratio * 1.5:
         results["plane_contamination"] = "review"
     else:
         results["plane_contamination"] = "fail"
 
+    # 4. Phase 3: Robustness Checks
+    compactness = iso_stats.get("compactness_score", 1.0)
+    flatness = iso_stats.get("flatness_score", 1.0)
+    
+    if compactness < thresholds.min_compactness:
+        results["compactness"] = "review"
+    else:
+        results["compactness"] = "pass"
+        
+    if flatness < thresholds.min_flatness:
+        results["flatness"] = "review"
+    else:
+        results["flatness"] = "pass"
+
     return results
 
-def validate_texture(status: str) -> str:
+def validate_texture(status: str, has_uv: bool = True, has_texture: bool = True) -> str:
     status = status.lower()
+    
+    # 1. Texture exists but NO UVs
+    if has_texture and not has_uv:
+        return "fail" # Mesh cannot render the texture
+        
+    # 2. Status based check
     if status == "complete":
         return "pass"
+    elif status == "missing_uv":
+        return "fail"
     elif status == "minor_missing":
         return "review"
+        
     return "fail"
 
 def validate_bbox(dimensions: Dict[str, float], thresholds: ValidationThresholds) -> str:
