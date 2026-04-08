@@ -255,18 +255,26 @@ class IngestionWorker:
         # 3. QA Validation Gate
         logger.info(f"⚖️ Validating asset quality for {session.session_id}...")
         
-        # Calculate dimensions for validator
+        # Calculate dimensions and measured ground residual for validator
+        import trimesh
+        logger.info(f"📏 Measuring final artifacts for {session.session_id}...")
+        cleaned_mesh = trimesh.load(cleaned_mesh_path)
+        if isinstance(cleaned_mesh, trimesh.Scene):
+            cleaned_mesh = cleaned_mesh.dump(concatenate=True)
+            
         dimensions = {
-            "x": metadata.bbox_max["x"] - metadata.bbox_min["x"],
-            "y": metadata.bbox_max["y"] - metadata.bbox_min["y"],
-            "z": metadata.bbox_max["z"] - metadata.bbox_min["z"]
+            "x": float(cleaned_mesh.bounds[1][0] - cleaned_mesh.bounds[0][0]),
+            "y": float(cleaned_mesh.bounds[1][1] - cleaned_mesh.bounds[0][1]),
+            "z": float(cleaned_mesh.bounds[1][2] - cleaned_mesh.bounds[0][2])
         }
+        
+        ground_residual = abs(float(cleaned_mesh.bounds[0][2]))
         
         validation_input = {
             "poly_count": metadata.final_polycount,
             "texture_status": "complete" if not manifest.is_stub else "missing",
             "bbox": dimensions,
-            "ground_offset": metadata.pivot_offset.get("z", 0.0),
+            "ground_offset": ground_residual,
             "cleanup_stats": cleanup_stats
         }
         

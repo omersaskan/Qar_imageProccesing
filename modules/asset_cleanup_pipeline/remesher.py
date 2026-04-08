@@ -43,7 +43,7 @@ class Remesher:
             except Exception as e:
                 print(f"Warning: fast_simplification failed, falling back to trimesh: {e}")
                 # Fallback to trimesh default simplify (decimation)
-                mesh = mesh.simplify_quadratic_decimation(target_faces)
+                mesh = mesh.simplify_quadric_decimation(target_faces)
 
         # 3. Post-Simplification Health Checks
         mesh.process(validate=True)

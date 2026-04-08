@@ -91,8 +91,9 @@ class TestWorkerFinalizeFlow(unittest.TestCase):
             final_polycount=100
         )
         cleaned_mesh_path = str(self.recon_dir / "cleaned_mesh.obj")
-        # Ensure cleaned mesh exists for exporter check if it checks it
-        Path(cleaned_mesh_path).write_text("v 1 1 1", encoding="utf-8")
+        # Ensure cleaned mesh exists for measured residual check in worker.py
+        # Using Z=0 to ensure ground_residual is 0
+        Path(cleaned_mesh_path).write_text("v 0 0 0\nv 1 1 1", encoding="utf-8")
         
         mock_cleaner.process_cleanup.return_value = (mock_metadata, {"isolation": {"component_count": 1}}, cleaned_mesh_path)
         
@@ -149,7 +150,9 @@ class TestWorkerFinalizeFlow(unittest.TestCase):
             pivot_offset={"x":0, "y":0, "z":0},
             final_polycount=100
         )
-        mock_cleaner.process_cleanup.return_value = (mock_metadata, {"isolation": {"component_count": 1}}, "dummy_clean.obj")
+        cleaned_mesh_path = str(self.recon_dir / "failed_mesh.obj")
+        Path(cleaned_mesh_path).write_text("v 0 0 10", encoding="utf-8") # High Z residual
+        mock_cleaner.process_cleanup.return_value = (mock_metadata, {"isolation": {"component_count": 1}}, cleaned_mesh_path)
         
         from modules.shared_contracts.models import ValidationReport
         mock_report = ValidationReport(
