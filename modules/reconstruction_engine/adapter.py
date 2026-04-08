@@ -3,22 +3,6 @@ from typing import List, Optional
 from pathlib import Path
 import os
 import time
-
-class ReconstructionAdapter(ABC):
-    @abstractmethod
-    def run_reconstruction(self, input_frames: List[str], output_dir: Path) -> dict:
-        """
-        Runs the reconstruction process and returns a dictionary with artifact info.
-        """
-        pass
-
-    @property
-    @abstractmethod
-    def engine_type(self) -> str:
-        pass
-
-    @property
-    @abstractmethod
 import shutil
 import subprocess
 import json
