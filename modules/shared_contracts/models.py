@@ -73,6 +73,13 @@ class ValidationReport(BaseModel):
     bbox_reasonable: bool
     ground_aligned: bool
     mobile_performance_grade: str
+    
+    # Contamination metrics
+    component_count: int = 1
+    largest_component_share: float = 1.0
+    contamination_score: float = 0.0 # 0.0 (clean) to 1.0 (contaminated)
+    contamination_report: Dict[str, Any] = Field(default_factory=dict)
+    
     final_decision: str # pass, fail, review
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 

@@ -1,16 +1,22 @@
 from typing import Dict, List, Tuple
 
+import trimesh
+from typing import Dict, Tuple
+
 class BBoxExtractor:
     def __init__(self):
         pass
 
     def extract(self, mesh_path: str) -> Tuple[Dict[str, float], Dict[str, float]]:
         """
-        Stub: Simulates bounding box extraction from finalized mesh.
-        Returns (min_corner, max_corner).
+        Extracts the real axis-aligned bounding box from the mesh.
         """
-        # Simulated result: 25cm x 25cm x 40cm product
-        min_corner = {"x": -12.5, "y": -12.5, "z": 0.0}
-        max_corner = {"x": 12.5, "y": 12.5, "z": 40.0}
+        mesh = trimesh.load(mesh_path)
+        if isinstance(mesh, trimesh.Scene):
+            mesh = mesh.dump(concatenate=True)
+            
+        bounds = mesh.bounds
+        min_corner = {"x": float(bounds[0][0]), "y": float(bounds[0][1]), "z": float(bounds[0][2])}
+        max_corner = {"x": float(bounds[1][0]), "y": float(bounds[1][1]), "z": float(bounds[1][2])}
 
         return min_corner, max_corner

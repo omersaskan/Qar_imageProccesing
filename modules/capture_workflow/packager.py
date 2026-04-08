@@ -1,12 +1,12 @@
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from pydantic import BaseModel, HttpUrl
-from shared_contracts.models import (
+from modules.shared_contracts.models import (
     CaptureSession, 
     ReconstructionJob, 
     ReconstructionJobDraft
 )
-from shared_contracts.lifecycle import AssetStatus
+from modules.shared_contracts.lifecycle import AssetStatus
 
 class Packager:
     def __init__(self):

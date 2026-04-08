@@ -4,8 +4,8 @@ from pathlib import Path
 from datetime import datetime, timezone
 from typing import Optional
 
-from shared_contracts.models import ReconstructionJob
-from shared_contracts.lifecycle import ReconstructionStatus
+from modules.shared_contracts.models import ReconstructionJob
+from modules.shared_contracts.lifecycle import ReconstructionStatus
 from .output_manifest import OutputManifest, MeshMetadata
 from .failures import RuntimeReconstructionError, MissingArtifactError, InsufficientInputError
 from .adapter import ReconstructionAdapter, COLMAPAdapter, SimulatedAdapter

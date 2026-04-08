@@ -1,11 +1,17 @@
 import pytest
+import shutil
+from pathlib import Path
 from modules.asset_registry.registry import AssetRegistry
 from modules.asset_registry.publisher import PackagePublisher
 from modules.shared_contracts.models import AssetMetadata, ValidationReport, ProductPhysicalProfile
 from pydantic import HttpUrl
 
-def test_registry_registration():
-    registry = AssetRegistry()
+@pytest.fixture
+def registry(tmp_path):
+    reg = AssetRegistry(data_root=str(tmp_path))
+    return reg
+
+def test_registry_registration(registry):
     asset_id = "asset_v1"
     product_id = "product_123"
     metadata = AssetMetadata(
@@ -17,11 +23,12 @@ def test_registry_registration():
     )
     
     registry.register_asset(metadata)
-    assert registry.get_asset(asset_id) == metadata
-    assert asset_id in registry.product_versions[product_id]
+    # Verification using the persistent API
+    registered = registry.get_asset(asset_id)
+    assert registered.asset_id == asset_id
+    assert registered.product_id == product_id
 
-def test_registry_active_version():
-    registry = AssetRegistry()
+def test_registry_active_version(registry):
     product_id = "product_123"
     metadata_v1 = AssetMetadata(asset_id="v1", product_id=product_id, version="1.0.0")
     metadata_v2 = AssetMetadata(asset_id="v2", product_id=product_id, version="2.0.0")
@@ -30,14 +37,13 @@ def test_registry_active_version():
     registry.register_asset(metadata_v2)
     
     registry.set_active_version(product_id, "v1")
-    assert registry.active_versions[product_id] == "v1"
+    assert registry._get_active_id(product_id) == "v1"
     
     # Switch
     registry.set_active_version(product_id, "v2")
-    assert registry.active_versions[product_id] == "v2"
+    assert registry._get_active_id(product_id) == "v2"
 
-def test_registry_rollback():
-    registry = AssetRegistry()
+def test_registry_rollback(registry):
     product_id = "product_123"
     metadata_v1 = AssetMetadata(asset_id="v1", product_id=product_id, version="1.0.0")
     metadata_v2 = AssetMetadata(asset_id="v2", product_id=product_id, version="2.0.0")
@@ -48,10 +54,9 @@ def test_registry_rollback():
     
     rolled_back = registry.rollback_version(product_id)
     assert rolled_back == "v1"
-    assert registry.active_versions[product_id] == "v1"
+    assert registry._get_active_id(product_id) == "v1"
 
-def test_publisher_gate_fail():
-    registry = AssetRegistry()
+def test_publisher_gate_fail(registry):
     publisher = PackagePublisher(registry)
     
     asset_id = "asset_fail"
@@ -78,8 +83,7 @@ def test_publisher_gate_fail():
             physical_profile=ProductPhysicalProfile(real_width_cm=10, real_depth_cm=10, real_height_cm=10)
         )
 
-def test_publisher_successful_publish():
-    registry = AssetRegistry()
+def test_publisher_successful_publish(registry):
     publisher = PackagePublisher(registry)
     
     asset_id = "asset_pass"
@@ -115,5 +119,7 @@ def test_publisher_successful_publish():
     )
     
     assert package.package_status == "ready_for_ar"
-    assert registry.publish_states[asset_id] == "published"
-    assert registry.active_versions[product_id] == asset_id
+    # Verification using the persistent API
+    asset_info = registry._load_product_data(product_id)["assets"][asset_id]
+    assert asset_info["publish_state"] == "published"
+    assert registry._get_active_id(product_id) == asset_id

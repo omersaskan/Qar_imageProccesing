@@ -2,27 +2,50 @@ import os
 from pathlib import Path
 from .profiles import CleanupProfile
 
+import trimesh
+import fast_simplification
+from .profiles import CleanupProfile
+
 class Remesher:
     def __init__(self):
         pass
 
     def process(self, input_path: str, output_path: str, profile: CleanupProfile) -> int:
         """
-        Simulates mesh decimation based on the cleanup profile.
+        Performs real mesh simplification and repair.
         Returns the final vertex count.
         """
-        if not os.path.exists(input_path):
-            raise FileNotFoundError(f"Input mesh not found: {input_path}")
+        mesh = trimesh.load(input_path)
+        if isinstance(mesh, trimesh.Scene):
+            mesh = mesh.dump(concatenate=True)
 
-        # Stub: Simulating processing by copying or just creating a new file
-        # with updated metadata in comments.
-        with open(input_path, "r") as f:
-            content = f.read()
+        if len(mesh.faces) == 0:
+            return 0
 
-        with open(output_path, "w") as f:
-            f.write(f"# Optimized with profile: {profile.name}\n")
-            f.write(f"# Target Polycount: {profile.target_polycount}\n")
-            f.write(content)
+        # 1. Mesh Repair
+        # Fix normals, remove degenerate faces, fill small holes
+        mesh.fill_holes()
+        mesh.remove_degenerate_faces()
+        mesh.remove_duplicate_faces()
+        mesh.remove_infinite_values()
+        mesh.remove_unreferenced_vertices()
 
-        # Simulating reduced vertex count (stub logic)
-        return int(profile.target_polycount * 0.8)
+        # 2. Simplification
+        # Calculate target faces
+        target_faces = profile.target_polycount
+        current_faces = len(mesh.faces)
+
+        if current_faces > target_faces:
+            # Use fast-simplification for speed and quality
+            points = mesh.vertices.astype(np.float32)
+            faces = mesh.faces.astype(np.uint32)
+            
+            # Target reduction ratio
+            ratio = target_faces / current_faces
+            new_vertices, new_faces = fast_simplification.simplify(points, faces, ratio)
+            
+            mesh = trimesh.Trimesh(vertices=new_vertices, faces=new_faces)
+
+        # 3. Finalize
+        mesh.export(output_path)
+        return len(mesh.vertices)

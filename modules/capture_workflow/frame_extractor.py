@@ -9,18 +9,24 @@ from modules.operations.logging_config import get_component_logger
 
 logger = get_component_logger("extractor")
 
+from .object_masker import ObjectMasker
+
+logger = get_component_logger("extractor")
+
 class FrameExtractor:
     def __init__(self, 
                  quality_analyzer: Optional[QualityAnalyzer] = None,
+                 object_masker: Optional[ObjectMasker] = None,
                  thresholds: QualityThresholds = default_quality_thresholds,
                  config: ExtractionConfig = default_extraction_config):
         self.quality_analyzer = quality_analyzer or QualityAnalyzer(thresholds)
+        self.object_masker = object_masker or ObjectMasker()
         self.thresholds = thresholds
         self.config = config
 
     def extract_keyframes(self, video_path: str, output_dir: str) -> List[str]:
         """
-        Extracts high-quality, diverse keyframes from a video.
+        Extracts high-quality, product-focused keyframes from a video.
         """
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
@@ -33,12 +39,16 @@ class FrameExtractor:
         # Diagnostics
         rejection_counts = {
             "blur_or_exposure": 0,
+            "object_isolation": 0,
             "similarity": 0,
             "sampling": 0
         }
         
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
+        
+        masks_dir = output_path / "masks"
+        masks_dir.mkdir(parents=True, exist_ok=True)
 
         while True:
             ret, frame = cap.read()
@@ -51,17 +61,20 @@ class FrameExtractor:
                 frame_count += 1
                 continue
             
-            # 2. Quality filter (blur/exposure)
-            analysis = self.quality_analyzer.analyze_frame(frame)
+            # 2. Object Masking
+            mask, mask_meta = self.object_masker.generate_mask(frame)
+            
+            # 3. Quality filter (blur/exposure/product framing)
+            analysis = self.quality_analyzer.analyze_frame(frame, mask)
             if not analysis["overall_pass"]:
-                rejection_counts["blur_or_exposure"] += 1
+                rejection_counts["object_isolation"] += 1
                 reasons = ", ".join(analysis.get("failure_reasons", []))
                 logger.debug(f"Frame {frame_count} rejected: {reasons}")
                 frame_count += 1
                 continue
             
-            # 3. Similarity filter (avoid redundant frames)
-            current_hist = self._get_histogram(frame)
+            # 4. Similarity filter (avoid redundant frames) - Masked ROI
+            current_hist = self._get_masked_histogram(frame, mask)
             if last_extracted_hist is not None:
                 similarity = cv2.compareHist(last_extracted_hist, current_hist, cv2.HISTCMP_CORREL)
                 if similarity > self.thresholds.min_similarity_score:
@@ -69,10 +82,13 @@ class FrameExtractor:
                     frame_count += 1
                     continue
             
-            # 4. Save frame
+            # 5. Save frame and mask
             frame_filename = f"frame_{len(extracted_paths):04d}.jpg"
             frame_path = output_path / frame_filename
+            mask_path = masks_dir / f"{frame_filename}.png"
+            
             cv2.imwrite(str(frame_path), frame)
+            cv2.imwrite(str(mask_path), mask)
             
             extracted_paths.append(str(frame_path))
             last_extracted_hist = current_hist
@@ -83,28 +99,29 @@ class FrameExtractor:
             
             # Log progress every 20 frames read
             if frame_count % 20 == 0:
-                logger.debug(f"Video {video_path} progress: Read {frame_count} frames, Extracted {len(extracted_paths)} valid keyframes.")
+                logger.debug(f"Video {video_path} progress: Read {frame_count} frames, Extracted {len(extracted_paths)} product-focused keyframes.")
             
             frame_count += 1
 
         cap.release()
         
         # Diagnostic summary
-        logger.info(f"📊 EXTRACTION SUMMARY for {Path(video_path).name}:")
+        logger.info(f"📊 PRODUCT-AWARE EXTRACTION SUMMARY for {Path(video_path).name}:")
         logger.info(f"   - Total frames read: {frame_count}")
-        logger.info(f"   - Rejected by quality (blur/exposure): {rejection_counts['blur_or_exposure']}")
+        logger.info(f"   - Rejected by quality/isolation: {rejection_counts['object_isolation']}")
         logger.info(f"   - Rejected by similarity: {rejection_counts['similarity']}")
         logger.info(f"   - Skipped by sampling: {rejection_counts['sampling']}")
         logger.info(f"   - ✅ TOTAL SAVED: {len(extracted_paths)}")
 
         if not extracted_paths:
-            logger.warning(f"❌ ZERO valid keyframes extracted from {video_path}! Check quality settings or video content.")
+            logger.warning(f"❌ ZERO product-focused keyframes extracted! Check quality settings or object visibility.")
         
         return extracted_paths
 
-    def _get_histogram(self, frame: np.ndarray) -> np.ndarray:
-        """Calculate a simple 3B histogram for similarity comparison."""
+    def _get_masked_histogram(self, frame: np.ndarray, mask: np.ndarray) -> np.ndarray:
+        """Calculate a simple 3B histogram focused on the masked object."""
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-        hist = cv2.calcHist([hsv], [0, 1], None, [180, 256], [0, 180, 0, 256])
+        # Use only values where mask is white
+        hist = cv2.calcHist([hsv], [0, 1], mask, [180, 256], [0, 180, 0, 256])
         cv2.normalize(hist, hist, 0, 1, cv2.NORM_MINMAX)
         return hist

@@ -15,6 +15,11 @@ from modules.operations.logging_config import get_component_logger
 from modules.shared_contracts.lifecycle import AssetStatus, assert_transition
 from modules.reconstruction_engine.output_manifest import OutputManifest
 from modules.export_pipeline.glb_exporter import GLBExporter
+from modules.asset_cleanup_pipeline.cleaner import AssetCleaner
+from modules.asset_cleanup_pipeline.profiles import CleanupProfileType
+from modules.qa_validation.validator import AssetValidator
+from modules.shared_contracts.lifecycle import ReconstructionStatus
+from modules.asset_cleanup_pipeline.normalizer import NormalizedMetadata
 
 # Custom exceptions for clearer flow control
 class WorkerError(Exception): pass
@@ -34,6 +39,13 @@ class IngestionWorker:
         # Ensure blobs dir exists for final step
         self.blobs_dir = Path("data/registry/blobs")
         self.blobs_dir.mkdir(parents=True, exist_ok=True)
+        
+        self.cleaner = AssetCleaner()
+        self.validator = AssetValidator()
+        self.exporter = GLBExporter()
+        self.manifest_manager = OutputManifest() # Assuming this is the artifact manager
+        # Need to make sure job_tracker is available or use registry
+        self.job_tracker = self.registry 
 
     def start(self):
         if self.running: return

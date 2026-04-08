@@ -1,4 +1,4 @@
-from shared_contracts.errors import AssetFactoryError
+from modules.shared_contracts.errors import AssetFactoryError
 
 class ReconstructionError(AssetFactoryError):
     """Base class for all reconstruction-related errors."""

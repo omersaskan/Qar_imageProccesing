@@ -6,6 +6,13 @@ class ValidationThresholds(BaseModel):
     polycount_review: int = Field(100_000, ge=0)
     bbox_max_dimension_cm: float = Field(500.0, ge=0)
     ground_alignment_threshold_cm: float = Field(1.0, ge=0)
+    
+    # Contamination Thresholds
+    min_largest_component_share_pass: float = Field(0.85, ge=0, le=1.0)
+    min_largest_component_share_review: float = Field(0.70, ge=0, le=1.0)
+    max_component_count: int = Field(5, ge=1)
+    max_plane_face_share: float = Field(0.2, ge=0, le=1.0)
+    max_plane_vertex_ratio: float = Field(0.3, ge=0, le=1.0)
 
 def validate_polycount(count: int, thresholds: ValidationThresholds) -> str:
     if count <= thresholds.polycount_pass:
@@ -13,6 +20,44 @@ def validate_polycount(count: int, thresholds: ValidationThresholds) -> str:
     elif count <= thresholds.polycount_review:
         return "review"
     return "fail"
+
+def validate_contamination(stats: Dict[str, Any], thresholds: ValidationThresholds) -> Dict[str, str]:
+    """
+    Evaluates scene contamination based on component and plane metrics.
+    """
+    results = {}
+    
+    # 1. Largest Component Share
+    iso_stats = stats.get("isolation", {})
+    final_f = iso_stats.get("final_faces", 0)
+    initial_f = iso_stats.get("initial_faces", 1)
+    share = final_f / initial_f if initial_f > 0 else 0
+    
+    if share >= thresholds.min_largest_component_share_pass:
+        results["component_share"] = "pass"
+    elif share >= thresholds.min_largest_component_share_review:
+        results["component_share"] = "review"
+    else:
+        results["component_share"] = "fail"
+
+    # 2. Component Count
+    comp_count = iso_stats.get("component_count", 1)
+    if comp_count <= thresholds.max_component_count:
+        results["component_count"] = "pass"
+    else:
+        results["component_count"] = "review"
+
+    # 3. Plane Contamination (Stub until isolation provides real plane metrics)
+    # Isolation currently just removes planes, we should ideally check what was removed.
+    plane_faces = iso_stats.get("removed_plane_faces", 0)
+    plane_share = plane_faces / initial_f if initial_f > 0 else 0
+    
+    if plane_share <= thresholds.max_plane_face_share:
+        results["plane_contamination"] = "pass"
+    else:
+        results["plane_contamination"] = "review"
+
+    return results
 
 def validate_texture(status: str) -> str:
     status = status.lower()
