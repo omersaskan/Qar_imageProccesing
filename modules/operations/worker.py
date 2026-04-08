@@ -43,7 +43,7 @@ class IngestionWorker:
         self.cleaner = AssetCleaner()
         self.validator = AssetValidator()
         self.exporter = GLBExporter()
-        self.manifest_manager = OutputManifest() # Assuming this is the artifact manager
+        
         # Need to make sure job_tracker is available or use registry
         self.job_tracker = self.registry 
 
@@ -241,36 +241,84 @@ class IngestionWorker:
             manifest_data = json.load(f)
             manifest = OutputManifest.model_validate(manifest_data)
 
-        # 2. Export GLB
+        # 2. Cleanup & Artifact Processing
+        logger.info(f"🧹 Starting mesh cleanup for {session.session_id}...")
+        try:
+            metadata, cleanup_stats, cleaned_mesh_path = self.cleaner.process_cleanup(
+                job_id=job_id,
+                raw_mesh_path=manifest.mesh_path,
+                profile_type=CleanupProfileType.MOBILE_DEFAULT
+            )
+        except Exception as e:
+            raise IrrecoverableError(f"Mesh cleanup failed: {e}")
+            
+        # 3. QA Validation Gate
+        logger.info(f"⚖️ Validating asset quality for {session.session_id}...")
+        
+        # Calculate dimensions for validator
+        dimensions = {
+            "x": metadata.bbox_max["x"] - metadata.bbox_min["x"],
+            "y": metadata.bbox_max["y"] - metadata.bbox_min["y"],
+            "z": metadata.bbox_max["z"] - metadata.bbox_min["z"]
+        }
+        
+        validation_input = {
+            "poly_count": metadata.final_polycount,
+            "texture_status": "complete" if not manifest.is_stub else "missing",
+            "bbox": dimensions,
+            "ground_offset": metadata.pivot_offset.get("z", 0.0),
+            "cleanup_stats": cleanup_stats
+        }
+        
         timestamp = int(time.time())
         asset_id = f"{session.product_id}_{timestamp}"
+        
+        report = self.validator.validate(asset_id, validation_input)
+        logger.info(f"📊 Validation Decision: {report.final_decision.upper()}")
+        
+        if report.final_decision == "fail":
+            logger.error(f"❌ Asset FAILED validation: {report.contamination_report}")
+            # Policy: Move to registry as 'failed', but don't publish
+            # We still might want the GLB for inspection in some flows, but usually we stop here
+            # For this pipeline, we advance to FAILED state and don't publish.
+            self._mark_session_failed(session.session_id, f"Validation Failed: {report.contamination_report}")
+            return
+
+        # 4. Export GLB (using CLEANED mesh)
         blob_path = self.blobs_dir / f"{asset_id}.glb"
         
-        logger.info(f"📦 Exporting GLB from {manifest.mesh_path}...")
-        exporter = GLBExporter()
+        logger.info(f"📦 Exporting CLEANED GLB from {cleaned_mesh_path}...")
         try:
-            export_result = exporter.export(
-                mesh_path=manifest.mesh_path,
+            export_result = self.exporter.export(
+                mesh_path=cleaned_mesh_path,
                 output_path=str(blob_path),
-                profile_name="standard"
+                profile_name="standard",
+                metadata=metadata
             )
             logger.info(f"✅ GLB Export successful: {export_result['filesize']} bytes")
         except Exception as e:
             raise IrrecoverableError(f"GLB Export failed: {e}")
 
-        # 3. Register in Registry
-        metadata = AssetMetadata(
+        # 5. Register in Registry
+        # Use metadata from cleaner
+        registry_metadata = AssetMetadata(
             asset_id=asset_id,
             product_id=session.product_id,
-            version=f"v{random.randint(1,5)}.0" 
+            version=f"v{random.randint(1,5)}.0",
+            bbox={"min": metadata.bbox_min, "max": metadata.bbox_max, "dimensions": dimensions},
+            pivot_offset=metadata.pivot_offset,
+            quality_grade=report.mobile_performance_grade
         )
         
-        self.registry.register_asset(metadata)
+        self.registry.register_asset(registry_metadata)
         self.registry.set_active_version(session.product_id, asset_id)
         
-        # Policy: If stub, do NOT flag as 'published' for production
+        # Policy: Only publish if it worked AND it's not a stub
         if manifest.is_stub:
-            logger.warning(f"⚠️ CAPTURE {session.session_id} yielded a STUB mesh. Marking as 'draft' instead of 'published'.")
+            logger.warning(f"⚠️ {session.session_id} yielded a STUB. Marking as 'draft'.")
+            self.registry.update_publish_state(asset_id, "draft")
+        elif report.final_decision == "review":
+            logger.warning(f"⚠️ {session.session_id} requires REVIEW. Marking as 'draft'.")
             self.registry.update_publish_state(asset_id, "draft")
         else:
             self.registry.update_publish_state(asset_id, "published")

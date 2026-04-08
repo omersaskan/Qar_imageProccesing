@@ -1,11 +1,12 @@
 from typing import Dict, Any, List
 from modules.shared_contracts.models import ValidationReport
 from .rules import (
-    ValidationThresholds, 
+    ValidationThresholds,
     validate_polycount, 
     validate_texture, 
     validate_bbox, 
-    validate_ground_alignment
+    validate_ground_alignment,
+    validate_contamination
 )
 
 class AssetValidator:
@@ -49,8 +50,23 @@ class AssetValidator:
         initial_f = iso_stats.get("initial_faces", 1)
         share = final_f / initial_f if initial_f > 0 else 0
         
-        # A simple contamination score: 1.0 - share
-        contam_score = 1.0 - share
+        # Weighted contamination score
+        # 1. Component share (dominant part of the score)
+        # 2. Plane contamination (if isolation stats available)
+        # 3. Component count overflow penalty
+        
+        share_weight = 0.5
+        plane_weight = 0.3
+        count_weight = 0.2
+        
+        plane_share = iso_stats.get("removed_plane_face_share", 0.0)
+        comp_overflow = max(0, iso_stats.get("component_count", 1) - self.thresholds.max_component_count) / 10.0
+        
+        contam_score = (
+            (1.0 - share) * share_weight +
+            plane_share * plane_weight +
+            min(0.2, comp_overflow) * count_weight
+        )
 
         return ValidationReport(
             asset_id=asset_id,

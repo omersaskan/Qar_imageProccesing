@@ -1,6 +1,5 @@
 import cv2
 import numpy as np
-from typing import Dict, Any, Tuple
 from typing import Dict, Any, Tuple, Optional
 from .config import QualityThresholds, default_quality_thresholds
 
@@ -61,6 +60,7 @@ class QualityAnalyzer:
             if not is_framed: failure_reasons.append(f"Subject not centered (dist={center_dist:.2f})")
             if is_clipped: failure_reasons.append("Subject clipped at edges")
 
+        # Overall pass criteria: No failure reasons found
         return {
             "blur_score": blur_score,
             "exposure_score": exposure_score,
@@ -70,7 +70,7 @@ class QualityAnalyzer:
             "is_blur_ok": is_blur_ok,
             "is_exposure_ok": is_exposure_ok,
             "is_framed": is_framed,
-            "overall_pass": bool(is_blur_ok and is_exposure_ok and is_framed and not is_clipped and 0.05 < occupancy < 0.9),
+            "overall_pass": len(failure_reasons) == 0,
             "failure_reasons": failure_reasons
         }
 

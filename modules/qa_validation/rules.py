@@ -42,20 +42,26 @@ def validate_contamination(stats: Dict[str, Any], thresholds: ValidationThreshol
 
     # 2. Component Count
     comp_count = iso_stats.get("component_count", 1)
-    if comp_count <= thresholds.max_component_count:
+    if comp_count == 1:
         results["component_count"] = "pass"
-    else:
+    elif comp_count <= thresholds.max_component_count:
         results["component_count"] = "review"
-
-    # 3. Plane Contamination (Stub until isolation provides real plane metrics)
-    # Isolation currently just removes planes, we should ideally check what was removed.
-    plane_faces = iso_stats.get("removed_plane_faces", 0)
-    plane_share = plane_faces / initial_f if initial_f > 0 else 0
-    
-    if plane_share <= thresholds.max_plane_face_share:
-        results["plane_contamination"] = "pass"
     else:
+        # Extreme fragmentation is usually a failure
+        results["component_count"] = "fail"
+
+    # 3. Plane Contamination
+    plane_share = iso_stats.get("removed_plane_face_share", 0.0)
+    plane_v_ratio = iso_stats.get("removed_plane_vertex_ratio", 0.0)
+    
+    # Pass if both measures are within pass thresholds
+    if plane_share <= thresholds.max_plane_face_share and plane_v_ratio <= thresholds.max_plane_vertex_ratio:
+        results["plane_contamination"] = "pass"
+    # Review if either exceeds slightly
+    elif plane_share <= thresholds.max_plane_face_share * 1.5 or plane_v_ratio <= thresholds.max_plane_vertex_ratio * 1.5:
         results["plane_contamination"] = "review"
+    else:
+        results["plane_contamination"] = "fail"
 
     return results
 

@@ -1,10 +1,3 @@
-import os
-from typing import Dict, Tuple
-
-class AlignmentProcessor:
-    def __init__(self):
-        pass
-
 import trimesh
 import numpy as np
 from typing import Dict, Tuple, Optional

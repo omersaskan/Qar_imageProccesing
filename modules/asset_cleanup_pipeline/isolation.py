@@ -19,17 +19,17 @@ class MeshIsolator:
         """
         if len(mesh.vertices) == 0:
             return mesh, {"error": "Empty mesh"}
-
         stats = {
             "initial_faces": len(mesh.faces),
             "initial_vertices": len(mesh.vertices),
             "removed_planes": 0,
-            "removed_islands": 0
+            "removed_islands": 0,
+            "removed_plane_faces": 0,
+            "removed_plane_vertices": 0
         }
 
         # 1. Remove dominant planes (Table/Floor)
         current_mesh = mesh.copy()
-        stats["removed_plane_faces"] = 0
         
         for i in range(2):
             try:
@@ -50,6 +50,7 @@ class MeshIsolator:
                     # Effective removal
                     vertex_mask = np.ones(len(current_mesh.vertices), dtype=bool)
                     vertex_mask[inliers] = False
+                    stats["removed_plane_vertices"] += len(inliers)
                     current_mesh.update_vertices(vertex_mask)
                     stats["removed_planes"] += 1
                 else:
@@ -99,6 +100,11 @@ class MeshIsolator:
 
         stats["final_faces"] = len(best_comp.faces)
         stats["final_vertices"] = len(best_comp.vertices)
+        stats["component_count"] = len(components)
         stats["island_count"] = len(components) - 1
         
+        # Calculate Ratios
+        stats["removed_plane_face_share"] = stats["removed_plane_faces"] / stats["initial_faces"] if stats["initial_faces"] > 0 else 0
+        stats["removed_plane_vertex_ratio"] = stats["removed_plane_vertices"] / stats["initial_vertices"] if stats["initial_vertices"] > 0 else 0
+
         return best_comp, stats

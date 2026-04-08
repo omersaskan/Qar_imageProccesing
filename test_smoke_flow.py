@@ -31,6 +31,8 @@ def test_mesh_isolation():
     sphere.apply_translation([0, 0, 1.5]) # Floating
     
     plane = trimesh.creation.box(extents=[10, 10, 0.1])
+    for _ in range(3):
+        plane = plane.subdivide()
     plane.apply_translation([0, 0, 0]) # Floor
     
     scene_mesh = sphere + plane
@@ -38,10 +40,9 @@ def test_mesh_isolation():
     isolated_mesh, stats = isolator.isolate_product(scene_mesh)
     print(f"Isolation Stats: {stats}")
     
-    # Check if plane was removed
-    # Isolated mesh should have faces belonging mostly to the sphere
-    assert stats['removed_planes'] >= 1
+    # Check if plane was removed (either by plane-fit or connected component selection)
     assert len(isolated_mesh.faces) < len(scene_mesh.faces)
+    assert isolated_mesh.faces.shape[0] == sphere.faces.shape[0]
     print("[SUCCESS] Mesh Isolator Passed")
 
 def test_cleanup_orchestration():
@@ -53,7 +54,7 @@ def test_cleanup_orchestration():
     
     cleaner = AssetCleaner(data_root="temp_test_data")
     try:
-        metadata, stats = cleaner.process_cleanup("test_job", temp_raw, CleanupProfileType.MOBILE_DEFAULT)
+        metadata, stats, cleaned_mesh_path = cleaner.process_cleanup("test_job", temp_raw, CleanupProfileType.MOBILE_DEFAULT)
         print(f"Cleanup Metadata: {metadata}")
         print(f"Final Polycount: {stats['final_polycount']}")
         assert stats['final_polycount'] > 0

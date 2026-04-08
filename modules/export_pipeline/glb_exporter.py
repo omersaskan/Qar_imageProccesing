@@ -1,11 +1,18 @@
 import os
 import trimesh
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Optional
+from modules.asset_cleanup_pipeline.normalizer import NormalizedMetadata
 
 class GLBExporter:
     def __init__(self):
         pass
+
+    def export(self, mesh_path: str, output_path: str, profile_name: str = "standard", texture_path: Optional[str] = None, metadata: Optional[NormalizedMetadata] = None) -> Dict[str, Any]:
+        """
+        Wrapper for export_to_glb for worker compatibility.
+        """
+        return self.export_to_glb(mesh_path, texture_path, output_path, metadata)
 
     def export_to_glb(self, mesh_path: str, texture_path: Optional[str], output_path: str, metadata: Optional[NormalizedMetadata] = None) -> Dict[str, Any]:
         """

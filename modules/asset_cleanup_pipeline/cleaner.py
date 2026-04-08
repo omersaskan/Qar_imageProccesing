@@ -27,7 +27,7 @@ class AssetCleaner:
     def process_cleanup(self, 
                         job_id: str, 
                         raw_mesh_path: str, 
-                        profile_type: CleanupProfileType = CleanupProfileType.MOBILE_DEFAULT) -> Tuple[NormalizedMetadata, dict]:
+                        profile_type: CleanupProfileType = CleanupProfileType.MOBILE_DEFAULT) -> Tuple[NormalizedMetadata, dict, str]:
         """
         Orchestrates the full product-centric cleanup pipeline.
         Returns (metadata, cleanup_stats).
@@ -68,12 +68,20 @@ class AssetCleaner:
         if isolation_temp_path.exists():
             isolation_temp_path.unlink()
 
+        # 6. Final verification of artifacts
+        if not cleaned_mesh_path.exists():
+            raise FileNotFoundError(f"Cleaned mesh artifact not found at: {cleaned_mesh_path}")
+        if not metadata_path.exists():
+            raise FileNotFoundError(f"Metadata artifact not found at: {metadata_path}")
+            
         # Combine stats
         cleanup_stats = {
             "isolation": isolation_stats,
             "final_polycount": final_polycount,
             "bbox_min": bbox_min,
-            "bbox_max": bbox_max
+            "bbox_max": bbox_max,
+            "cleaned_mesh_path": str(cleaned_mesh_path),
+            "metadata_path": str(metadata_path)
         }
 
-        return metadata, cleanup_stats
+        return metadata, cleanup_stats, str(cleaned_mesh_path)
