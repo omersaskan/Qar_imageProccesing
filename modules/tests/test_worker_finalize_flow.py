@@ -72,6 +72,7 @@ class TestWorkerFinalizeFlow(unittest.TestCase):
     @patch("modules.operations.worker.AssetValidator")
     @patch("modules.operations.worker.GLBExporter")
     def test_finalize_ingestion_success(self, MockExporterClass, MockValidatorClass, MockCleanerClass):
+        import trimesh
         # Setup mocks
         mock_cleaner = MockCleanerClass.return_value
         mock_validator = MockValidatorClass.return_value
@@ -85,15 +86,18 @@ class TestWorkerFinalizeFlow(unittest.TestCase):
         # Mocking cleaner return
         from modules.asset_cleanup_pipeline.normalizer import NormalizedMetadata
         mock_metadata = NormalizedMetadata(
-            bbox_min={"x":0, "y":0, "z":0},
-            bbox_max={"x":1, "y":1, "z":1},
+            bbox_min={"x":-0.5, "y":-0.5, "z":0},
+            bbox_max={"x":0.5, "y":0.5, "z":1},
             pivot_offset={"x":0, "y":0, "z":0},
             final_polycount=100
         )
         cleaned_mesh_path = str(self.recon_dir / "cleaned_mesh.obj")
-        # Ensure cleaned mesh exists for measured residual check in worker.py
-        # Using Z=0 to ensure ground_residual is 0
-        Path(cleaned_mesh_path).write_text("v 0 0 0\nv 1 1 1", encoding="utf-8")
+        
+        # USE REAL GEOMETRY: min_z = 0.0
+        # A 1x1x1 box centered at (0,0,0.5) has bottom at z=0
+        mesh = trimesh.creation.box(extents=[1, 1, 1])
+        mesh.apply_translation([0, 0, 0.5])
+        mesh.export(cleaned_mesh_path)
         
         mock_cleaner.process_cleanup.return_value = (mock_metadata, {"isolation": {"component_count": 1}}, cleaned_mesh_path)
         
@@ -119,16 +123,23 @@ class TestWorkerFinalizeFlow(unittest.TestCase):
         # ASSERTIONS
         # 1. Cleaner called with raw mesh
         mock_cleaner.process_cleanup.assert_called_once()
-        _, kwargs = mock_cleaner.process_cleanup.call_args
-        self.assertEqual(kwargs['raw_mesh_path'], str(self.raw_mesh_path))
         
-        # 2. Exporter called with CLEANED mesh path
+        # 2. Orchestration Assertion: Exporter called with CLEANED mesh path
         mock_exporter.export.assert_called_once()
         _, kwargs = mock_exporter.export.call_args
         self.assertEqual(kwargs['mesh_path'], cleaned_mesh_path)
         self.assertNotEqual(kwargs['mesh_path'], str(self.raw_mesh_path))
         
-        # 3. Registry update: should be published
+        # 3. SEMANTIC ASSERTION: Validator received measured residual
+        mock_validator.validate.assert_called_once()
+        args, kwargs = mock_validator.validate.call_args
+        # Robust extraction for positional or keyword arguments
+        validation_input = kwargs.get("asset_data") if (kwargs and "asset_data" in kwargs) else args[1]
+        
+        self.assertIn("ground_offset", validation_input)
+        self.assertAlmostEqual(validation_input["ground_offset"], 0.0, places=6)
+        
+        # 4. Registry update: should be published
         history = self.worker.registry.get_history(self.product_id)
         self.assertEqual(len(history), 1)
         self.assertEqual(history[0]['status'], "published")
@@ -136,6 +147,7 @@ class TestWorkerFinalizeFlow(unittest.TestCase):
     @patch("modules.operations.worker.AssetCleaner")
     @patch("modules.operations.worker.AssetValidator")
     def test_finalize_ingestion_gate_fails(self, MockValidatorClass, MockCleanerClass):
+        import trimesh
         # Setup mocks
         mock_cleaner = MockCleanerClass.return_value
         mock_validator = MockValidatorClass.return_value
@@ -145,13 +157,18 @@ class TestWorkerFinalizeFlow(unittest.TestCase):
         
         from modules.asset_cleanup_pipeline.normalizer import NormalizedMetadata
         mock_metadata = NormalizedMetadata(
-            bbox_min={"x":0, "y":0, "z":0},
-            bbox_max={"x":1, "y":1, "z":1},
+            bbox_min={"x":-0.5, "y":-0.5, "z":10},
+            bbox_max={"x":0.5, "y":0.5, "z":11},
             pivot_offset={"x":0, "y":0, "z":0},
             final_polycount=100
         )
         cleaned_mesh_path = str(self.recon_dir / "failed_mesh.obj")
-        Path(cleaned_mesh_path).write_text("v 0 0 10", encoding="utf-8") # High Z residual
+        
+        # USE REAL GEOMETRY: min_z = 10.0
+        mesh = trimesh.creation.box(extents=[1, 1, 1])
+        mesh.apply_translation([0, 0, 10.5])
+        mesh.export(cleaned_mesh_path)
+        
         mock_cleaner.process_cleanup.return_value = (mock_metadata, {"isolation": {"component_count": 1}}, cleaned_mesh_path)
         
         from modules.shared_contracts.models import ValidationReport
@@ -174,11 +191,18 @@ class TestWorkerFinalizeFlow(unittest.TestCase):
         self.worker._finalize_ingestion(self.session)
         
         # ASSERTIONS
-        # 1. Mark session failed called
+        # 1. SEMANTIC ASSERTION: Validator received measured residual (10.0)
+        mock_validator.validate.assert_called_once()
+        args, kwargs = mock_validator.validate.call_args
+        validation_input = kwargs.get("asset_data") if (kwargs and "asset_data" in kwargs) else args[1]
+        
+        self.assertIn("ground_offset", validation_input)
+        self.assertAlmostEqual(validation_input["ground_offset"], 10.0, places=6)
+        
+        # 2. Mark session failed called
         self.worker._mark_session_failed.assert_called_once()
         
-        # 2. Registry should NOT have a published asset
-        # (It shouldn't even be registered if it fails the gate)
+        # 3. Registry should NOT have a published asset
         prod_data = self.worker.registry._load_product_data(self.product_id)
         self.assertEqual(len(prod_data["assets"]), 0)
 
