@@ -9,6 +9,11 @@ dependencies = [
     "Pillow>=10.0.0",
     "trimesh",
     "numpy",
+    "opencv-python",
+    "xatlas",
+    "fastapi",
+    "uvicorn",
+    "fast-simplification",
 ]
 
 [project.optional-dependencies]

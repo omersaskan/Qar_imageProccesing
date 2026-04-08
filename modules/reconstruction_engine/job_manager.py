@@ -7,6 +7,9 @@ from modules.shared_contracts.models import ReconstructionJob, ReconstructionJob
 from modules.shared_contracts.lifecycle import ReconstructionStatus
 from modules.utils.path_safety import validate_safe_path, ensure_dir, validate_identifier
 from modules.utils.file_persistence import atomic_write_json, FileLock
+from modules.operations.logging_config import get_component_logger
+
+logger = get_component_logger("job_manager")
 
 class JobManager:
     def __init__(self, data_root: str = "data"):

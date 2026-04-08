@@ -202,3 +202,16 @@ class AssetRegistry:
         active_id = self._get_active_id(product_id)
         if not active_id: return None
         return self.get_asset(active_id)
+
+    def _log_audit(self, asset_id: str, product_id: str, action: str, details: Optional[Dict[str, Any]] = None) -> None:
+        """Internal helper to add an audit entry to a product's history."""
+        file_path = self._get_product_file(product_id)
+        with FileLock(file_path):
+            data = self._load_product_data(product_id)
+            data["audit_logs"].append({
+                "asset_id": asset_id,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "action": action,
+                "details": details or {}
+            })
+            self._save_no_lock(product_id, data)
