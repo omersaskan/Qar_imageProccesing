@@ -18,6 +18,19 @@ class GLBExporter:
         # 1. Load the mesh (OBJ/PLY/etc)
         scene_or_mesh = trimesh.load(mesh_path)
         
+        # Force a generic PBR material so <model-viewer> displays vertex colors (if no real texture exists)
+        if hasattr(scene_or_mesh, 'visual'):
+            if not isinstance(scene_or_mesh.visual, trimesh.visual.TextureVisuals):
+                if hasattr(scene_or_mesh.visual, 'vertex_colors'):
+                    from trimesh.visual.material import PBRMaterial
+                    # This ensures that GLB gets a proper material with baseColorFactor white
+                    # which correctly multiplies with vertex colors (COLOR_0 attr)
+                    scene_or_mesh.visual.material = PBRMaterial(
+                        baseColorFactor=(255, 255, 255, 255),
+                        metallicFactor=0.0,
+                        roughnessFactor=1.0
+                    )
+
         # 2. Export as GLB
         scene_or_mesh.export(output_path, file_type='glb')
 

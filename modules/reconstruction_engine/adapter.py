@@ -108,9 +108,11 @@ class COLMAPAdapter(ReconstructionAdapter):
 
         # 4. Artifact Discovery (User requirement: prioritize meshes)
         potential_meshes = [
+            output_dir / "dense" / "0" / "meshed-poisson.ply",
+            output_dir / "dense" / "0" / "meshed-delaunay.ply",
             output_dir / "meshed-poisson.ply",
             output_dir / "meshed-delaunay.ply",
-            output_dir / "dense/0/fused.ply" # Check dense subfolder if exists
+            output_dir / "dense" / "0" / "fused.ply" # Check dense subfolder if exists
         ]
         
         mesh_path = None
@@ -128,9 +130,59 @@ class COLMAPAdapter(ReconstructionAdapter):
         if not mesh_path:
             raise RuntimeError(f"COLMAP completed but no .ply artifacts found in {output_dir}")
 
+        # 5. OpenMVS Texturing Stage (Photorealism)
+        openmvs_dir = os.getenv("OPENMVS_BIN_PATH", r"C:\OpenMVS")
+        texture_path = str(output_dir / "dummy_texture.png")
+        
+        # Check if OpenMVS tools exist
+        interface_colmap = Path(openmvs_dir) / "InterfaceCOLMAP.exe"
+        texture_mesh = Path(openmvs_dir) / "TextureMesh.exe"
+        
+        if interface_colmap.exists() and texture_mesh.exists():
+            log_file = open(log_path, "a", encoding="utf-8")
+            log_file.write("\n\n--- Starting OpenMVS Texturing Pipeline ---\n")
+            
+            try:
+                # Setup paths
+                scene_mvs = output_dir / "scene.mvs"
+                dense_dir = output_dir / "dense" / "0"
+                scene_texture_obj = output_dir / "scene_texture.obj"
+                
+                # Command 1: Convert COLMAP workspace to MVS format
+                cmd_interface = [
+                    str(interface_colmap),
+                    "-i", str(dense_dir),
+                    "-o", str(scene_mvs)
+                ]
+                log_file.write(f"Running InterfaceCOLMAP: {' '.join(cmd_interface)}\n")
+                subprocess.run(cmd_interface, stdout=log_file, stderr=subprocess.STDOUT, check=True)
+                
+                # Command 2: Project original images onto the Poisson Mesh
+                cmd_texture = [
+                    str(texture_mesh),
+                    str(scene_mvs),
+                    "-m", str(mesh_path),
+                    "-o", str(scene_texture_obj)
+                ]
+                log_file.write(f"Running TextureMesh: {' '.join(cmd_texture)}\n")
+                subprocess.run(cmd_texture, stdout=log_file, stderr=subprocess.STDOUT, check=True)
+                
+                # If success, update outputs to MVS results
+                if scene_texture_obj.exists():
+                    mesh_path = scene_texture_obj
+                    texture_path = str(output_dir / "scene_texture.png")
+                    log_file.write("\nOpenMVS Texturing completed successfully.\n")
+                    
+            except subprocess.CalledProcessError as e:
+                log_file.write(f"\nOpenMVS Process failed with code {e.returncode}. Falling back to default COLMAP output.\n")
+            except Exception as e:
+                log_file.write(f"\nOpenMVS Error: {str(e)}. Falling back to default COLMAP output.\n")
+            finally:
+                log_file.close()
+
         return {
             "mesh_path": str(mesh_path),
-            "texture_path": str(output_dir / "dummy_texture.png"), # placeholder if no texture produced
+            "texture_path": texture_path, # will point to scene_texture.png if MVS succeeded
             "log_path": str(log_path),
             "vertex_count": 0, # Placeholder, could be parsed from PLY header
             "face_count": 0
