@@ -5,6 +5,7 @@ import sys
 
 import numpy as np
 import trimesh
+from PIL import Image
 
 project_root = str(Path(__file__).parent.parent.parent)
 if project_root not in sys.path:
@@ -15,14 +16,7 @@ from modules.qa_validation.validator import AssetValidator
 
 
 def write_dummy_png(path: Path):
-    path.write_bytes(
-        b"\x89PNG\r\n\x1a\n"
-        b"\x00\x00\x00\rIHDR"
-        b"\x00\x00\x00\x01\x00\x00\x00\x01"
-        b"\x08\x02\x00\x00\x00\x90wS\xde"
-        b"\x00\x00\x00\x0cIDAT\x08\xd7c\xf8\xff\xff? \x00\x05\xfe\x02\xfe\xdcD\x05\x13"
-        b"\x00\x00\x00\x00IEND\xaeB`\x82"
-    )
+    Image.new("RGBA", (4, 4), (255, 128, 64, 255)).save(path)
 
 
 def make_uv_mesh_obj(path: Path):

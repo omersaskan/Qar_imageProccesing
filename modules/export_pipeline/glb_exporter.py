@@ -83,7 +83,8 @@ class GLBExporter:
                 try:
                     from PIL import Image
 
-                    tex_image = Image.open(texture_path)
+                    with Image.open(texture_path) as texture_image:
+                        tex_image = texture_image.convert("RGBA").copy()
                     material = trimesh.visual.material.PBRMaterial(
                         baseColorTexture=tex_image,
                         metallicFactor=0.0,
@@ -122,7 +123,9 @@ class GLBExporter:
                 pass
 
         # metadata transform is expected to be already baked by cleaner/alignment
-        mesh.export(output_path, file_type="glb")
+        glb_bytes = mesh.export(file_type="glb")
+        with open(output_path, "wb") as glb_file:
+            glb_file.write(glb_bytes)
 
         result = {
             "format": "GLB",

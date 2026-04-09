@@ -2,14 +2,36 @@ import pytest
 from modules.qa_validation.validator import AssetValidator
 from modules.qa_validation.rules import ValidationThresholds
 
-def test_validator_pass():
-    validator = AssetValidator()
+
+def make_asset_data(**overrides):
     asset_data = {
         "poly_count": 10_000,
         "texture_status": "complete",
         "bbox": {"width": 10.0, "height": 20.0, "depth": 5.0},
-        "ground_offset": 0.5
+        "ground_offset": 0.5,
+        "cleanup_stats": {
+            "isolation": {
+                "component_count": 1,
+                "initial_faces": 1000,
+                "final_faces": 950,
+                "removed_plane_face_share": 0.0,
+                "removed_plane_vertex_ratio": 0.0,
+                "compactness_score": 0.5,
+                "selected_component_score": 0.8,
+            }
+        },
+        "texture_path_exists": True,
+        "has_uv": True,
+        "has_material": True,
+        "texture_applied_successfully": True,
     }
+    asset_data.update(overrides)
+    return asset_data
+
+
+def test_validator_pass():
+    validator = AssetValidator()
+    asset_data = make_asset_data()
     
     report = validator.validate("test_id", asset_data)
     
@@ -20,12 +42,7 @@ def test_validator_pass():
 
 def test_validator_fail_polycount():
     validator = AssetValidator()
-    asset_data = {
-        "poly_count": 150_000,
-        "texture_status": "complete",
-        "bbox": {"width": 10.0, "height": 20.0, "depth": 5.0},
-        "ground_offset": 0.5
-    }
+    asset_data = make_asset_data(poly_count=150_000)
     
     report = validator.validate("test_id", asset_data)
     
@@ -34,12 +51,7 @@ def test_validator_fail_polycount():
 
 def test_validator_review_polycount():
     validator = AssetValidator()
-    asset_data = {
-        "poly_count": 75_000,
-        "texture_status": "complete",
-        "bbox": {"width": 10.0, "height": 20.0, "depth": 5.0},
-        "ground_offset": 0.5
-    }
+    asset_data = make_asset_data(poly_count=75_000)
     
     report = validator.validate("test_id", asset_data)
     
@@ -50,12 +62,7 @@ def test_validator_custom_thresholds():
     custom_thresholds = ValidationThresholds(polycount_pass=10_000, polycount_review=20_000)
     validator = AssetValidator(thresholds=custom_thresholds)
     
-    asset_data = {
-        "poly_count": 15_000,
-        "texture_status": "complete",
-        "bbox": {"width": 10.0, "height": 20.0, "depth": 5.0},
-        "ground_offset": 0.5
-    }
+    asset_data = make_asset_data(poly_count=15_000)
     
     report = validator.validate("test_id", asset_data)
     
@@ -63,12 +70,7 @@ def test_validator_custom_thresholds():
 
 def test_validator_fail_texture():
     validator = AssetValidator()
-    asset_data = {
-        "poly_count": 10_000,
-        "texture_status": "missing_critical",
-        "bbox": {"width": 10.0, "height": 20.0, "depth": 5.0},
-        "ground_offset": 0.5
-    }
+    asset_data = make_asset_data(texture_status="missing_critical")
     
     report = validator.validate("test_id", asset_data)
     

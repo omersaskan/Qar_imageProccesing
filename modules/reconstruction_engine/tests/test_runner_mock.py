@@ -22,11 +22,9 @@ def test_runner_production_missing_path(tmp_path, monkeypatch):
     monkeypatch.setenv("RECON_ENGINE", "colmap")
     monkeypatch.delenv("RECON_ENGINE_PATH", raising=False)
     
-    # COLMAP without path in production should fail
-    # Note: COLMAPAdapter will raise RuntimeError if path is missing during initialization 
-    # if it's called by runner.
-    with pytest.raises(RuntimeError, match="must be configured"):
-        ReconstructionRunner()
+    with patch("modules.reconstruction_engine.adapter.os.path.exists", return_value=False):
+        with pytest.raises(RuntimeError, match="must be configured"):
+            ReconstructionRunner()
 
 def test_runner_success(tmp_path, monkeypatch):
     monkeypatch.setenv("ENV", "development") # Ensure dev mode

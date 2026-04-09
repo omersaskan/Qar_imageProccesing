@@ -33,6 +33,13 @@ class TestRealMeshContamination(unittest.TestCase):
         product.apply_translation([0, 0, 1.0])
 
         table = trimesh.creation.box(extents=[8.0, 8.0, 0.15])
+        table_vertices, table_faces = trimesh.remesh.subdivide_to_size(
+            table.vertices,
+            table.faces,
+            max_edge=0.35,
+            max_iter=8,
+        )
+        table = trimesh.Trimesh(vertices=table_vertices, faces=table_faces, process=False)
         table.apply_translation([0, 0, 0.0])
 
         return product + table
