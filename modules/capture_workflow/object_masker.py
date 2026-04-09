@@ -4,75 +4,29 @@ from pathlib import Path
 from typing import Dict, Any, Tuple, List, Optional
 
 from modules.operations.logging_config import get_component_logger
-from .config import QualityThresholds, default_quality_thresholds
+from .config import QualityThresholds, default_quality_thresholds, default_segmentation_config, SegmentationConfig
+from .segmentation_backends.factory import BackendFactory
 
 logger = get_component_logger("object_masker")
 
 
 class ObjectMasker:
     """
-    Object-centric masking tuned to suppress table/support contamination.
-
-    The pipeline intentionally combines weak priors rather than trusting a
-    single center prior:
-    - center prior
-    - border-color contrast prior
-    - edge/gradient prior
-    - GrabCut refinement from explicit FG/BG seeds
-    - support-band suppression near the bottom of the frame
+    Standardizes object masking by calling a pluggable backend (e.g. rembg or heuristic),
+    and enforcing common post-processing like support-band suppression and metric computation.
     """
 
     def __init__(
         self,
         use_gpu: bool = False,
         thresholds: Optional[QualityThresholds] = None,
+        config: Optional[SegmentationConfig] = None,
     ):
         self.use_gpu = use_gpu
         self.thresholds = (thresholds or default_quality_thresholds).model_copy(deep=True)
+        self.config = (config or default_segmentation_config).model_copy(deep=True)
 
-    def _normalize01(self, arr: np.ndarray) -> np.ndarray:
-        arr = arr.astype(np.float32)
-        mn, mx = float(arr.min()), float(arr.max())
-        if mx - mn < 1e-8:
-            return np.zeros_like(arr, dtype=np.float32)
-        return (arr - mn) / (mx - mn)
-
-    def _center_prior(self, h: int, w: int) -> np.ndarray:
-        ys, xs = np.mgrid[0:h, 0:w].astype(np.float32)
-        cx = w / 2.0
-        cy = h / 2.0
-
-        sx = max(w * 0.28, 1.0)
-        sy = max(h * 0.28, 1.0)
-
-        gauss = np.exp(-(((xs - cx) ** 2) / (2 * sx * sx) + ((ys - cy) ** 2) / (2 * sy * sy)))
-        return self._normalize01(gauss)
-
-    def _contrast_prior(self, frame: np.ndarray) -> np.ndarray:
-        lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB).astype(np.float32)
-
-        border = np.concatenate(
-            [
-                lab[0, :, :],
-                lab[-1, :, :],
-                lab[:, 0, :],
-                lab[:, -1, :],
-            ],
-            axis=0,
-        )
-
-        border_mean = border.mean(axis=0, keepdims=True)
-        dist = np.linalg.norm(lab - border_mean, axis=2)
-        dist = cv2.GaussianBlur(dist, (0, 0), 3)
-        return self._normalize01(dist)
-
-    def _edge_prior(self, frame: np.ndarray) -> np.ndarray:
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        grad_x = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
-        grad_y = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)
-        magnitude = cv2.magnitude(grad_x, grad_y)
-        magnitude = cv2.GaussianBlur(magnitude, (0, 0), 2)
-        return self._normalize01(magnitude)
+    # Post-processing utilities
 
     def _largest_component_mask(self, binary_mask: np.ndarray) -> np.ndarray:
         num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary_mask, connectivity=8)
@@ -121,45 +75,7 @@ class ObjectMasker:
             "solidity": solidity,
         }
 
-    def _build_seed_mask(self, frame: np.ndarray) -> np.ndarray:
-        h, w = frame.shape[:2]
-        center_prior = self._center_prior(h, w)
-        contrast_prior = self._contrast_prior(frame)
-        edge_prior = self._edge_prior(frame)
-
-        combined = 0.30 * center_prior + 0.45 * contrast_prior + 0.25 * edge_prior
-        combined = self._normalize01(combined)
-
-        seed = (combined > self.thresholds.seed_threshold).astype(np.uint8) * 255
-        seed = cv2.morphologyEx(seed, cv2.MORPH_CLOSE, np.ones((7, 7), np.uint8))
-        seed = cv2.morphologyEx(seed, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
-        seed = self._largest_component_mask(seed)
-        return seed
-
-    def _grabcut_mask_init(self, frame: np.ndarray, seed: np.ndarray) -> np.ndarray:
-        h, w = seed.shape[:2]
-        gc_mask = np.full((h, w), cv2.GC_PR_BGD, dtype=np.uint8)
-
-        border = int(max(4, min(h, w) * 0.05))
-        gc_mask[:border, :] = cv2.GC_BGD
-        gc_mask[-border:, :] = cv2.GC_BGD
-        gc_mask[:, :border] = cv2.GC_BGD
-        gc_mask[:, -border:] = cv2.GC_BGD
-
-        sure_fg = cv2.erode(seed, np.ones((9, 9), np.uint8), iterations=1)
-        prob_fg = cv2.dilate(seed, np.ones((11, 11), np.uint8), iterations=1)
-        gc_mask[prob_fg > 0] = cv2.GC_PR_FGD
-        gc_mask[sure_fg > 0] = cv2.GC_FGD
-
-        contrast_prior = self._contrast_prior(frame)
-        low_contrast_bg = (contrast_prior < self.thresholds.low_contrast_background_threshold).astype(np.uint8) * 255
-
-        bottom_bg = np.zeros_like(seed)
-        bottom_bg[int(h * self.thresholds.bottom_background_start_ratio):, :] = 255
-        bottom_bg = cv2.bitwise_and(bottom_bg, low_contrast_bg)
-        gc_mask[bottom_bg > 0] = cv2.GC_BGD
-
-        return gc_mask
+    # Removed legacy priority functions
 
     def _support_metrics(self, binary_mask: np.ndarray) -> Dict[str, float]:
         h, w = binary_mask.shape[:2]
@@ -254,23 +170,29 @@ class ObjectMasker:
 
     def generate_mask(self, frame: np.ndarray) -> Tuple[np.ndarray, Dict[str, Any]]:
         h, w = frame.shape[:2]
-
-        seed = self._build_seed_mask(frame)
-        gc_mask = self._grabcut_mask_init(frame, seed)
-        bgd_model = np.zeros((1, 65), np.float64)
-        fgd_model = np.zeros((1, 65), np.float64)
-
+        
+        backend_name = self.config.backend
+        if not self.config.enabled:
+            backend_name = "heuristic"
+            
+        backend = BackendFactory.get_backend(backend_name)
+        
         try:
-            cv2.grabCut(frame, gc_mask, None, bgd_model, fgd_model, 4, cv2.GC_INIT_WITH_MASK)
-            binary = np.where(
-                (gc_mask == cv2.GC_BGD) | (gc_mask == cv2.GC_PR_BGD),
-                0,
-                255,
-            ).astype(np.uint8)
+            binary, meta_out = backend.segment(frame, self.config)
         except Exception as e:
-            logger.error(f"GrabCut failed: {e}")
-            binary = seed.copy()
+            logger.error(f"Backend '{backend_name}' failed: {e}")
+            if self.config.hard_fail_on_backend_error:
+                raise e
+            if self.config.fallback_backend:
+                logger.warning(f"Falling back to '{self.config.fallback_backend}'")
+                backend = BackendFactory.get_backend(self.config.fallback_backend)
+                binary, meta_out = backend.segment(frame, self.config)
+                meta_out["fallback_used"] = True
+                meta_out["fallback_reason"] = str(e)
+            else:
+                raise ValueError("No fallback backend defined and main backend failed.")
 
+        # Post-processing to standardize format and suppress support band
         binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
         binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
         binary = self._largest_component_mask(binary)
@@ -314,7 +236,8 @@ class ObjectMasker:
             or support_area_ratio > self.thresholds.max_support_area_ratio
         )
 
-        confidence = 0.10
+        base_confidence = meta_out.get("mask_confidence", 0.10)
+        confidence = base_confidence * 0.30  # weigh initial backend confidence
         confidence += min(0.30, float(metrics["largest_contour_ratio"]) * 0.30)
         confidence += min(0.20, float(metrics["solidity"]) * 0.20)
         confidence += min(
@@ -340,6 +263,7 @@ class ObjectMasker:
         confidence = float(np.clip(confidence, 0.0, 1.0))
 
         meta = {
+            **meta_out,
             "confidence": confidence,
             "mask_confidence": confidence,
             "purity_score": float(np.clip(purity_score, 0.0, 1.0)),

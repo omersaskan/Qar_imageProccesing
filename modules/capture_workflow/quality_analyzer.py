@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 
 from .config import QualityThresholds, default_quality_thresholds
 
@@ -60,6 +60,8 @@ class QualityAnalyzer:
         bottom_contact_ratio = 0.0
         support_area_ratio = 0.0
         support_suspected = False
+        fallback_used = False
+        backend_name = None
         bbox = None
 
         if mask is not None:
@@ -83,6 +85,8 @@ class QualityAnalyzer:
                 bottom_contact_ratio = float(mask_meta.get("bottom_contact_ratio", 0.0))
                 support_area_ratio = float(mask_meta.get("support_area_ratio", 0.0))
                 support_suspected = bool(mask_meta.get("support_suspected", False))
+                fallback_used = bool(mask_meta.get("fallback_used", False))
+                backend_name = mask_meta.get("backend_name", "unknown")
                 centroid = mask_meta.get("centroid")
             else:
                 centroid = self._fallback_centroid_from_mask(mask)
@@ -141,6 +145,13 @@ class QualityAnalyzer:
 
             if border_touch_ratio > self.thresholds.max_border_touch_ratio:
                 failure_reasons.append(f"mask_touches_borders ({border_touch_ratio:.2f})")
+
+            if fallback_used and mask_confidence < self.thresholds.min_mask_confidence:
+                failure_reasons.append(f"fallback_mask_used_with_low_confidence ({mask_confidence:.2f})")
+
+            # We don't blindly fail on fallback_used, but we record if it dropped below purity
+            if fallback_used and purity_score < self.thresholds.min_mask_purity + 0.05:
+                failure_reasons.append(f"fallback_mask_unstable_purity ({purity_score:.2f})")
 
             if support_suspected:
                 failure_reasons.append("support_contamination_detected")
@@ -207,6 +218,8 @@ class QualityAnalyzer:
             "bottom_contact_ratio": float(bottom_contact_ratio),
             "support_area_ratio": float(support_area_ratio),
             "support_suspected": bool(support_suspected),
+            "fallback_used": bool(fallback_used),
+            "backend_name": backend_name,
             "is_blur_ok": bool(is_blur_ok),
             "is_exposure_ok": bool(is_exposure_ok),
             "is_framed": bool(is_framed),

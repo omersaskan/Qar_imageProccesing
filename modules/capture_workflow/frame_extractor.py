@@ -1,13 +1,16 @@
 import cv2
+import json
 import numpy as np
 from pathlib import Path
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Tuple
 
 from .config import (
     QualityThresholds,
     ExtractionConfig,
+    SegmentationConfig,
     default_quality_thresholds,
     default_extraction_config,
+    default_segmentation_config,
 )
 from .quality_analyzer import QualityAnalyzer
 from .object_masker import ObjectMasker
@@ -23,11 +26,13 @@ class FrameExtractor:
         object_masker: Optional[ObjectMasker] = None,
         thresholds: Optional[QualityThresholds] = None,
         config: Optional[ExtractionConfig] = None,
+        seg_config: Optional[SegmentationConfig] = None,
     ):
         self.thresholds = (thresholds or default_quality_thresholds).model_copy(deep=True)
         self.config = (config or default_extraction_config).model_copy(deep=True)
+        self.seg_config = (seg_config or default_segmentation_config).model_copy(deep=True)
         self.quality_analyzer = quality_analyzer or QualityAnalyzer(self.thresholds)
-        self.object_masker = object_masker or ObjectMasker(thresholds=self.thresholds)
+        self.object_masker = object_masker or ObjectMasker(thresholds=self.thresholds, config=self.seg_config)
 
     def _apply_object_mask(self, frame: np.ndarray, mask: np.ndarray) -> np.ndarray:
         expanded_mask = cv2.dilate(mask, np.ones((5, 5), np.uint8), iterations=1)
@@ -80,26 +85,19 @@ class FrameExtractor:
         label: str,
         read_flag: int,
     ) -> None:
-        write_ok = cv2.imwrite(str(image_path), image)
-        if not write_ok:
-            raise ValueError(f"{label} write failed: {image_path}")
+        ext = image_path.suffix
+        success, encoded = cv2.imencode(ext, image)
+        if not success:
+            raise ValueError(f"{label} internal encode failed for: {image_path}")
+        encoded.tofile(str(image_path))
 
         if not image_path.exists():
-            raise ValueError(f"{label} missing after write: {image_path}")
+            raise IOError(f"Filesystem sync validation failed for {label}: {image_path}")
 
-        if image_path.stat().st_size <= 0:
-            raise ValueError(f"{label} is empty after write: {image_path}")
-
-        reloaded = cv2.imread(str(image_path), read_flag)
-        if reloaded is None:
-            try:
-                image_bytes = np.fromfile(str(image_path), dtype=np.uint8)
-                if image_bytes.size > 0:
-                    reloaded = cv2.imdecode(image_bytes, read_flag)
-            except Exception:
-                reloaded = None
-        if reloaded is None or reloaded.size == 0:
-            raise ValueError(f"{label} unreadable after write: {image_path}")
+        nparr = np.fromfile(str(image_path), np.uint8)
+        written = cv2.imdecode(nparr, read_flag)
+        if written is None or written.size == 0:
+            raise IOError(f"Read-back validation failed for {label}: {image_path}")
 
     def _bbox_iou(self, a: Dict[str, int], b: Dict[str, int]) -> float:
         ax1, ay1, aw, ah = a["x"], a["y"], a["w"], a["h"]
@@ -208,9 +206,11 @@ class FrameExtractor:
                     frame_count += 1
                     continue
 
-                frame_filename = f"frame_{len(extracted_paths):04d}.jpg"
+                frame_base = f"frame_{len(extracted_paths):04d}"
+                frame_filename = f"{frame_base}.jpg"
                 frame_path = output_path / frame_filename
-                mask_path = masks_dir / f"{frame_filename}.png"
+                mask_path = masks_dir / f"{frame_base}.png"
+                meta_path = masks_dir / f"{frame_base}.json"
 
                 focused_frame, focused_mask = self._prepare_object_centric_frame(
                     frame,
@@ -219,6 +219,17 @@ class FrameExtractor:
                 )
                 self._write_verified_image(frame_path, focused_frame, "Extracted frame", cv2.IMREAD_COLOR)
                 self._write_verified_image(mask_path, focused_mask, "Mask", cv2.IMREAD_GRAYSCALE)
+                
+                with open(meta_path, "w", encoding="utf-8") as f:
+                    # Filter out non-serializable elements from meta if any, though primitives are expected
+                    clean_meta = {k: v for k, v in mask_meta.items() if isinstance(v, (int, float, str, bool, type(None), dict, list))}
+                    json.dump(clean_meta, f, indent=2)
+                
+                if self.seg_config.debug_artifacts:
+                    debug_dir = output_path / "debug"
+                    debug_dir.mkdir(parents=True, exist_ok=True)
+                    cv2.imencode(".png", mask)[1].tofile(str(debug_dir / f"{frame_base}_raw_mask.png"))
+                    cv2.imencode(".png", focused_mask)[1].tofile(str(debug_dir / f"{frame_base}_refined_mask.png"))
 
                 extracted_paths.append(str(frame_path))
                 last_extracted_hist = current_hist

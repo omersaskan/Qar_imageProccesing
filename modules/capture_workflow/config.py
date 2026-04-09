@@ -1,5 +1,13 @@
 from pydantic import BaseModel, Field
 
+class SegmentationConfig(BaseModel):
+    backend: str = Field("rembg", description="Primary backend to use: 'rembg' or 'heuristic'")
+    fallback_backend: str | None = Field("heuristic", description="Fallback backend on failure")
+    enabled: bool = Field(True, description="Enable segmentation backend logic")
+    rembg_model_name: str = Field("u2net", description="rembg model name")
+    rembg_mask_threshold: int = Field(50, ge=0, le=255, description="Alpha threshold for binary mask")
+    hard_fail_on_backend_error: bool = Field(False, description="Fail extraction if main backend fails")
+    debug_artifacts: bool = Field(False, description="Save debug masks to disk")
 
 class QualityThresholds(BaseModel):
     # Blur detection (higher variance = sharper image)
@@ -81,3 +89,4 @@ class CoverageConfig(BaseModel):
 default_quality_thresholds = QualityThresholds()
 default_extraction_config = ExtractionConfig()
 default_coverage_config = CoverageConfig()
+default_segmentation_config = SegmentationConfig()

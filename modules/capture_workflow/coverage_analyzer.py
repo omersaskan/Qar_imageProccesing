@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 
 import cv2
+import json
 import numpy as np
 
 from .config import CoverageConfig, default_coverage_config
@@ -35,6 +36,9 @@ class CoverageAnalyzer:
     def _mask_path_for_frame(self, frame_path: Path) -> Path:
         return frame_path.parent / "masks" / f"{frame_path.name}.png"
 
+    def _meta_path_for_frame(self, frame_path: Path) -> Path:
+        return frame_path.parent / "masks" / f"{frame_path.name}.json"
+
     def _extract_signature(self, frame_path: Path) -> Optional[Dict[str, Any]]:
         frame = self._read_image(frame_path, cv2.IMREAD_COLOR)
         if frame is None or frame.size == 0:
@@ -64,6 +68,18 @@ class CoverageAnalyzer:
         moments = cv2.moments(mask)
         hu = cv2.HuMoments(moments).flatten()
         hu = np.sign(hu) * np.log10(np.abs(hu) + 1e-12)
+        
+        fallback_used = False
+        confidence = 1.0
+        meta_path = self._meta_path_for_frame(frame_path)
+        if meta_path.exists():
+            try:
+                with open(meta_path, "r", encoding="utf-8") as f:
+                    meta = json.load(f)
+                    fallback_used = meta.get("fallback_used", False)
+                    confidence = meta.get("mask_confidence", confidence)
+            except Exception:
+                pass
 
         return {
             "path": str(frame_path),
@@ -72,6 +88,8 @@ class CoverageAnalyzer:
             "area_ratio": area_ratio,
             "aspect_ratio": aspect_ratio,
             "hu": hu,
+            "fallback_used": fallback_used,
+            "confidence": confidence,
         }
 
     def _is_new_view(self, signature: Dict[str, Any], representatives: List[Dict[str, Any]]) -> bool:
@@ -101,12 +119,18 @@ class CoverageAnalyzer:
     def analyze_coverage(self, extracted_frames: List[str]) -> Dict[str, Any]:
         signatures: List[Dict[str, Any]] = []
         unreadable_frames = 0
+        fallback_frames = 0
+        low_confidence_frames = 0
 
         for frame_str in extracted_frames:
             sig = self._extract_signature(Path(frame_str))
             if sig is None:
                 unreadable_frames += 1
                 continue
+            if sig.get("fallback_used", False):
+                fallback_frames += 1
+            if sig.get("confidence", 1.0) < 0.6:
+                low_confidence_frames += 1
             signatures.append(sig)
 
         num_frames = len(extracted_frames)
@@ -170,6 +194,12 @@ class CoverageAnalyzer:
 
         if unreadable_frames > 0:
             reasons.append(f"{unreadable_frames} extracted frames could not be analyzed.")
+            
+        if fallback_frames > max(1, readable_frames * 0.5):
+            reasons.append(f"Too many frames relied on heuristic fallback ({fallback_frames}).")
+            
+        if low_confidence_frames > max(1, readable_frames * 0.3):
+            reasons.append(f"Too many frames have low semantic confidence ({low_confidence_frames}).")
 
         coverage_score = (
             min(1.0, readable_frames / max(self.config.min_readable_frames, 1)) * 0.30
@@ -211,6 +241,8 @@ class CoverageAnalyzer:
             "scale_variation": scale_variation,
             "aspect_variation": aspect_variation,
             "coverage_score": float(np.clip(coverage_score, 0.0, 1.0)),
+            "fallback_frames": fallback_frames,
+            "low_confidence_frames": low_confidence_frames,
             "overall_status": overall_status,
             "recommended_action": "reconstruct" if overall_status == "sufficient" else "needs_recapture",
             "reasons": reasons,
