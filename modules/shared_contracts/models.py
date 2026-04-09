@@ -15,9 +15,20 @@ class CaptureSession(BaseModel):
     operator_id: str
     status: AssetStatus = AssetStatus.CREATED
     source_video_url: Optional[HttpUrl] = None
-    extracted_frames: List[HttpUrl] = Field(default_factory=list)
+    extracted_frames: List[str] = Field(default_factory=list)
     coverage_score: float = Field(0.0, ge=0.0, le=1.0)
     failure_reason: Optional[str] = None
+    reconstruction_job_id: Optional[str] = None
+    reconstruction_manifest_path: Optional[str] = None
+    cleanup_mesh_path: Optional[str] = None
+    cleanup_metadata_path: Optional[str] = None
+    cleanup_stats_path: Optional[str] = None
+    export_blob_path: Optional[str] = None
+    validation_report_path: Optional[str] = None
+    asset_id: Optional[str] = None
+    asset_version: Optional[str] = None
+    publish_state: Optional[str] = None
+    last_pipeline_stage: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     @field_validator("status", mode="before")
@@ -52,7 +63,7 @@ class ReconstructionJob(BaseModel):
 class AssetMetadata(BaseModel):
     asset_id: str
     product_id: str
-    version: str
+    version: Optional[str] = None
     bbox: Dict[str, Any] = Field(default_factory=dict)
     pivot_offset: Dict[str, Any] = Field(default_factory=dict)
     quality_grade: str = "C" # A, B, C, D

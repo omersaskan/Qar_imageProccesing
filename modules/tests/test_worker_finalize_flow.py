@@ -189,6 +189,90 @@ class TestWorkerFinalizeFlow(unittest.TestCase):
         self.assertEqual(len(history), 1)
         self.assertEqual(history[0]["status"], "published")
 
+    @patch("modules.operations.worker.AssetCleaner")
+    @patch("modules.operations.worker.AssetValidator")
+    @patch("modules.operations.worker.GLBExporter")
+    def test_review_asset_stays_draft_and_not_active(self, MockExporterClass, MockValidatorClass, MockCleanerClass):
+        import trimesh
+
+        mock_cleaner = MockCleanerClass.return_value
+        mock_validator = MockValidatorClass.return_value
+        mock_exporter = MockExporterClass.return_value
+
+        self.worker.cleaner = mock_cleaner
+        self.worker.validator = mock_validator
+        self.worker.exporter = mock_exporter
+
+        from modules.asset_cleanup_pipeline.normalizer import NormalizedMetadata
+        from modules.shared_contracts.models import ValidationReport
+
+        mock_metadata = NormalizedMetadata(
+            bbox_min={"x": -0.5, "y": -0.5, "z": 0.0},
+            bbox_max={"x": 0.5, "y": 0.5, "z": 1.0},
+            pivot_offset={"x": 0.0, "y": 0.0, "z": 0.0},
+            final_polycount=100,
+        )
+
+        cleaned_mesh_path = str(self.recon_dir / "review_mesh.obj")
+        cleaned_texture_path = str(self.recon_dir / "review_texture.png")
+
+        mesh = trimesh.creation.box(extents=[1, 1, 1])
+        mesh.apply_translation([0, 0, 0.5])
+        mesh.export(cleaned_mesh_path)
+        write_dummy_png(Path(cleaned_texture_path))
+
+        mock_cleaner.process_cleanup.return_value = (
+            mock_metadata,
+            {
+                "isolation": {
+                    "component_count": 1,
+                    "initial_faces": 12,
+                    "final_faces": 12,
+                    "removed_plane_face_share": 0.0,
+                    "removed_plane_vertex_ratio": 0.0,
+                    "compactness_score": 0.5,
+                    "selected_component_score": 0.8,
+                },
+                "uv_preserved": True,
+                "material_preserved": True,
+                "cleaned_texture_path": cleaned_texture_path,
+            },
+            cleaned_mesh_path,
+        )
+
+        mock_validator.validate.return_value = ValidationReport(
+            asset_id="test_asset_review",
+            poly_count=100,
+            texture_status="complete",
+            bbox_reasonable=True,
+            ground_aligned=True,
+            mobile_performance_grade="A",
+            component_count=1,
+            largest_component_share=1.0,
+            contamination_score=0.1,
+            contamination_report={"texture_application": "review"},
+            final_decision="review",
+        )
+
+        mock_exporter.export.return_value = {
+            "filesize": 1024,
+            "has_uv": True,
+            "has_material": True,
+            "used_texture_path": cleaned_texture_path,
+            "texture_applied_successfully": True,
+        }
+
+        final_session = self.worker._finalize_ingestion(self.session)
+
+        self.assertEqual(final_session.status, AssetStatus.VALIDATED)
+        self.assertEqual(final_session.publish_state, "draft")
+
+        history = self.worker.registry.get_history(self.product_id)
+        self.assertEqual(len(history), 1)
+        self.assertEqual(history[0]["status"], "draft")
+        self.assertFalse(history[0]["is_active"])
+        self.assertIsNone(self.worker.registry._get_active_id(self.product_id))
+
     @patch("modules.operations.worker.GLBExporter")
     @patch("modules.operations.worker.AssetCleaner")
     @patch("modules.operations.worker.AssetValidator")
@@ -264,8 +348,8 @@ class TestWorkerFinalizeFlow(unittest.TestCase):
         self.assertIn("ground_offset", validation_input)
         self.assertAlmostEqual(validation_input["ground_offset"], 10.0, places=6)
 
-        # exporter should not run on fail
-        mock_exporter.export.assert_not_called()
+        # export happens before validation in the new lifecycle
+        mock_exporter.export.assert_called_once()
 
         # failed session path
         self.worker._mark_session_failed.assert_called_once()

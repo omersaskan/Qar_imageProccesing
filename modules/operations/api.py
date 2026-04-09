@@ -6,11 +6,12 @@ from typing import List, Dict, Any
 import os
 import json
 import shutil
-import time
+import uuid
 
 from modules.asset_registry.registry import AssetRegistry
 from modules.capture_workflow.session_manager import SessionManager
 from modules.operations.logging_config import get_component_logger, setup_logging
+from modules.operations.worker import worker_instance
 import mimetypes
 
 # Initialize unified logging
@@ -29,6 +30,19 @@ app.add_middleware(
 
 registry = AssetRegistry()
 session_manager = SessionManager()
+embedded_worker_enabled = os.getenv("MESHYSIZ_EMBEDDED_WORKER", "true").lower() == "true"
+
+
+@app.on_event("startup")
+async def startup_event():
+    if embedded_worker_enabled:
+        worker_instance.start()
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    if embedded_worker_enabled:
+        worker_instance.stop()
 
 @app.post("/api/sessions/upload")
 async def upload_video(
@@ -43,7 +57,7 @@ async def upload_video(
         raise HTTPException(status_code=400, detail="Invalid video format. Supported: .mp4, .mov, .avi")
 
     # Generate unique session ID
-    session_id = f"cap_{int(time.time())}"
+    session_id = f"cap_{uuid.uuid4().hex[:8]}"
     
     try:
         # 1. Create Session folders and record
@@ -115,12 +129,19 @@ async def list_products():
                         }
                     elif p_id in products_map and products_map[p_id]["status"] == "registered":
                         # If it has both, we can flag it as having active updates
-                        if session_data.get("status") in ["CREATED", "CAPTURING"]:
+                        if session_data.get("status") not in ["published", "failed"]:
                             products_map[p_id]["has_active_session"] = True
             except:
                 continue
 
     return sorted(products_map.values(), key=lambda x: x["last_updated"], reverse=True)
+
+@app.get("/api/worker/status")
+async def worker_status():
+    return {
+        "embedded": embedded_worker_enabled,
+        "running": worker_instance.running,
+    }
 
 @app.get("/api/products/{product_id}/history")
 async def get_history(product_id: str):

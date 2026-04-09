@@ -1,5 +1,5 @@
 import json
-import os
+import re
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from datetime import datetime, timezone
@@ -43,7 +43,16 @@ class AssetRegistry:
         with FileLock(file_path):
             self._save_no_lock(product_id, data)
 
-    def register_asset(self, metadata: AssetMetadata) -> None:
+    def _next_version_from_data(self, data: Dict[str, Any]) -> str:
+        max_seen = 0
+        for info in data.get("assets", {}).values():
+            version = str(info.get("metadata", {}).get("version", "") or "").strip().lower()
+            match = re.search(r"(\d+)", version)
+            if match:
+                max_seen = max(max_seen, int(match.group(1)))
+        return f"v{max_seen + 1}"
+
+    def register_asset(self, metadata: AssetMetadata) -> AssetMetadata:
         """Registers a new asset version. Atomic operation."""
         product_id = validate_identifier(metadata.product_id, "Product ID")
         asset_id = validate_identifier(metadata.asset_id, "Asset ID")
@@ -54,8 +63,12 @@ class AssetRegistry:
             if asset_id in data["assets"]:
                 raise DuplicateAssetError(f"Asset ID {asset_id} already exists in registry.")
 
+            stored_metadata = metadata
+            if not metadata.version:
+                stored_metadata = metadata.model_copy(update={"version": self._next_version_from_data(data)})
+
             data["assets"][asset_id] = {
-                "metadata": metadata.model_dump(mode="json"),
+                "metadata": stored_metadata.model_dump(mode="json"),
                 "publish_state": "draft",
                 "is_approved": False,
                 "rework_required": False,
@@ -67,10 +80,11 @@ class AssetRegistry:
                 "asset_id": asset_id,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "action": "registered",
-                "details": {"version": metadata.version}
+                "details": {"version": stored_metadata.version}
             })
             
             self._save_no_lock(product_id, data)
+            return stored_metadata
 
     def grant_approval(self, asset_id: str, validation_status: str) -> None:
         """Grants manual approval. Atomic operation."""
@@ -184,10 +198,12 @@ class AssetRegistry:
         product_id = self._find_product_by_asset(asset_id)
         if not product_id:
             raise ValueError(f"Asset {asset_id} not found")
-        
-        data = self._load_product_data(product_id)
-        data["assets"][asset_id]["publish_state"] = state
-        self._save_product_data(product_id, data)
+
+        file_path = self._get_product_file(product_id)
+        with FileLock(file_path):
+            data = self._load_product_data(product_id)
+            data["assets"][asset_id]["publish_state"] = state
+            self._save_no_lock(product_id, data)
 
     def get_asset(self, asset_id: str) -> Optional[AssetMetadata]:
         product_id = self._find_product_by_asset(asset_id)

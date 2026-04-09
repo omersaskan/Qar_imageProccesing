@@ -1,7 +1,6 @@
-import os
 import json
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 from modules.shared_contracts.models import CaptureSession
 from modules.shared_contracts.lifecycle import AssetStatus, assert_transition
 from modules.utils.path_safety import validate_safe_path, ensure_dir, validate_identifier
@@ -25,7 +24,8 @@ class SessionManager:
             session_id=session_id,
             product_id=product_id,
             operator_id=operator_id,
-            status=AssetStatus.CREATED
+            status=AssetStatus.CREATED,
+            last_pipeline_stage=AssetStatus.CREATED.value,
         )
         
         # Setup capture folder structure
@@ -57,15 +57,24 @@ class SessionManager:
             return CaptureSession.model_validate(data)
 
     def update_session_status(self, session_id: str, new_status: AssetStatus) -> CaptureSession:
+        return self.update_session(session_id, new_status=new_status)
+
+    def update_session(self, session_id: str, new_status: Optional[AssetStatus] = None, **fields: Any) -> CaptureSession:
         file_path = self.sessions_dir / f"{session_id}.json"
         with FileLock(file_path):
             session = self.get_session(session_id)
             if not session:
                 raise ValueError(f"Session {session_id} not found")
-            
-            assert_transition(session.status, new_status)
-            session.status = new_status
-            # Use lock-free save because we already hold the lock
+
+            if new_status is not None:
+                assert_transition(session.status, new_status)
+                session.status = new_status
+
+            for field_name, value in fields.items():
+                if not hasattr(session, field_name):
+                    raise AttributeError(f"CaptureSession has no field '{field_name}'")
+                setattr(session, field_name, value)
+
             self._save_no_lock(session)
             return session
     

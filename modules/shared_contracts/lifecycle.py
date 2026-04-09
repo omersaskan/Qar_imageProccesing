@@ -20,14 +20,13 @@ class ReconstructionStatus(str, Enum):
 
 # Define allowed transitions
 _ALLOWED_TRANSITIONS: Dict[AssetStatus, Set[AssetStatus]] = {
-    AssetStatus.CREATED: {AssetStatus.CAPTURED},
-    AssetStatus.CAPTURED: {AssetStatus.RECONSTRUCTED, AssetStatus.CAPTURED, AssetStatus.FAILED}, # Retry capture or fail
-    AssetStatus.RECONSTRUCTED: {AssetStatus.CLEANED, AssetStatus.CAPTURED, AssetStatus.FAILED}, # Fail/Retry capture or fail
-    AssetStatus.CLEANED: {AssetStatus.EXPORTED, AssetStatus.RECONSTRUCTED}, # Redo cleanup or redo reconstruction
-    AssetStatus.EXPORTED: {AssetStatus.VALIDATED, AssetStatus.CLEANED}, # Re-export or redo cleanup
-    AssetStatus.VALIDATED: {AssetStatus.PUBLISHED, AssetStatus.EXPORTED}, # Publish or re-export
-    AssetStatus.PUBLISHED: {AssetStatus.VALIDATED}, # Rollback to validated state
     AssetStatus.CREATED: {AssetStatus.CAPTURED, AssetStatus.FAILED}, # Allow initial failure
+    AssetStatus.CAPTURED: {AssetStatus.RECONSTRUCTED, AssetStatus.CAPTURED, AssetStatus.FAILED}, # Retry capture or fail
+    AssetStatus.RECONSTRUCTED: {AssetStatus.CLEANED, AssetStatus.CAPTURED, AssetStatus.FAILED}, # Redo capture or fail
+    AssetStatus.CLEANED: {AssetStatus.EXPORTED, AssetStatus.RECONSTRUCTED, AssetStatus.FAILED}, # Re-export, redo reconstruction or fail
+    AssetStatus.EXPORTED: {AssetStatus.VALIDATED, AssetStatus.CLEANED, AssetStatus.FAILED}, # Revalidate, redo cleanup or fail
+    AssetStatus.VALIDATED: {AssetStatus.PUBLISHED, AssetStatus.EXPORTED, AssetStatus.FAILED}, # Publish, re-export or fail
+    AssetStatus.PUBLISHED: {AssetStatus.VALIDATED}, # Rollback to validated state
     AssetStatus.FAILED: set(), # Terminal state
 }
 

@@ -1,20 +1,24 @@
-import time
 import json
-import random
 import threading
+import time
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any, Dict, Optional, Tuple
 
-from modules.shared_contracts.models import AssetMetadata, CaptureSession
-from modules.shared_contracts.lifecycle import AssetStatus
+import trimesh
+
+from modules.asset_cleanup_pipeline.cleaner import AssetCleaner
+from modules.asset_cleanup_pipeline.normalizer import NormalizedMetadata
+from modules.asset_cleanup_pipeline.profiles import CleanupProfileType
 from modules.asset_registry.registry import AssetRegistry
 from modules.capture_workflow.session_manager import SessionManager
-from modules.operations.logging_config import get_component_logger
-from modules.reconstruction_engine.output_manifest import OutputManifest
 from modules.export_pipeline.glb_exporter import GLBExporter
-from modules.asset_cleanup_pipeline.cleaner import AssetCleaner
-from modules.asset_cleanup_pipeline.profiles import CleanupProfileType
+from modules.operations.logging_config import get_component_logger
 from modules.qa_validation.validator import AssetValidator
+from modules.reconstruction_engine.output_manifest import OutputManifest
+from modules.shared_contracts.lifecycle import AssetStatus, ReconstructionStatus
+from modules.shared_contracts.models import AssetMetadata, CaptureSession, ValidationReport
+from modules.utils.file_persistence import FileLock, atomic_write_json
+from modules.utils.path_safety import validate_identifier
 
 logger = get_component_logger("worker")
 
@@ -32,27 +36,42 @@ class IrrecoverableError(WorkerError):
 
 
 class IngestionWorker:
-    def __init__(self, interval_sec: int = 5):
+    def __init__(self, interval_sec: int = 5, data_root: str = "data"):
         self.interval = interval_sec
+        self.data_root = Path(data_root).resolve()
         self.registry = AssetRegistry()
-        self.session_manager = SessionManager()
+        self.session_manager = SessionManager(data_root=str(self.data_root))
         self.running = False
-        self._thread = None
+        self._thread: Optional[threading.Thread] = None
+        self._process_lock: Optional[FileLock] = None
 
-        self.blobs_dir = Path("data/registry/blobs")
+        self.blobs_dir = self.data_root / "registry" / "blobs"
         self.blobs_dir.mkdir(parents=True, exist_ok=True)
+        self._worker_lock_path = self.data_root / "worker.process"
 
-        self.cleaner = AssetCleaner()
+        self.cleaner = AssetCleaner(data_root=str(self.data_root))
         self.validator = AssetValidator()
         self.exporter = GLBExporter()
-
         self.job_tracker = self.registry
 
     def start(self):
         if self.running:
             return
+
+        process_lock = FileLock(
+            self._worker_lock_path,
+            timeout=0.1,
+            stale_threshold=max(float(self.interval * 6), 30.0),
+        )
+        try:
+            process_lock.__enter__()
+        except TimeoutError:
+            logger.warning("IngestionWorker start skipped because another process already holds the worker lock.")
+            return
+
+        self._process_lock = process_lock
         self.running = True
-        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread = threading.Thread(target=self._run, daemon=True, name="meshysiz-worker")
         self._thread.start()
         logger.info("IngestionWorker started.")
 
@@ -60,6 +79,12 @@ class IngestionWorker:
         self.running = False
         if self._thread:
             self._thread.join(timeout=2)
+            self._thread = None
+
+        if self._process_lock is not None:
+            self._process_lock.__exit__(None, None, None)
+            self._process_lock = None
+
         logger.info("IngestionWorker stopped.")
 
     def _run(self):
@@ -71,130 +96,164 @@ class IngestionWorker:
             time.sleep(self.interval)
 
     def _process_pending_sessions(self):
-        sessions_dir = Path("data/sessions")
+        sessions_dir = self.session_manager.sessions_dir
         if not sessions_dir.exists():
             return
 
         for file in sessions_dir.glob("*.json"):
             try:
                 with open(file, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    session = CaptureSession.model_validate(data)
+                    session = CaptureSession.model_validate(json.load(f))
 
                 if session.status == AssetStatus.CREATED:
                     self._advance_session(session, AssetStatus.CAPTURED, "Extracting frames from video...")
                 elif session.status == AssetStatus.CAPTURED:
                     self._advance_session(session, AssetStatus.RECONSTRUCTED, "Reconstructing 3D geometry...")
                 elif session.status == AssetStatus.RECONSTRUCTED:
-                    self._finalize_ingestion(session)
-                elif session.status == AssetStatus.FAILED:
+                    self._advance_session(session, AssetStatus.CLEANED, "Cleaning reconstructed mesh...")
+                elif session.status == AssetStatus.CLEANED:
+                    self._advance_session(session, AssetStatus.EXPORTED, "Exporting final GLB...")
+                elif session.status == AssetStatus.EXPORTED:
+                    self._advance_session(session, AssetStatus.VALIDATED, "Validating exported asset...")
+                elif session.status == AssetStatus.VALIDATED:
+                    if session.publish_state not in {"draft", "published"}:
+                        self._handle_publish(session)
+                elif session.status in {AssetStatus.PUBLISHED, AssetStatus.FAILED}:
                     continue
 
             except IrrecoverableError as ie:
-                logger.error(f"💀 Irrecoverable error for {file.name}: {ie}")
+                logger.error(f"Irrecoverable error for {file.name}: {ie}")
                 self._mark_session_failed(file.stem, str(ie))
-
             except RecoverableError as re:
-                logger.warning(f"⏳ Transient error for {file.name}, will retry: {re}")
-
+                logger.warning(f"Transient error for {file.name}, will retry: {re}")
             except Exception as e:
-                logger.error(f"❌ Unexpected failure handling {file.name}: {str(e)}")
+                logger.error(f"Unexpected failure handling {file.name}: {str(e)}")
+
+    def _persist_session(self, session: CaptureSession, new_status: Optional[AssetStatus] = None, **fields: Any) -> CaptureSession:
+        persisted = self.session_manager.get_session(session.session_id)
+        if persisted is None:
+            if new_status is not None:
+                session.status = new_status
+            for field_name, value in fields.items():
+                setattr(session, field_name, value)
+            return session
+
+        return self.session_manager.update_session(session.session_id, new_status=new_status, **fields)
 
     def _mark_session_failed(self, session_id: str, reason: str):
         try:
             session = self.session_manager.get_session(session_id)
-            if session:
-                session.failure_reason = reason
-                self.session_manager.save_session(session)
-                self.session_manager.update_session_status(session_id, AssetStatus.FAILED)
-                logger.info(f"🚫 Session {session_id} marked as FAILED. Reason: {reason}")
+            if session is None:
+                return
+
+            if session.status == AssetStatus.FAILED:
+                self.session_manager.update_session(
+                    session_id,
+                    failure_reason=reason,
+                    publish_state="failed",
+                    last_pipeline_stage=AssetStatus.FAILED.value,
+                )
+            else:
+                self.session_manager.update_session(
+                    session_id,
+                    new_status=AssetStatus.FAILED,
+                    failure_reason=reason,
+                    publish_state="failed",
+                    last_pipeline_stage=AssetStatus.FAILED.value,
+                )
+            logger.info(f"Session {session_id} marked as FAILED. Reason: {reason}")
         except Exception as e:
             logger.error(f"Failed to mark session {session_id} as FAILED: {e}")
 
     def _advance_session(self, session: CaptureSession, next_status: AssetStatus, log_msg: str):
         try:
-            logger.info(f"🚀 PIPELINE START: {log_msg} ({session.session_id})", extra={"job_id": session.session_id})
+            logger.info(f"PIPELINE START: {log_msg} ({session.session_id})", extra={"job_id": session.session_id})
 
             if next_status == AssetStatus.CAPTURED:
-                self._handle_frame_extraction(session)
+                updated = self._handle_frame_extraction(session)
             elif next_status == AssetStatus.RECONSTRUCTED:
-                self._handle_reconstruction(session)
+                updated = self._handle_reconstruction(session)
+            elif next_status == AssetStatus.CLEANED:
+                updated = self._handle_cleanup(session)
+            elif next_status == AssetStatus.EXPORTED:
+                updated = self._handle_export(session)
+            elif next_status == AssetStatus.VALIDATED:
+                updated = self._handle_validation(session)
+            else:
+                raise IrrecoverableError(f"Unsupported pipeline transition target: {next_status.value}")
 
-            self.session_manager.update_session_status(session.session_id, next_status)
-            logger.info(f"✅ PIPELINE STEP COMPLETE: {session.session_id} is now {next_status.value}")
+            logger.info(f"PIPELINE STEP COMPLETE: {updated.session_id} is now {updated.status.value}")
 
         except (RecoverableError, IrrecoverableError):
             raise
         except Exception as e:
             raise RecoverableError(f"Unexpected error: {str(e)}")
 
-    def _handle_frame_extraction(self, session: CaptureSession):
+    def _handle_frame_extraction(self, session: CaptureSession) -> CaptureSession:
         try:
             from modules.capture_workflow.frame_extractor import FrameExtractor
 
             extractor = FrameExtractor()
-            video_path = Path("data/captures") / session.session_id / "video" / "raw_video.mp4"
-            output_dir = Path("data/captures") / session.session_id / "frames"
+            video_path = self.session_manager.captures_dir / session.session_id / "video" / "raw_video.mp4"
+            output_dir = self.session_manager.captures_dir / session.session_id / "frames"
 
-            if video_path.exists():
-                logger.info(
-                    f"🛠️ Starting CV2 frame extraction for {session.session_id}...",
-                    extra={"job_id": session.session_id},
-                )
-                frames = extractor.extract_keyframes(str(video_path), str(output_dir))
-                if not frames:
-                    raise IrrecoverableError(f"Frame extraction produced 0 frames for {session.session_id}.")
-                logger.info(
-                    f"📸 Extraction successful: {len(frames)} frames saved.",
-                    extra={"job_id": session.session_id},
-                )
-            else:
+            if not video_path.exists():
                 raise IrrecoverableError(f"Video file missing at {video_path}.")
 
+            frames = extractor.extract_keyframes(str(video_path), str(output_dir))
+            if not frames:
+                raise IrrecoverableError(f"Frame extraction produced 0 frames for {session.session_id}.")
+
+            return self._persist_session(
+                session,
+                new_status=AssetStatus.CAPTURED,
+                extracted_frames=frames,
+                last_pipeline_stage=AssetStatus.CAPTURED.value,
+                failure_reason=None,
+            )
         except IrrecoverableError:
             raise
         except Exception as e:
             raise RecoverableError(f"Frame extraction failed: {e}")
 
-    def _handle_reconstruction(self, session: CaptureSession):
+    def _handle_reconstruction(self, session: CaptureSession) -> CaptureSession:
         try:
             from modules.reconstruction_engine.job_manager import JobManager
             from modules.reconstruction_engine.runner import ReconstructionRunner
             from modules.shared_contracts.models import ReconstructionJobDraft
 
-            frames_dir = Path("data/captures") / session.session_id / "frames"
+            frames_dir = self.session_manager.captures_dir / session.session_id / "frames"
             if not frames_dir.exists():
-                self._handle_frame_extraction(session)
+                session = self._handle_frame_extraction(session)
 
             input_frames = [str(f) for f in frames_dir.glob("*.jpg")]
             if not input_frames:
                 raise IrrecoverableError(f"No frames available for reconstruction in {session.session_id}")
 
-            manager = JobManager()
+            manager = JobManager(data_root=str(self.data_root))
             runner = ReconstructionRunner()
+            job_id = f"job_{session.session_id}"
 
             draft = ReconstructionJobDraft(
-                job_id=f"job_{session.session_id}",
+                job_id=job_id,
                 capture_session_id=session.session_id,
                 input_frames=input_frames,
                 product_id=session.product_id,
             )
 
             job = manager.create_job(draft)
-            manager.update_job_status(job.job_id, "running")
-
-            logger.info(
-                f"🏗️ Starting Geometric Reconstruction for {session.session_id} with {len(input_frames)} frames..."
-            )
+            manager.update_job_status(job.job_id, ReconstructionStatus.RUNNING)
             manifest = runner.run(job)
+            manager.update_job_status(job.job_id, ReconstructionStatus.COMPLETED)
 
-            manager.update_job_status(job.job_id, "completed")
-            logger.info(
-                f"✨ Reconstruction successful: "
-                f"{manifest.processing_time_seconds:.2f}s, "
-                f"{manifest.mesh_metadata.vertex_count} vertices."
+            return self._persist_session(
+                session,
+                new_status=AssetStatus.RECONSTRUCTED,
+                reconstruction_job_id=job.job_id,
+                reconstruction_manifest_path=str(Path(job.job_dir) / "manifest.json"),
+                last_pipeline_stage=AssetStatus.RECONSTRUCTED.value,
+                failure_reason=None,
             )
-
         except IrrecoverableError:
             raise
         except Exception as e:
@@ -203,32 +262,13 @@ class IngestionWorker:
                 raise IrrecoverableError(f"Engine configuration error: {msg}")
             raise RecoverableError(f"Engine failure: {e}")
 
-    def _finalize_ingestion(self, session: CaptureSession):
-        logger.info(
-            f"🏁 Finalizing ingestion: Processing assets for {session.product_id}...",
-            extra={"job_id": session.session_id},
-        )
+    def _handle_cleanup(self, session: CaptureSession) -> CaptureSession:
+        manifest = self._load_manifest(session)
+        logger.info(f"Starting mesh cleanup for {session.session_id}...")
 
-        job_id = f"job_{session.session_id}"
-        job_dir = Path("data/reconstructions") / job_id
-        manifest_path = job_dir / "manifest.json"
-
-        if not manifest_path.exists():
-            raise IrrecoverableError(
-                f"Reconstruction manifest missing for {session.session_id} at {manifest_path}"
-            )
-
-        with open(manifest_path, "r", encoding="utf-8") as f:
-            manifest_data = json.load(f)
-            manifest = OutputManifest.model_validate(manifest_data)
-
-        # ------------------------------------------------------------
-        # 1. Cleanup
-        # ------------------------------------------------------------
-        logger.info(f"🧹 Starting mesh cleanup for {session.session_id}...")
         try:
             metadata, cleanup_stats, cleaned_mesh_path = self.cleaner.process_cleanup(
-                job_id=job_id,
+                job_id=manifest.job_id,
                 raw_mesh_path=manifest.mesh_path,
                 profile_type=CleanupProfileType.MOBILE_DEFAULT,
                 raw_texture_path=manifest.texture_path,
@@ -236,31 +276,62 @@ class IngestionWorker:
         except Exception as e:
             raise IrrecoverableError(f"Mesh cleanup failed: {e}")
 
-        # ------------------------------------------------------------
-        # 2. Measure cleaned artifact
-        # ------------------------------------------------------------
-        logger.info(f"⚖️ Validating asset quality for {session.session_id}...")
+        metadata_path = Path(cleaned_mesh_path).parent / "normalized_metadata.json"
+        cleanup_stats_path = Path(cleaned_mesh_path).parent / "cleanup_stats.json"
+        atomic_write_json(metadata_path, metadata.model_dump(mode="json"))
+        atomic_write_json(cleanup_stats_path, cleanup_stats)
 
-        import trimesh
+        return self._persist_session(
+            session,
+            new_status=AssetStatus.CLEANED,
+            cleanup_mesh_path=cleaned_mesh_path,
+            cleanup_metadata_path=str(metadata_path),
+            cleanup_stats_path=str(cleanup_stats_path),
+            last_pipeline_stage=AssetStatus.CLEANED.value,
+            failure_reason=None,
+        )
 
-        cleaned_mesh = trimesh.load(cleaned_mesh_path)
-        if isinstance(cleaned_mesh, trimesh.Scene):
-            cleaned_mesh = cleaned_mesh.dump(concatenate=True)
+    def _handle_export(self, session: CaptureSession) -> CaptureSession:
+        metadata, cleanup_stats = self._load_cleanup_artifacts(session)
+        manifest = self._load_manifest(session)
 
-        dimensions = {
-            "x": float(cleaned_mesh.bounds[1][0] - cleaned_mesh.bounds[0][0]),
-            "y": float(cleaned_mesh.bounds[1][1] - cleaned_mesh.bounds[0][1]),
-            "z": float(cleaned_mesh.bounds[1][2] - cleaned_mesh.bounds[0][2]),
-        }
+        asset_id = session.asset_id or self._build_asset_id(session)
+        texture_path = cleanup_stats.get("cleaned_texture_path") or manifest.texture_path
+        texture_path_exists = bool(texture_path and Path(texture_path).exists())
+        blob_path = self.blobs_dir / f"{asset_id}.glb"
 
-        # actual residual after alignment
-        ground_residual = abs(float(cleaned_mesh.bounds[0][2]))
+        logger.info(f"Exporting cleaned GLB for {session.session_id}...")
+        try:
+            self.exporter.export(
+                mesh_path=session.cleanup_mesh_path,
+                output_path=str(blob_path),
+                profile_name="standard",
+                texture_path=texture_path if texture_path_exists else None,
+                metadata=metadata,
+            )
+        except Exception as e:
+            raise IrrecoverableError(f"GLB Export failed: {e}")
+
+        return self._persist_session(
+            session,
+            new_status=AssetStatus.EXPORTED,
+            asset_id=asset_id,
+            export_blob_path=str(blob_path),
+            last_pipeline_stage=AssetStatus.EXPORTED.value,
+            failure_reason=None,
+        )
+
+    def _handle_validation(self, session: CaptureSession) -> CaptureSession:
+        metadata, cleanup_stats = self._load_cleanup_artifacts(session)
+        manifest = self._load_manifest(session)
+        asset_id = session.asset_id or self._build_asset_id(session)
+
+        dimensions, ground_residual = self._measure_cleaned_mesh(session.cleanup_mesh_path)
 
         texture_path = cleanup_stats.get("cleaned_texture_path") or manifest.texture_path
         texture_path_exists = bool(texture_path and Path(texture_path).exists())
         has_uv = bool(cleanup_stats.get("uv_preserved", False))
         has_material = bool(cleanup_stats.get("material_preserved", False))
-
         texture_status = (
             "complete"
             if texture_path_exists and has_uv
@@ -279,55 +350,80 @@ class IngestionWorker:
             "texture_applied_successfully": texture_path_exists and has_uv,
         }
 
-        timestamp = int(time.time())
-        asset_id = f"{session.product_id}_{timestamp}"
-
         report = self.validator.validate(asset_id, validation_input)
-        logger.info(
-            f"📊 Validation Decision: {report.final_decision.upper()} :: {report.contamination_report}"
+        reports_dir = self.session_manager.get_capture_path(session.session_id) / "reports"
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        validation_report_path = reports_dir / "validation_report.json"
+        atomic_write_json(validation_report_path, report.model_dump(mode="json"))
+
+        logger.info(f"Validation Decision for {session.session_id}: {report.final_decision.upper()}")
+        return self._persist_session(
+            session,
+            new_status=AssetStatus.VALIDATED,
+            asset_id=asset_id,
+            validation_report_path=str(validation_report_path),
+            publish_state="pending",
+            last_pipeline_stage=AssetStatus.VALIDATED.value,
+            failure_reason=None,
         )
 
-        # ------------------------------------------------------------
-        # 3. Validation gate
-        # ------------------------------------------------------------
+    def _handle_publish(self, session: CaptureSession) -> CaptureSession:
+        if session.publish_state in {"draft", "published"}:
+            return session
+
+        report = self._load_validation_report(session)
+        manifest = self._load_manifest(session)
+
         if report.final_decision == "fail":
-            logger.error(f"❌ Asset FAILED validation: {report.contamination_report}")
-            self._mark_session_failed(
-                session.session_id,
-                f"Validation Failed: {report.contamination_report}",
-            )
-            return
+            reason = f"Validation Failed: {report.contamination_report}"
+            self._mark_session_failed(session.session_id, reason)
+            session.failure_reason = reason
+            session.publish_state = "failed"
+            session.status = AssetStatus.FAILED
+            session.last_pipeline_stage = AssetStatus.FAILED.value
+            return session
 
-        # ------------------------------------------------------------
-        # 4. Export final GLB
-        # ------------------------------------------------------------
-        blob_path = self.blobs_dir / f"{asset_id}.glb"
+        asset_id = session.asset_id or self._build_asset_id(session)
+        metadata = self._build_registry_metadata(session, asset_id, report)
 
-        logger.info(f"📦 Exporting CLEANED GLB from {cleaned_mesh_path}...")
-        try:
-            export_result = self.exporter.export(
-                mesh_path=cleaned_mesh_path,
-                output_path=str(blob_path),
-                profile_name="standard",
-                texture_path=texture_path if texture_path_exists else None,
-                metadata=metadata,
-            )
-            logger.info(
-                f"✅ GLB Export successful: {export_result['filesize']} bytes | "
-                f"has_uv={export_result.get('has_uv')} "
-                f"has_material={export_result.get('has_material')} "
-                f"texture_ok={export_result.get('texture_applied_successfully')}"
-            )
-        except Exception as e:
-            raise IrrecoverableError(f"GLB Export failed: {e}")
+        existing_metadata = self.registry.get_asset(asset_id)
+        stored_metadata = existing_metadata or self.registry.register_asset(metadata)
+        publish_state, next_status = self._publish_asset(asset_id, session, report, manifest)
 
-        # ------------------------------------------------------------
-        # 5. Registry
-        # ------------------------------------------------------------
-        registry_metadata = AssetMetadata(
+        fields = {
+            "asset_id": asset_id,
+            "asset_version": stored_metadata.version,
+            "publish_state": publish_state,
+            "last_pipeline_stage": next_status.value if next_status else AssetStatus.VALIDATED.value,
+            "failure_reason": None,
+        }
+        return self._persist_session(session, new_status=next_status, **fields)
+
+    def _publish_asset(
+        self,
+        asset_id: str,
+        session: CaptureSession,
+        report: ValidationReport,
+        manifest: OutputManifest,
+    ) -> Tuple[str, Optional[AssetStatus]]:
+        if manifest.is_stub or report.final_decision == "review":
+            self.registry.update_publish_state(asset_id, "draft")
+            return "draft", None
+
+        self.registry.update_publish_state(asset_id, "published")
+        self.registry.set_active_version(session.product_id, asset_id)
+        return "published", AssetStatus.PUBLISHED
+
+    def _build_asset_id(self, session: CaptureSession) -> str:
+        return validate_identifier(f"asset_{session.session_id}", "Asset ID")
+
+    def _build_registry_metadata(self, session: CaptureSession, asset_id: str, report: ValidationReport) -> AssetMetadata:
+        metadata, _ = self._load_cleanup_artifacts(session)
+        dimensions, _ = self._measure_cleaned_mesh(session.cleanup_mesh_path)
+        return AssetMetadata(
             asset_id=asset_id,
             product_id=session.product_id,
-            version=f"v{random.randint(1, 5)}.0",
+            version=None,
             bbox={
                 "min": metadata.bbox_min,
                 "max": metadata.bbox_max,
@@ -337,29 +433,85 @@ class IngestionWorker:
             quality_grade=report.mobile_performance_grade,
         )
 
-        self.registry.register_asset(registry_metadata)
-        self.registry.set_active_version(session.product_id, asset_id)
+    def _measure_cleaned_mesh(self, cleaned_mesh_path: Optional[str]) -> Tuple[Dict[str, float], float]:
+        if not cleaned_mesh_path or not Path(cleaned_mesh_path).exists():
+            raise IrrecoverableError(f"Cleaned mesh artifact missing: {cleaned_mesh_path}")
 
-        # publish policy
-        if manifest.is_stub:
-            logger.warning(f"⚠️ {session.session_id} yielded a STUB. Marking as draft.")
-            self.registry.update_publish_state(asset_id, "draft")
-        elif report.final_decision == "review":
-            logger.warning(f"⚠️ {session.session_id} requires REVIEW. Marking as draft.")
-            self.registry.update_publish_state(asset_id, "draft")
-        else:
-            self.registry.update_publish_state(asset_id, "published")
+        cleaned_mesh = trimesh.load(cleaned_mesh_path)
+        if isinstance(cleaned_mesh, trimesh.Scene):
+            cleaned_mesh = cleaned_mesh.dump(concatenate=True)
 
-        # ------------------------------------------------------------
-        # 6. Session cleanup
-        # ------------------------------------------------------------
-        try:
-            session_file = Path("data/sessions") / f"{session.session_id}.json"
-            if session_file.exists():
-                session_file.unlink()
-            logger.info(f"✅ Success! {session.product_id} is now registered as {asset_id}.")
-        except Exception as e:
-            logger.error(f"Worker cleanup failed: {str(e)}")
+        dimensions = {
+            "x": float(cleaned_mesh.bounds[1][0] - cleaned_mesh.bounds[0][0]),
+            "y": float(cleaned_mesh.bounds[1][1] - cleaned_mesh.bounds[0][1]),
+            "z": float(cleaned_mesh.bounds[1][2] - cleaned_mesh.bounds[0][2]),
+        }
+        ground_residual = abs(float(cleaned_mesh.bounds[0][2]))
+        return dimensions, ground_residual
+
+    def _load_manifest(self, session: CaptureSession) -> OutputManifest:
+        manifest_path = session.reconstruction_manifest_path
+        if not manifest_path and session.reconstruction_job_id:
+            manifest_path = str(self.data_root / "reconstructions" / session.reconstruction_job_id / "manifest.json")
+        if not manifest_path:
+            manifest_path = str(self.data_root / "reconstructions" / f"job_{session.session_id}" / "manifest.json")
+
+        manifest_file = Path(manifest_path)
+        if not manifest_file.exists():
+            raise IrrecoverableError(f"Reconstruction manifest missing for {session.session_id} at {manifest_file}")
+
+        with open(manifest_file, "r", encoding="utf-8") as f:
+            return OutputManifest.model_validate(json.load(f))
+
+    def _load_cleanup_artifacts(self, session: CaptureSession) -> Tuple[NormalizedMetadata, Dict[str, Any]]:
+        if not session.cleanup_metadata_path:
+            raise IrrecoverableError(f"Cleanup metadata missing for {session.session_id}")
+        if not session.cleanup_stats_path:
+            raise IrrecoverableError(f"Cleanup stats missing for {session.session_id}")
+
+        metadata_path = Path(session.cleanup_metadata_path)
+        stats_path = Path(session.cleanup_stats_path)
+        if not metadata_path.exists():
+            raise IrrecoverableError(f"Cleanup metadata artifact missing: {metadata_path}")
+        if not stats_path.exists():
+            raise IrrecoverableError(f"Cleanup stats artifact missing: {stats_path}")
+
+        with open(metadata_path, "r", encoding="utf-8") as f:
+            metadata = NormalizedMetadata.model_validate(json.load(f))
+        with open(stats_path, "r", encoding="utf-8") as f:
+            cleanup_stats = json.load(f)
+
+        return metadata, cleanup_stats
+
+    def _load_validation_report(self, session: CaptureSession) -> ValidationReport:
+        if not session.validation_report_path:
+            raise IrrecoverableError(f"Validation report missing for {session.session_id}")
+
+        report_path = Path(session.validation_report_path)
+        if not report_path.exists():
+            raise IrrecoverableError(f"Validation report artifact missing: {report_path}")
+
+        with open(report_path, "r", encoding="utf-8") as f:
+            return ValidationReport.model_validate(json.load(f))
+
+    def _finalize_ingestion(self, session: CaptureSession) -> CaptureSession:
+        """
+        Compatibility wrapper for existing tools/tests.
+        Executes the remaining phase handlers sequentially starting from the
+        current session status.
+        """
+        current = self.session_manager.get_session(session.session_id) or session
+
+        if current.status == AssetStatus.RECONSTRUCTED:
+            current = self._handle_cleanup(current)
+        if current.status == AssetStatus.CLEANED:
+            current = self._handle_export(current)
+        if current.status == AssetStatus.EXPORTED:
+            current = self._handle_validation(current)
+        if current.status == AssetStatus.VALIDATED and current.publish_state not in {"draft", "published"}:
+            current = self._handle_publish(current)
+
+        return current
 
 
 worker_instance = IngestionWorker()

@@ -3,10 +3,13 @@ from modules.shared_contracts.lifecycle import AssetStatus, can_transition, asse
 from modules.shared_contracts.errors import InvalidTransitionError
 
 def test_failed_status_is_reachable():
-    # Reachable from CREATED, CAPTURED, RECONSTRUCTED
+    # Reachable from every in-flight stage.
     assert can_transition(AssetStatus.CREATED, AssetStatus.FAILED)
     assert can_transition(AssetStatus.CAPTURED, AssetStatus.FAILED)
     assert can_transition(AssetStatus.RECONSTRUCTED, AssetStatus.FAILED)
+    assert can_transition(AssetStatus.CLEANED, AssetStatus.FAILED)
+    assert can_transition(AssetStatus.EXPORTED, AssetStatus.FAILED)
+    assert can_transition(AssetStatus.VALIDATED, AssetStatus.FAILED)
 
 def test_failed_status_is_terminal():
     # Should not be able to transition OUT of FAILED
@@ -19,5 +22,4 @@ def test_invalid_transitions_raise_error():
         assert_transition(AssetStatus.FAILED, AssetStatus.CAPTURED)
     
     with pytest.raises(InvalidTransitionError):
-        assert_transition(AssetStatus.CLEANED, AssetStatus.FAILED) # Based on current map, CLEANED can't fail? 
-        # (Though we could add it if needed, but current contract only allows from earlier stages)
+        assert_transition(AssetStatus.CREATED, AssetStatus.PUBLISHED)
