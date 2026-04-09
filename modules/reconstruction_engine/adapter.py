@@ -5,9 +5,9 @@ import os
 import time
 import shutil
 import subprocess
-import json
 
 import cv2
+import numpy as np
 import trimesh
 
 from .mesh_selector import MeshSelector
@@ -16,26 +16,33 @@ from .mesh_selector import MeshSelector
 class ReconstructionAdapter(ABC):
     @abstractmethod
     def run_reconstruction(self, input_frames: List[str], output_dir: Path) -> dict:
-        pass
+        """
+        Runs the reconstruction process and returns a dictionary with artifact info.
+        """
+        raise NotImplementedError
 
     @property
     @abstractmethod
     def engine_type(self) -> str:
-        pass
+        raise NotImplementedError
 
     @property
     @abstractmethod
     def is_stub(self) -> bool:
-        pass
+        raise NotImplementedError
 
 
 class COLMAPAdapter(ReconstructionAdapter):
     """
-    Explicit COLMAP chain with:
-    - frame + mask copying
-    - lightweight mask-quality filtering
-    - artifact discovery
-    - best mesh selection via MeshSelector
+    Product-focused COLMAP reconstruction adapter.
+
+    Improvements over the old version:
+    - filters frames by usable mask occupancy
+    - keeps explicit COLMAP chain
+    - discovers multiple mesh candidates
+    - selects best candidate with MeshSelector
+    - returns real vertex_count / face_count
+    - attempts to discover any texture-like artifact instead of always returning a dummy path
     """
 
     def __init__(self, engine_path: Optional[str] = None):
@@ -55,8 +62,6 @@ class COLMAPAdapter(ReconstructionAdapter):
         self._use_gpu = os.getenv("RECON_USE_GPU", "true").lower() == "true"
         self._max_image_size = int(os.getenv("RECON_MAX_IMAGE_SIZE", "2000"))
         self._matcher = os.getenv("RECON_MATCHER", "exhaustive").lower()  # exhaustive | sequential
-        self._input_mode = os.getenv("RECON_INPUT_MODE", "full").lower()   # full only for now
-
         self.mesh_selector = MeshSelector()
 
     @property
@@ -67,7 +72,7 @@ class COLMAPAdapter(ReconstructionAdapter):
     def is_stub(self) -> bool:
         return False
 
-    def _run_command(self, cmd: List[str], cwd: Path, log_file):
+    def _run_command(self, cmd: List[str], cwd: Path, log_file) -> None:
         log_file.write(f"\n--- Running: {' '.join(cmd)} ---\n")
         log_file.flush()
 
@@ -107,7 +112,7 @@ class COLMAPAdapter(ReconstructionAdapter):
         images_dir.mkdir(parents=True, exist_ok=True)
         masks_dir.mkdir(parents=True, exist_ok=True)
 
-        accepted = 0
+        accepted_frames = 0
         rejected_missing_mask = 0
         rejected_bad_mask = 0
 
@@ -117,7 +122,6 @@ class COLMAPAdapter(ReconstructionAdapter):
                 continue
 
             mask_src = src.parent / "masks" / f"{src.name}.png"
-
             if not mask_src.exists():
                 rejected_missing_mask += 1
                 continue
@@ -128,48 +132,15 @@ class COLMAPAdapter(ReconstructionAdapter):
 
             shutil.copy2(src, images_dir / src.name)
             shutil.copy2(mask_src, masks_dir / f"{src.name}.png")
-            accepted += 1
+            accepted_frames += 1
 
         return {
             "images_dir": images_dir,
             "masks_dir": masks_dir,
-            "accepted_frames": accepted,
+            "accepted_frames": accepted_frames,
             "rejected_missing_mask": rejected_missing_mask,
             "rejected_bad_mask": rejected_bad_mask,
         }
-
-    def _discover_candidates(self, dense_dir: Path) -> List[str]:
-        candidates: List[str] = []
-
-        # High-priority mesh outputs
-        for name in ["meshed-poisson.ply", "meshed-delaunay.ply", "delaunay_mesh.ply", "poisson_mesh.ply"]:
-            p = dense_dir / name
-            if p.exists():
-                candidates.append(str(p))
-
-        # Fallback mesh-ish PLYs
-        for p in dense_dir.glob("*.ply"):
-            if str(p) not in candidates and "fused" not in p.name.lower():
-                candidates.append(str(p))
-
-        # Last-resort point cloud fallback
-        fused = dense_dir / "fused.ply"
-        if fused.exists() and str(fused) not in candidates:
-            candidates.append(str(fused))
-
-        return candidates
-
-    def _mesh_stats(self, mesh_path: str) -> Dict[str, int]:
-        try:
-            mesh = trimesh.load(mesh_path)
-            if isinstance(mesh, trimesh.Scene):
-                mesh = mesh.dump(concatenate=True)
-            return {
-                "vertex_count": int(len(mesh.vertices)) if hasattr(mesh, "vertices") else 0,
-                "face_count": int(len(mesh.faces)) if hasattr(mesh, "faces") else 0,
-            }
-        except Exception:
-            return {"vertex_count": 0, "face_count": 0}
 
     def _validate_dense_workspace(self, workspace_path: Path) -> bool:
         dense_dir = workspace_path / "dense"
@@ -184,6 +155,71 @@ class COLMAPAdapter(ReconstructionAdapter):
 
         return True
 
+    def _discover_mesh_candidates(self, dense_dir: Path) -> List[str]:
+        candidates: List[str] = []
+
+        # preferred mesh outputs
+        preferred = [
+            "meshed-poisson.ply",
+            "meshed-delaunay.ply",
+            "delaunay_mesh.ply",
+            "poisson_mesh.ply",
+        ]
+
+        for name in preferred:
+            p = dense_dir / name
+            if p.exists():
+                candidates.append(str(p))
+
+        # any other non-fused mesh-like ply
+        for p in dense_dir.glob("*.ply"):
+            if "fused" in p.name.lower():
+                continue
+            if str(p) not in candidates:
+                candidates.append(str(p))
+
+        # point cloud fallback as absolute last resort
+        fused = dense_dir / "fused.ply"
+        if fused.exists() and str(fused) not in candidates:
+            candidates.append(str(fused))
+
+        return candidates
+
+    def _discover_texture_candidate(self, workspace_dir: Path) -> str:
+        """
+        COLMAP poisson/delaunay outputs usually won't give a real textured mesh.
+        But if some downstream step or future extension dumps a texture image,
+        we can pick it up here. Otherwise return a known non-existing sentinel path.
+        """
+        search_roots = [
+            workspace_dir,
+            workspace_dir / "dense",
+        ]
+
+        exts = ["*.png", "*.jpg", "*.jpeg"]
+        for root in search_roots:
+            if not root.exists():
+                continue
+            for ext in exts:
+                for p in root.glob(ext):
+                    # skip obvious non-texture inputs if needed
+                    if "texture" in p.name.lower() or "albedo" in p.name.lower():
+                        return str(p)
+
+        return str(workspace_dir / "_no_texture.png")
+
+    def _mesh_stats(self, mesh_path: str) -> Dict[str, int]:
+        try:
+            mesh = trimesh.load(mesh_path)
+            if isinstance(mesh, trimesh.Scene):
+                mesh = mesh.dump(concatenate=True)
+            return {
+                "vertex_count": int(len(mesh.vertices)) if hasattr(mesh, "vertices") else 0,
+                "face_count": int(len(mesh.faces)) if hasattr(mesh, "faces") else 0,
+            }
+        except Exception:
+            return {"vertex_count": 0, "face_count": 0}
+
     def run_reconstruction(self, input_frames: List[str], output_dir: Path) -> dict:
         if not self._engine_path:
             raise RuntimeError("Reconstruction engine path (RECON_ENGINE_PATH) not configured.")
@@ -194,7 +230,7 @@ class COLMAPAdapter(ReconstructionAdapter):
 
         if prep["accepted_frames"] < 3:
             raise RuntimeError(
-                f"Not enough usable masked frames for reconstruction. "
+                "Not enough usable masked frames for reconstruction. "
                 f"accepted={prep['accepted_frames']} "
                 f"missing_mask={prep['rejected_missing_mask']} "
                 f"bad_mask={prep['rejected_bad_mask']}"
@@ -211,6 +247,7 @@ class COLMAPAdapter(ReconstructionAdapter):
             try:
                 db_path = output_dir / "database.db"
 
+                # Feature extraction
                 cmd_extract = [
                     self._engine_path,
                     "feature_extractor",
@@ -222,6 +259,7 @@ class COLMAPAdapter(ReconstructionAdapter):
                 ]
                 self._run_command(cmd_extract, output_dir, log_file)
 
+                # Matching
                 if self._matcher == "sequential":
                     cmd_match = [
                         self._engine_path,
@@ -238,9 +276,9 @@ class COLMAPAdapter(ReconstructionAdapter):
                     ]
                 self._run_command(cmd_match, output_dir, log_file)
 
+                # Sparse map
                 sparse_dir = output_dir / "sparse"
                 sparse_dir.mkdir(exist_ok=True)
-
                 cmd_map = [
                     self._engine_path,
                     "mapper",
@@ -250,9 +288,9 @@ class COLMAPAdapter(ReconstructionAdapter):
                 ]
                 self._run_command(cmd_map, output_dir, log_file)
 
+                # Dense prep
                 dense_dir = output_dir / "dense"
                 dense_dir.mkdir(exist_ok=True)
-
                 cmd_undistort = [
                     self._engine_path,
                     "image_undistorter",
@@ -263,6 +301,7 @@ class COLMAPAdapter(ReconstructionAdapter):
                 ]
                 self._run_command(cmd_undistort, output_dir, log_file)
 
+                # Dense depth
                 cmd_stereo = [
                     self._engine_path,
                     "patch_match_stereo",
@@ -271,6 +310,7 @@ class COLMAPAdapter(ReconstructionAdapter):
                 ]
                 self._run_command(cmd_stereo, output_dir, log_file)
 
+                # Fusion
                 cmd_fuse = [
                     self._engine_path,
                     "stereo_fusion",
@@ -279,7 +319,8 @@ class COLMAPAdapter(ReconstructionAdapter):
                 ]
                 self._run_command(cmd_fuse, output_dir, log_file)
 
-                # try poisson mesher first
+                # Meshing: try poisson, then delaunay
+                poisson_ok = False
                 try:
                     cmd_mesh = [
                         self._engine_path,
@@ -288,8 +329,11 @@ class COLMAPAdapter(ReconstructionAdapter):
                         "--output_path", str(dense_dir / "meshed-poisson.ply"),
                     ]
                     self._run_command(cmd_mesh, output_dir, log_file)
+                    poisson_ok = True
                 except Exception as poisson_err:
                     log_file.write(f"\nPoisson mesher failed: {poisson_err}\n")
+
+                if not poisson_ok:
                     try:
                         cmd_mesh = [
                             self._engine_path,
@@ -308,19 +352,20 @@ class COLMAPAdapter(ReconstructionAdapter):
         self._validate_dense_workspace(output_dir)
 
         dense_dir = output_dir / "dense"
-        candidates = self._discover_candidates(dense_dir)
+        candidates = self._discover_mesh_candidates(dense_dir)
         if not candidates:
-            raise RuntimeError(f"COLMAP completed but no reconstruction artifacts found in {dense_dir}")
+            raise RuntimeError(f"COLMAP completed but no usable mesh artifacts found in {dense_dir}")
 
         selected_mesh = self.mesh_selector.select_best_mesh(candidates) or candidates[0]
-        stats = self._mesh_stats(selected_mesh)
+        selected_stats = self._mesh_stats(selected_mesh)
+        texture_candidate = self._discover_texture_candidate(output_dir)
 
         return {
             "mesh_path": str(selected_mesh),
-            "texture_path": str(output_dir / "dummy_texture.png"),
+            "texture_path": texture_candidate,
             "log_path": str(log_path),
-            "vertex_count": stats["vertex_count"],
-            "face_count": stats["face_count"],
+            "vertex_count": selected_stats["vertex_count"],
+            "face_count": selected_stats["face_count"],
         }
 
 

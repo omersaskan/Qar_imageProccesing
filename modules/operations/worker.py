@@ -45,6 +45,7 @@ class IngestionWorker:
         self.cleaner = AssetCleaner()
         self.validator = AssetValidator()
         self.exporter = GLBExporter()
+
         self.job_tracker = self.registry
 
     def start(self):
@@ -88,11 +89,14 @@ class IngestionWorker:
                     self._finalize_ingestion(session)
                 elif session.status == AssetStatus.FAILED:
                     continue
+
             except IrrecoverableError as ie:
                 logger.error(f"💀 Irrecoverable error for {file.name}: {ie}")
                 self._mark_session_failed(file.stem, str(ie))
+
             except RecoverableError as re:
                 logger.warning(f"⏳ Transient error for {file.name}, will retry: {re}")
+
             except Exception as e:
                 logger.error(f"❌ Unexpected failure handling {file.name}: {str(e)}")
 
@@ -133,13 +137,20 @@ class IngestionWorker:
             output_dir = Path("data/captures") / session.session_id / "frames"
 
             if video_path.exists():
-                logger.info(f"🛠️ Starting CV2 frame extraction for {session.session_id}...", extra={"job_id": session.session_id})
+                logger.info(
+                    f"🛠️ Starting CV2 frame extraction for {session.session_id}...",
+                    extra={"job_id": session.session_id},
+                )
                 frames = extractor.extract_keyframes(str(video_path), str(output_dir))
                 if not frames:
                     raise IrrecoverableError(f"Frame extraction produced 0 frames for {session.session_id}.")
-                logger.info(f"📸 Extraction successful: {len(frames)} frames saved.", extra={"job_id": session.session_id})
+                logger.info(
+                    f"📸 Extraction successful: {len(frames)} frames saved.",
+                    extra={"job_id": session.session_id},
+                )
             else:
                 raise IrrecoverableError(f"Video file missing at {video_path}.")
+
         except IrrecoverableError:
             raise
         except Exception as e:
@@ -172,12 +183,15 @@ class IngestionWorker:
             job = manager.create_job(draft)
             manager.update_job_status(job.job_id, "running")
 
-            logger.info(f"🏗️ Starting Geometric Reconstruction for {session.session_id} with {len(input_frames)} frames...")
+            logger.info(
+                f"🏗️ Starting Geometric Reconstruction for {session.session_id} with {len(input_frames)} frames..."
+            )
             manifest = runner.run(job)
 
             manager.update_job_status(job.job_id, "completed")
             logger.info(
-                f"✨ Reconstruction successful: {manifest.processing_time_seconds:.2f}s, "
+                f"✨ Reconstruction successful: "
+                f"{manifest.processing_time_seconds:.2f}s, "
                 f"{manifest.mesh_metadata.vertex_count} vertices."
             )
 
@@ -190,19 +204,27 @@ class IngestionWorker:
             raise RecoverableError(f"Engine failure: {e}")
 
     def _finalize_ingestion(self, session: CaptureSession):
-        logger.info(f"🏁 Finalizing ingestion: Processing assets for {session.product_id}...", extra={"job_id": session.session_id})
+        logger.info(
+            f"🏁 Finalizing ingestion: Processing assets for {session.product_id}...",
+            extra={"job_id": session.session_id},
+        )
 
         job_id = f"job_{session.session_id}"
         job_dir = Path("data/reconstructions") / job_id
         manifest_path = job_dir / "manifest.json"
 
         if not manifest_path.exists():
-            raise IrrecoverableError(f"Reconstruction manifest missing for {session.session_id} at {manifest_path}")
+            raise IrrecoverableError(
+                f"Reconstruction manifest missing for {session.session_id} at {manifest_path}"
+            )
 
         with open(manifest_path, "r", encoding="utf-8") as f:
             manifest_data = json.load(f)
             manifest = OutputManifest.model_validate(manifest_data)
 
+        # ------------------------------------------------------------
+        # 1. Cleanup
+        # ------------------------------------------------------------
         logger.info(f"🧹 Starting mesh cleanup for {session.session_id}...")
         try:
             metadata, cleanup_stats, cleaned_mesh_path = self.cleaner.process_cleanup(
@@ -214,6 +236,9 @@ class IngestionWorker:
         except Exception as e:
             raise IrrecoverableError(f"Mesh cleanup failed: {e}")
 
+        # ------------------------------------------------------------
+        # 2. Measure cleaned artifact
+        # ------------------------------------------------------------
         logger.info(f"⚖️ Validating asset quality for {session.session_id}...")
 
         import trimesh
@@ -227,13 +252,20 @@ class IngestionWorker:
             "y": float(cleaned_mesh.bounds[1][1] - cleaned_mesh.bounds[0][1]),
             "z": float(cleaned_mesh.bounds[1][2] - cleaned_mesh.bounds[0][2]),
         }
+
+        # actual residual after alignment
         ground_residual = abs(float(cleaned_mesh.bounds[0][2]))
 
         texture_path = cleanup_stats.get("cleaned_texture_path") or manifest.texture_path
         texture_path_exists = bool(texture_path and Path(texture_path).exists())
         has_uv = bool(cleanup_stats.get("uv_preserved", False))
         has_material = bool(cleanup_stats.get("material_preserved", False))
-        texture_status = "complete" if texture_path_exists and has_uv else ("degraded" if texture_path_exists else "missing")
+
+        texture_status = (
+            "complete"
+            if texture_path_exists and has_uv
+            else ("degraded" if texture_path_exists else "missing")
+        )
 
         validation_input = {
             "poly_count": metadata.final_polycount,
@@ -251,13 +283,24 @@ class IngestionWorker:
         asset_id = f"{session.product_id}_{timestamp}"
 
         report = self.validator.validate(asset_id, validation_input)
-        logger.info(f"📊 Validation Decision: {report.final_decision.upper()} :: {report.contamination_report}")
+        logger.info(
+            f"📊 Validation Decision: {report.final_decision.upper()} :: {report.contamination_report}"
+        )
 
+        # ------------------------------------------------------------
+        # 3. Validation gate
+        # ------------------------------------------------------------
         if report.final_decision == "fail":
             logger.error(f"❌ Asset FAILED validation: {report.contamination_report}")
-            self._mark_session_failed(session.session_id, f"Validation Failed: {report.contamination_report}")
+            self._mark_session_failed(
+                session.session_id,
+                f"Validation Failed: {report.contamination_report}",
+            )
             return
 
+        # ------------------------------------------------------------
+        # 4. Export final GLB
+        # ------------------------------------------------------------
         blob_path = self.blobs_dir / f"{asset_id}.glb"
 
         logger.info(f"📦 Exporting CLEANED GLB from {cleaned_mesh_path}...")
@@ -272,16 +315,24 @@ class IngestionWorker:
             logger.info(
                 f"✅ GLB Export successful: {export_result['filesize']} bytes | "
                 f"has_uv={export_result.get('has_uv')} "
+                f"has_material={export_result.get('has_material')} "
                 f"texture_ok={export_result.get('texture_applied_successfully')}"
             )
         except Exception as e:
             raise IrrecoverableError(f"GLB Export failed: {e}")
 
+        # ------------------------------------------------------------
+        # 5. Registry
+        # ------------------------------------------------------------
         registry_metadata = AssetMetadata(
             asset_id=asset_id,
             product_id=session.product_id,
             version=f"v{random.randint(1, 5)}.0",
-            bbox={"min": metadata.bbox_min, "max": metadata.bbox_max, "dimensions": dimensions},
+            bbox={
+                "min": metadata.bbox_min,
+                "max": metadata.bbox_max,
+                "dimensions": dimensions,
+            },
             pivot_offset=metadata.pivot_offset,
             quality_grade=report.mobile_performance_grade,
         )
@@ -289,13 +340,19 @@ class IngestionWorker:
         self.registry.register_asset(registry_metadata)
         self.registry.set_active_version(session.product_id, asset_id)
 
+        # publish policy
         if manifest.is_stub:
+            logger.warning(f"⚠️ {session.session_id} yielded a STUB. Marking as draft.")
             self.registry.update_publish_state(asset_id, "draft")
         elif report.final_decision == "review":
+            logger.warning(f"⚠️ {session.session_id} requires REVIEW. Marking as draft.")
             self.registry.update_publish_state(asset_id, "draft")
         else:
             self.registry.update_publish_state(asset_id, "published")
 
+        # ------------------------------------------------------------
+        # 6. Session cleanup
+        # ------------------------------------------------------------
         try:
             session_file = Path("data/sessions") / f"{session.session_id}.json"
             if session_file.exists():

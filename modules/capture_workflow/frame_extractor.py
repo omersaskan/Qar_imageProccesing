@@ -2,7 +2,13 @@ import cv2
 import numpy as np
 from pathlib import Path
 from typing import List, Optional, Dict, Any
-from .config import QualityThresholds, ExtractionConfig, default_quality_thresholds, default_extraction_config
+
+from .config import (
+    QualityThresholds,
+    ExtractionConfig,
+    default_quality_thresholds,
+    default_extraction_config,
+)
 from .quality_analyzer import QualityAnalyzer
 from .object_masker import ObjectMasker
 from modules.operations.logging_config import get_component_logger
@@ -26,6 +32,7 @@ class FrameExtractor:
     def _bbox_iou(self, a: Dict[str, int], b: Dict[str, int]) -> float:
         ax1, ay1, aw, ah = a["x"], a["y"], a["w"], a["h"]
         bx1, by1, bw, bh = b["x"], b["y"], b["w"], b["h"]
+
         ax2, ay2 = ax1 + aw, ay1 + ah
         bx2, by2 = bx1 + bw, by1 + bh
 
@@ -41,13 +48,39 @@ class FrameExtractor:
         area_a = aw * ah
         area_b = bw * bh
         union = area_a + area_b - inter_area
+
         return float(inter_area / union) if union > 0 else 0.0
 
     def _get_masked_histogram(self, frame: np.ndarray, mask: np.ndarray) -> np.ndarray:
+        """
+        HSV histogram over masked object area.
+        """
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         hist = cv2.calcHist([hsv], [0, 1], mask, [180, 128], [0, 180, 0, 256])
         cv2.normalize(hist, hist, 0, 1, cv2.NORM_MINMAX)
         return hist
+
+    def _should_reject_as_redundant(
+        self,
+        current_hist: np.ndarray,
+        current_bbox: Optional[Dict[str, int]],
+        last_hist: Optional[np.ndarray],
+        last_bbox: Optional[Dict[str, int]],
+    ) -> bool:
+        if last_hist is None:
+            return False
+
+        hist_similarity = cv2.compareHist(last_hist, current_hist, cv2.HISTCMP_CORREL)
+
+        bbox_iou = 0.0
+        if current_bbox is not None and last_bbox is not None:
+            bbox_iou = self._bbox_iou(last_bbox, current_bbox)
+
+        # Reject only if both appearance and ROI geometry are too similar
+        return bool(
+            hist_similarity > self.thresholds.min_similarity_score
+            and bbox_iou > 0.85
+        )
 
     def extract_keyframes(self, video_path: str, output_dir: str) -> List[str]:
         cap = cv2.VideoCapture(video_path)
@@ -56,17 +89,19 @@ class FrameExtractor:
 
         extracted_paths: List[str] = []
         frame_count = 0
+
         last_extracted_hist = None
         last_bbox = None
 
         rejection_counts = {
-            "quality_or_mask": 0,
-            "similarity": 0,
             "sampling": 0,
+            "quality_or_mask": 0,
+            "redundant_similarity": 0,
         }
 
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
+
         masks_dir = output_path / "masks"
         masks_dir.mkdir(parents=True, exist_ok=True)
 
@@ -75,33 +110,40 @@ class FrameExtractor:
             if not ret:
                 break
 
+            # 1. Time-based sampling
             if frame_count % self.thresholds.frame_sample_rate != 0:
                 rejection_counts["sampling"] += 1
                 frame_count += 1
                 continue
 
+            # 2. Generate object mask
             mask, mask_meta = self.object_masker.generate_mask(frame)
-            analysis = self.quality_analyzer.analyze_frame(frame, mask, mask_meta)
 
+            # 3. Analyze frame quality
+            analysis = self.quality_analyzer.analyze_frame(frame, mask, mask_meta)
             if not analysis["overall_pass"]:
                 rejection_counts["quality_or_mask"] += 1
-                logger.debug(f"Frame {frame_count} rejected: {analysis['failure_reasons']}")
+                logger.debug(
+                    f"Frame {frame_count} rejected :: reasons={analysis['failure_reasons']}"
+                )
                 frame_count += 1
                 continue
 
+            # 4. Similarity / redundancy check
             current_hist = self._get_masked_histogram(frame, mask)
             current_bbox = mask_meta.get("bbox")
 
-            if last_extracted_hist is not None:
-                hist_similarity = cv2.compareHist(last_extracted_hist, current_hist, cv2.HISTCMP_CORREL)
-                bbox_iou = self._bbox_iou(last_bbox, current_bbox) if (last_bbox and current_bbox) else 0.0
+            if self._should_reject_as_redundant(
+                current_hist=current_hist,
+                current_bbox=current_bbox,
+                last_hist=last_extracted_hist,
+                last_bbox=last_bbox,
+            ):
+                rejection_counts["redundant_similarity"] += 1
+                frame_count += 1
+                continue
 
-                # only reject if both appearance and ROI geometry are too similar
-                if hist_similarity > self.thresholds.min_similarity_score and bbox_iou > 0.85:
-                    rejection_counts["similarity"] += 1
-                    frame_count += 1
-                    continue
-
+            # 5. Save frame + mask
             frame_filename = f"frame_{len(extracted_paths):04d}.jpg"
             frame_path = output_path / frame_filename
             mask_path = masks_dir / f"{frame_filename}.png"
@@ -123,7 +165,7 @@ class FrameExtractor:
         logger.info(f"📊 PRODUCT-AWARE EXTRACTION SUMMARY for {Path(video_path).name}:")
         logger.info(f"   - Total frames read: {frame_count}")
         logger.info(f"   - Rejected by quality/mask: {rejection_counts['quality_or_mask']}")
-        logger.info(f"   - Rejected by similarity: {rejection_counts['similarity']}")
+        logger.info(f"   - Rejected by similarity: {rejection_counts['redundant_similarity']}")
         logger.info(f"   - Skipped by sampling: {rejection_counts['sampling']}")
         logger.info(f"   - ✅ TOTAL SAVED: {len(extracted_paths)}")
 

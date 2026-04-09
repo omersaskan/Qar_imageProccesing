@@ -1,4 +1,5 @@
 from typing import Dict, Any
+
 from modules.shared_contracts.models import ValidationReport
 from .rules import (
     ValidationThresholds,
@@ -16,6 +17,19 @@ class AssetValidator:
         self.thresholds = thresholds or ValidationThresholds()
 
     def validate(self, asset_id: str, asset_data: Dict[str, Any]) -> ValidationReport:
+        """
+        asset_data expected keys:
+        - poly_count: int
+        - texture_status: str
+        - bbox: Dict[str, float]
+        - ground_offset: float
+        - cleanup_stats: Dict[str, Any]
+        - texture_path_exists: bool
+        - has_uv: bool
+        - has_material: bool
+        - texture_applied_successfully: bool
+        """
+
         poly_decision = validate_polycount(asset_data.get("poly_count", 0), self.thresholds)
         texture_decision = validate_texture(asset_data.get("texture_status", "unknown"))
         bbox_decision = validate_bbox(asset_data.get("bbox", {}), self.thresholds)
@@ -23,12 +37,18 @@ class AssetValidator:
 
         cleanup_stats = asset_data.get("cleanup_stats", {})
         iso_stats = cleanup_stats.get("isolation", {})
-        contamination_decisions = validate_contamination(cleanup_stats, self.thresholds)
-        texture_integrity_decisions = validate_texture_integrity(asset_data)
 
-        all_decisions = [poly_decision, texture_decision, bbox_decision, ground_decision]
-        all_decisions.extend(contamination_decisions.values())
-        all_decisions.extend(texture_integrity_decisions.values())
+        contamination_decisions = validate_contamination(cleanup_stats, self.thresholds)
+        texture_integrity_decisions = validate_texture_integrity(asset_data, self.thresholds)
+
+        all_decisions = [
+            poly_decision,
+            texture_decision,
+            bbox_decision,
+            ground_decision,
+            *contamination_decisions.values(),
+            *texture_integrity_decisions.values(),
+        ]
 
         if "fail" in all_decisions:
             final_decision = "fail"
@@ -40,14 +60,14 @@ class AssetValidator:
         comp_count = int(iso_stats.get("component_count", 1))
         final_faces = int(iso_stats.get("final_faces", 0))
         initial_faces = max(int(iso_stats.get("initial_faces", 1)), 1)
-        share = float(final_faces / initial_faces)
+        largest_component_share = float(final_faces / initial_faces)
 
         plane_share = float(iso_stats.get("removed_plane_face_share", 0.0))
         comp_overflow = max(0.0, float(comp_count - self.thresholds.max_component_count)) / 10.0
         texture_penalty = 0.15 if "review" in texture_integrity_decisions.values() else 0.0
 
         contamination_score = (
-            (1.0 - share) * 0.45
+            (1.0 - largest_component_share) * 0.45
             + plane_share * 0.25
             + min(0.20, comp_overflow) * 0.15
             + texture_penalty * 0.15
@@ -64,7 +84,7 @@ class AssetValidator:
             bbox_reasonable=(bbox_decision == "pass"),
             ground_aligned=(ground_decision == "pass"),
             component_count=comp_count,
-            largest_component_share=share,
+            largest_component_share=largest_component_share,
             contamination_score=contamination_score,
             contamination_report=combined_report,
             mobile_performance_grade=self._calculate_grade(asset_data.get("poly_count", 0)),
