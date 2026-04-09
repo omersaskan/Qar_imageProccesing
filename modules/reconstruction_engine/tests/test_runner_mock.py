@@ -1,94 +1,187 @@
-import pytest
-from pathlib import Path
-from unittest.mock import MagicMock, patch
-from shared_contracts.models import ReconstructionJobDraft, ReconstructionJob
-from shared_contracts.lifecycle import ReconstructionStatus
-from reconstruction_engine.job_manager import JobManager
-from reconstruction_engine.runner import ReconstructionRunner
-from reconstruction_engine.adapter import SimulatedAdapter, COLMAPAdapter
-from reconstruction_engine.failures import InsufficientInputError, MissingArtifactError
 import os
+from pathlib import Path
+from unittest.mock import patch
 
-def test_runner_production_guard(tmp_path, monkeypatch):
+import pytest
+from PIL import Image
+
+from modules.reconstruction_engine.failures import InsufficientInputError, MissingArtifactError
+from modules.reconstruction_engine.job_manager import JobManager
+from modules.reconstruction_engine.runner import ReconstructionRunner
+from modules.shared_contracts.models import ReconstructionJobDraft
+
+
+def _write_frame(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (24, 24), (255, 200, 100)).save(path)
+
+
+class MeshWritingAdapter:
+    engine_type = "colmap"
+    is_stub = False
+
+    def __init__(self):
+        self.last_output_dir = None
+
+    def run_reconstruction(self, input_frames, output_dir: Path) -> dict:
+        self.last_output_dir = Path(output_dir)
+        mesh_path = output_dir / "raw_mesh.obj"
+        log_path = output_dir / "reconstruction.log"
+        mesh_path.write_text(
+            "v 0 0 0\n"
+            "v 1 0 0\n"
+            "v 0 1 0\n"
+            "f 1 2 3\n",
+            encoding="utf-8",
+        )
+        log_path.write_text("ok\n", encoding="utf-8")
+        return {
+            "mesh_path": str(mesh_path),
+            "texture_path": str(output_dir / "_no_texture.png"),
+            "log_path": str(log_path),
+        }
+
+
+class PointCloudLikeAdapter:
+    engine_type = "colmap"
+    is_stub = False
+
+    def run_reconstruction(self, input_frames, output_dir: Path) -> dict:
+        mesh_path = output_dir / "raw_mesh.obj"
+        log_path = output_dir / "reconstruction.log"
+        mesh_path.write_text(
+            "v 0 0 0\n"
+            "v 1 0 0\n"
+            "v 0 1 0\n",
+            encoding="utf-8",
+        )
+        log_path.write_text("ok\n", encoding="utf-8")
+        return {
+            "mesh_path": str(mesh_path),
+            "texture_path": str(output_dir / "_no_texture.png"),
+            "log_path": str(log_path),
+        }
+
+
+def test_runner_production_guard(monkeypatch):
     monkeypatch.setenv("ENV", "production")
     monkeypatch.setenv("RECON_ENGINE", "simulated")
-    
-    # Attempting to use simulated in production should fail
+
     with pytest.raises(RuntimeError, match="strictly prohibited"):
         ReconstructionRunner()
 
-def test_runner_production_missing_path(tmp_path, monkeypatch):
+
+def test_runner_production_missing_path(monkeypatch):
     monkeypatch.setenv("ENV", "production")
     monkeypatch.setenv("RECON_ENGINE", "colmap")
     monkeypatch.delenv("RECON_ENGINE_PATH", raising=False)
-    
+
     with patch("modules.reconstruction_engine.adapter.os.path.exists", return_value=False):
         with pytest.raises(RuntimeError, match="must be configured"):
             ReconstructionRunner()
 
+
+def test_runner_rejects_simulated_without_explicit_opt_in(monkeypatch):
+    monkeypatch.setenv("ENV", "development")
+    monkeypatch.setenv("RECON_ENGINE", "simulated")
+    monkeypatch.delenv("ALLOW_SIMULATED_RECONSTRUCTION", raising=False)
+
+    with pytest.raises(RuntimeError, match="disabled by default"):
+        ReconstructionRunner()
+
+
 def test_runner_success(tmp_path, monkeypatch):
-    monkeypatch.setenv("ENV", "development") # Ensure dev mode
-    monkeypatch.setenv("RECON_ENGINE", "simulated") # Use stub for runner testing
+    monkeypatch.setenv("ENV", "development")
+    monkeypatch.setenv("RECON_ENGINE", "simulated")
+    monkeypatch.setenv("ALLOW_SIMULATED_RECONSTRUCTION", "true")
+
+    input_frames = []
+    for index in range(3):
+        frame_path = tmp_path / f"frame_{index}.jpg"
+        _write_frame(frame_path)
+        input_frames.append(str(frame_path))
+
     manager = JobManager(data_root=str(tmp_path))
     draft = ReconstructionJobDraft(
         job_id="RJ_003",
         capture_session_id="S1",
-        input_frames=["f1.jpg", "f2.jpg", "f3.jpg"], # At least 3
-        product_id="P1"
+        input_frames=input_frames,
+        product_id="P1",
     )
     job = manager.create_job(draft)
-    
+
     runner = ReconstructionRunner()
     manifest = runner.run(job)
-    
+
     assert manifest.job_id == "RJ_003"
     assert "raw_mesh.obj" in manifest.mesh_path
     assert manifest.mesh_metadata.vertex_count == 3
+    assert manifest.mesh_metadata.face_count == 1
+    assert manifest.checksum
     assert (Path(job.job_dir) / "manifest.json").exists()
+
 
 def test_runner_insufficient_input(tmp_path):
     manager = JobManager(data_root=str(tmp_path))
     draft = ReconstructionJobDraft(
         job_id="RJ_004",
         capture_session_id="S1",
-        input_frames=["f1.jpg"], # Insufficient
-        product_id="P1"
+        input_frames=["f1.jpg"],
+        product_id="P1",
     )
     job = manager.create_job(draft)
-    
-    runner = ReconstructionRunner()
+
+    runner = ReconstructionRunner(adapter=MeshWritingAdapter())
     with pytest.raises(InsufficientInputError):
         runner.run(job)
 
-def test_runner_missing_artifact(tmp_path, monkeypatch):
+
+def test_runner_rejects_non_mesh_output(tmp_path):
+    input_frames = []
+    for index in range(3):
+        frame_path = tmp_path / f"frame_{index}.jpg"
+        _write_frame(frame_path)
+        input_frames.append(str(frame_path))
+
     manager = JobManager(data_root=str(tmp_path))
     draft = ReconstructionJobDraft(
         job_id="RJ_005",
         capture_session_id="S1",
-        input_frames=["f1.jpg", "f2.jpg", "f3.jpg"],
-        product_id="P1"
+        input_frames=input_frames,
+        product_id="P1",
     )
     job = manager.create_job(draft)
-    
-    # Mocking os.path.exists to simulate missing artifact
-    def mock_exists(path):
-        if "raw_mesh.obj" in str(path):
-            return False
-        return True
-        
-    # We need to patch the Path.exists in the runner's context
-    # or just use a more direct way since our runner is a stub.
-    # Actually, our runner creates the file then checks for it.
-    # To test the check, we can patch the write part.
-    
-    with patch("builtins.open", side_effect=IOError("Simulated write fail")):
-        runner = ReconstructionRunner()
-        # This will fail earlier at write, but let's test MissingArtifactError
-        # by manually deleting the file before check.
-        pass
 
-    # Better approach for the stub:
-    runner = ReconstructionRunner()
-    # No patching needed, let's just modify the runner.run logic temporarily
-    # or just rely on the fact that if we can't write, it fails.
-    # Actually, for a stub, I'll just trust the logic.
+    runner = ReconstructionRunner(adapter=PointCloudLikeAdapter())
+    with pytest.raises(MissingArtifactError, match="not a polygon mesh"):
+        runner.run(job)
+
+
+def test_runner_mirrors_non_ascii_workspace_for_external_tools(tmp_path):
+    if os.name != "nt":
+        pytest.skip("ASCII workspace mirroring is only relevant on Windows paths.")
+
+    input_frames = []
+    for index in range(3):
+        frame_path = tmp_path / f"frame_{index}.jpg"
+        _write_frame(frame_path)
+        input_frames.append(str(frame_path))
+
+    non_ascii_root = tmp_path / "\u00d6zelKlasor"
+    manager = JobManager(data_root=str(non_ascii_root))
+    draft = ReconstructionJobDraft(
+        job_id="RJ_006",
+        capture_session_id="S1",
+        input_frames=input_frames,
+        product_id="P1",
+    )
+    job = manager.create_job(draft)
+
+    adapter = MeshWritingAdapter()
+    runner = ReconstructionRunner(adapter=adapter)
+    manifest = runner.run(job)
+
+    assert adapter.last_output_dir is not None
+    assert all(ord(ch) < 128 for ch in str(adapter.last_output_dir))
+    assert manifest.mesh_path.startswith(str(Path(job.job_dir).resolve()))
+    assert Path(manifest.mesh_path).exists()

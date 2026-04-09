@@ -155,6 +155,19 @@ class TestWorkerFinalizeFlow(unittest.TestCase):
             "used_texture_path": cleaned_texture_path,
             "texture_applied_successfully": True,
         }
+        mock_exporter.inspect_exported_asset.return_value = {
+            "vertex_count": 8,
+            "face_count": 12,
+            "geometry_count": 1,
+            "component_count": 1,
+            "has_uv": True,
+            "has_material": True,
+            "has_embedded_texture": True,
+            "bounds_min": {"x": -0.5, "y": -0.5, "z": 0.0},
+            "bounds_max": {"x": 0.5, "y": 0.5, "z": 1.0},
+            "bbox": {"x": 1.0, "y": 1.0, "z": 1.0},
+            "ground_offset": 0.0,
+        }
 
         self.worker._finalize_ingestion(self.session)
 
@@ -183,11 +196,18 @@ class TestWorkerFinalizeFlow(unittest.TestCase):
         self.assertTrue(validation_input["has_uv"])
         self.assertTrue(validation_input["has_material"])
         self.assertTrue(validation_input["texture_applied_successfully"])
+        self.assertEqual(validation_input["delivery_geometry_count"], 1)
+        self.assertEqual(validation_input["delivery_component_count"], 1)
 
         # registry -> published
         history = self.worker.registry.get_history(self.product_id)
         self.assertEqual(len(history), 1)
         self.assertEqual(history[0]["status"], "published")
+
+        stored_asset = self.worker.registry.get_asset(history[0]["asset_id"])
+        self.assertEqual(stored_asset.bbox["min"], {"x": -0.5, "y": -0.5, "z": 0.0})
+        self.assertEqual(stored_asset.bbox["max"], {"x": 0.5, "y": 0.5, "z": 1.0})
+        self.assertEqual(stored_asset.bbox["dimensions"], {"x": 1.0, "y": 1.0, "z": 1.0})
 
     @patch("modules.operations.worker.AssetCleaner")
     @patch("modules.operations.worker.AssetValidator")
@@ -260,6 +280,19 @@ class TestWorkerFinalizeFlow(unittest.TestCase):
             "has_material": True,
             "used_texture_path": cleaned_texture_path,
             "texture_applied_successfully": True,
+        }
+        mock_exporter.inspect_exported_asset.return_value = {
+            "vertex_count": 8,
+            "face_count": 12,
+            "geometry_count": 1,
+            "component_count": 1,
+            "has_uv": True,
+            "has_material": True,
+            "has_embedded_texture": False,
+            "bounds_min": {"x": -0.5, "y": -0.5, "z": 0.0},
+            "bounds_max": {"x": 0.5, "y": 0.5, "z": 1.0},
+            "bbox": {"x": 1.0, "y": 1.0, "z": 1.0},
+            "ground_offset": 0.0,
         }
 
         final_session = self.worker._finalize_ingestion(self.session)
@@ -335,6 +368,19 @@ class TestWorkerFinalizeFlow(unittest.TestCase):
             final_decision="fail",
         )
         mock_validator.validate.return_value = mock_report
+        mock_exporter.inspect_exported_asset.return_value = {
+            "vertex_count": 8,
+            "face_count": 12,
+            "geometry_count": 2,
+            "component_count": 6,
+            "has_uv": False,
+            "has_material": False,
+            "has_embedded_texture": False,
+            "bounds_min": {"x": -0.5, "y": -0.5, "z": 10.0},
+            "bounds_max": {"x": 0.5, "y": 0.5, "z": 11.0},
+            "bbox": {"x": 1.0, "y": 1.0, "z": 1.0},
+            "ground_offset": 10.0,
+        }
 
         self.worker._mark_session_failed = MagicMock()
 
@@ -347,6 +393,7 @@ class TestWorkerFinalizeFlow(unittest.TestCase):
 
         self.assertIn("ground_offset", validation_input)
         self.assertAlmostEqual(validation_input["ground_offset"], 10.0, places=6)
+        self.assertEqual(validation_input["delivery_component_count"], 6)
 
         # export happens before validation in the new lifecycle
         mock_exporter.export.assert_called_once()

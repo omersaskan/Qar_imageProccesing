@@ -23,6 +23,10 @@ class ValidationThresholds(BaseModel):
     # texture / UV thresholds
     require_uv_for_texture_pass: bool = True
 
+    # delivered artifact thresholds
+    max_delivery_component_count_pass: int = Field(2, ge=1)
+    max_delivery_component_count_review: int = Field(5, ge=1)
+
 
 def validate_polycount(count: int, thresholds: ValidationThresholds) -> str:
     if count <= thresholds.polycount_pass:
@@ -158,5 +162,24 @@ def validate_texture_integrity(asset_data: Dict[str, Any], thresholds: Validatio
         results["material_integrity"] = "review"
     else:
         results["material_integrity"] = "pass"
+
+    return results
+
+
+def validate_delivery_mesh(asset_data: Dict[str, Any], thresholds: ValidationThresholds) -> Dict[str, str]:
+    results: Dict[str, str] = {}
+
+    if "delivery_geometry_count" in asset_data:
+        geometry_count = int(asset_data.get("delivery_geometry_count", 0))
+        results["delivery_geometry"] = "pass" if geometry_count > 0 else "fail"
+
+    if "delivery_component_count" in asset_data:
+        component_count = int(asset_data.get("delivery_component_count", 0))
+        if component_count <= thresholds.max_delivery_component_count_pass:
+            results["delivery_fragmentation"] = "pass"
+        elif component_count <= thresholds.max_delivery_component_count_review:
+            results["delivery_fragmentation"] = "review"
+        else:
+            results["delivery_fragmentation"] = "fail"
 
     return results

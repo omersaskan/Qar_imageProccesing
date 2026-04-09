@@ -1,10 +1,7 @@
 import pytest
-import shutil
-from pathlib import Path
 from modules.asset_registry.registry import AssetRegistry
 from modules.asset_registry.publisher import PackagePublisher
 from modules.shared_contracts.models import AssetMetadata, ValidationReport, ProductPhysicalProfile
-from pydantic import HttpUrl
 
 @pytest.fixture
 def registry(tmp_path):
@@ -123,3 +120,32 @@ def test_publisher_successful_publish(registry):
     asset_info = registry._load_product_data(product_id)["assets"][asset_id]
     assert asset_info["publish_state"] == "published"
     assert registry._get_active_id(product_id) == asset_id
+
+def test_publisher_rejects_missing_export_artifacts(registry):
+    publisher = PackagePublisher(registry)
+
+    asset_id = "asset_missing_exports"
+    product_id = "prod_missing_exports"
+    metadata = AssetMetadata(asset_id=asset_id, product_id=product_id, version="1.0.0")
+    registry.register_asset(metadata)
+
+    pass_report = ValidationReport(
+        asset_id=asset_id,
+        poly_count=10_000,
+        texture_status="complete",
+        bbox_reasonable=True,
+        ground_aligned=True,
+        mobile_performance_grade="A",
+        final_decision="pass",
+    )
+
+    profile = ProductPhysicalProfile(real_width_cm=10, real_depth_cm=10, real_height_cm=10)
+
+    with pytest.raises(ValueError, match="missing required export artifacts"):
+        publisher.publish_package(
+            product_id=product_id,
+            asset_id=asset_id,
+            validation_report=pass_report,
+            export_urls={"glb_url": "http://cdn.com/model.glb"},
+            physical_profile=profile,
+        )

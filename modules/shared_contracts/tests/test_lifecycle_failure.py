@@ -6,6 +6,7 @@ def test_failed_status_is_reachable():
     # Reachable from every in-flight stage.
     assert can_transition(AssetStatus.CREATED, AssetStatus.FAILED)
     assert can_transition(AssetStatus.CAPTURED, AssetStatus.FAILED)
+    assert can_transition(AssetStatus.RECAPTURE_REQUIRED, AssetStatus.FAILED)
     assert can_transition(AssetStatus.RECONSTRUCTED, AssetStatus.FAILED)
     assert can_transition(AssetStatus.CLEANED, AssetStatus.FAILED)
     assert can_transition(AssetStatus.EXPORTED, AssetStatus.FAILED)
@@ -20,6 +21,10 @@ def test_failed_status_is_terminal():
 def test_invalid_transitions_raise_error():
     with pytest.raises(InvalidTransitionError):
         assert_transition(AssetStatus.FAILED, AssetStatus.CAPTURED)
-    
+
     with pytest.raises(InvalidTransitionError):
         assert_transition(AssetStatus.CREATED, AssetStatus.PUBLISHED)
+
+
+def test_recapture_required_can_return_to_capture():
+    assert can_transition(AssetStatus.RECAPTURE_REQUIRED, AssetStatus.CAPTURED) is True

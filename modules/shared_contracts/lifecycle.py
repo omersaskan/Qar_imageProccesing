@@ -5,6 +5,7 @@ from .errors import InvalidTransitionError
 class AssetStatus(str, Enum):
     CREATED = "created"
     CAPTURED = "captured"
+    RECAPTURE_REQUIRED = "recapture_required"
     RECONSTRUCTED = "reconstructed"
     CLEANED = "cleaned"
     EXPORTED = "exported"
@@ -20,8 +21,9 @@ class ReconstructionStatus(str, Enum):
 
 # Define allowed transitions
 _ALLOWED_TRANSITIONS: Dict[AssetStatus, Set[AssetStatus]] = {
-    AssetStatus.CREATED: {AssetStatus.CAPTURED, AssetStatus.FAILED}, # Allow initial failure
-    AssetStatus.CAPTURED: {AssetStatus.RECONSTRUCTED, AssetStatus.CAPTURED, AssetStatus.FAILED}, # Retry capture or fail
+    AssetStatus.CREATED: {AssetStatus.CAPTURED, AssetStatus.RECAPTURE_REQUIRED, AssetStatus.FAILED}, # Allow initial failure
+    AssetStatus.CAPTURED: {AssetStatus.RECONSTRUCTED, AssetStatus.CAPTURED, AssetStatus.RECAPTURE_REQUIRED, AssetStatus.FAILED}, # Retry capture or fail
+    AssetStatus.RECAPTURE_REQUIRED: {AssetStatus.CAPTURED, AssetStatus.FAILED}, # Recapture can unblock the session
     AssetStatus.RECONSTRUCTED: {AssetStatus.CLEANED, AssetStatus.CAPTURED, AssetStatus.FAILED}, # Redo capture or fail
     AssetStatus.CLEANED: {AssetStatus.EXPORTED, AssetStatus.RECONSTRUCTED, AssetStatus.FAILED}, # Re-export, redo reconstruction or fail
     AssetStatus.EXPORTED: {AssetStatus.VALIDATED, AssetStatus.CLEANED, AssetStatus.FAILED}, # Revalidate, redo cleanup or fail

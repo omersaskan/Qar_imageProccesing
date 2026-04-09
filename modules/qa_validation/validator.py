@@ -9,6 +9,7 @@ from .rules import (
     validate_ground_alignment,
     validate_contamination,
     validate_texture_integrity,
+    validate_delivery_mesh,
 )
 
 
@@ -40,6 +41,7 @@ class AssetValidator:
 
         contamination_decisions = validate_contamination(cleanup_stats, self.thresholds)
         texture_integrity_decisions = validate_texture_integrity(asset_data, self.thresholds)
+        delivery_decisions = validate_delivery_mesh(asset_data, self.thresholds)
 
         all_decisions = [
             poly_decision,
@@ -48,6 +50,7 @@ class AssetValidator:
             ground_decision,
             *contamination_decisions.values(),
             *texture_integrity_decisions.values(),
+            *delivery_decisions.values(),
         ]
 
         if "fail" in all_decisions:
@@ -76,6 +79,7 @@ class AssetValidator:
         combined_report = {}
         combined_report.update(contamination_decisions)
         combined_report.update(texture_integrity_decisions)
+        combined_report.update(delivery_decisions)
 
         return ValidationReport(
             asset_id=asset_id,

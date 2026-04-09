@@ -2,11 +2,17 @@
 WARNING: This module is for DEBUG/TEST purposes ONLY.
 Do NOT use in production reconstruction flows.
 """
+import os
 import struct
 from pathlib import Path
 
 def write_placeholder_glb(output_path: str | Path):
     """Writes a minimal valid GLB binary cube (glTF 2.0) to the target path."""
+    if os.getenv("MESHYSIZ_ENABLE_PLACEHOLDERS", "false").lower() != "true":
+        raise RuntimeError(
+            "Placeholder GLB generation is disabled by default. "
+            "Set MESHYSIZ_ENABLE_PLACEHOLDERS=true only for explicit debug flows."
+        )
     
     # 1. JSON Chunk
     json_dict = {

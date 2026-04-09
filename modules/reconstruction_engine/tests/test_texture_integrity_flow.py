@@ -168,6 +168,29 @@ class TestTextureIntegrityFlow(unittest.TestCase):
         self.assertEqual(report.contamination_report.get("texture_application"), "pass")
         self.assertEqual(report.contamination_report.get("material_integrity"), "pass")
 
+    def test_export_inspection_uses_delivered_glb(self):
+        source_mesh = self.test_dir / "inspect_mesh.obj"
+        output_glb = self.test_dir / "inspect_mesh.glb"
+
+        make_uv_mesh_obj(source_mesh)
+
+        self.exporter.export(
+            mesh_path=str(source_mesh),
+            output_path=str(output_glb),
+            profile_name="standard",
+            texture_path=str(self.texture_path),
+            metadata=None,
+        )
+
+        info = self.exporter.inspect_exported_asset(str(output_glb))
+
+        self.assertGreater(info["face_count"], 0)
+        self.assertGreater(info["geometry_count"], 0)
+        self.assertTrue(info["has_uv"])
+        self.assertIn("bounds_min", info)
+        self.assertIn("bounds_max", info)
+        self.assertGreaterEqual(info["ground_offset"], 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()

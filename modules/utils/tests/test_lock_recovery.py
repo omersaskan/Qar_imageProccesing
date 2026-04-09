@@ -54,3 +54,15 @@ def test_file_lock_corrupt_recovery_only_if_stale(tmp_path):
     # 4. Attempt to acquire (should recover)
     with FileLock(lock_file_base, stale_threshold=10.0, timeout=1.0) as lock:
         assert lock.fd is not None
+
+def test_file_lock_does_not_steal_stale_lock_from_live_pid(tmp_path):
+    lock_file_base = tmp_path / "test_live_pid"
+    lock_file = tmp_path / "test_live_pid.lock"
+
+    lock_file.write_text(json.dumps({"pid": os.getpid(), "timestamp": time.time() - 200}))
+    old_time = time.time() - 200
+    os.utime(lock_file, (old_time, old_time))
+
+    with pytest.raises(TimeoutError):
+        with FileLock(lock_file_base, stale_threshold=1.0, timeout=0.1):
+            pass

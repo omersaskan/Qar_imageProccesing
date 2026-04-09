@@ -4,8 +4,6 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
-import trimesh
-
 from modules.asset_cleanup_pipeline.cleaner import AssetCleaner
 from modules.asset_cleanup_pipeline.normalizer import NormalizedMetadata
 from modules.asset_cleanup_pipeline.profiles import CleanupProfileType
@@ -109,6 +107,8 @@ class IngestionWorker:
                     self._advance_session(session, AssetStatus.CAPTURED, "Extracting frames from video...")
                 elif session.status == AssetStatus.CAPTURED:
                     self._advance_session(session, AssetStatus.RECONSTRUCTED, "Reconstructing 3D geometry...")
+                elif session.status == AssetStatus.RECAPTURE_REQUIRED:
+                    continue
                 elif session.status == AssetStatus.RECONSTRUCTED:
                     self._advance_session(session, AssetStatus.CLEANED, "Cleaning reconstructed mesh...")
                 elif session.status == AssetStatus.CLEANED:
@@ -165,6 +165,28 @@ class IngestionWorker:
         except Exception as e:
             logger.error(f"Failed to mark session {session_id} as FAILED: {e}")
 
+    def _mark_session_needs_recapture(
+        self,
+        session: CaptureSession,
+        reason: str,
+        coverage_score: float = 0.0,
+        extracted_frames: Optional[list[str]] = None,
+    ) -> CaptureSession:
+        logger.info(f"Session {session.session_id} requires recapture. Reason: {reason}")
+        fields: Dict[str, Any] = {
+            "publish_state": "needs_recapture",
+            "coverage_score": float(coverage_score),
+            "failure_reason": reason,
+            "last_pipeline_stage": AssetStatus.RECAPTURE_REQUIRED.value,
+        }
+        if extracted_frames is not None:
+            fields["extracted_frames"] = extracted_frames
+        return self._persist_session(
+            session,
+            new_status=AssetStatus.RECAPTURE_REQUIRED,
+            **fields,
+        )
+
     def _advance_session(self, session: CaptureSession, next_status: AssetStatus, log_msg: str):
         try:
             logger.info(f"PIPELINE START: {log_msg} ({session.session_id})", extra={"job_id": session.session_id})
@@ -192,10 +214,14 @@ class IngestionWorker:
     def _handle_frame_extraction(self, session: CaptureSession) -> CaptureSession:
         try:
             from modules.capture_workflow.frame_extractor import FrameExtractor
+            from modules.capture_workflow.coverage_analyzer import CoverageAnalyzer
 
             extractor = FrameExtractor()
+            coverage_analyzer = CoverageAnalyzer()
             video_path = self.session_manager.captures_dir / session.session_id / "video" / "raw_video.mp4"
             output_dir = self.session_manager.captures_dir / session.session_id / "frames"
+            reports_dir = self.session_manager.get_capture_path(session.session_id) / "reports"
+            reports_dir.mkdir(parents=True, exist_ok=True)
 
             if not video_path.exists():
                 raise IrrecoverableError(f"Video file missing at {video_path}.")
@@ -203,21 +229,44 @@ class IngestionWorker:
             frames = extractor.extract_keyframes(str(video_path), str(output_dir))
             if not frames:
                 raise IrrecoverableError(f"Frame extraction produced 0 frames for {session.session_id}.")
+            min_frames = getattr(getattr(extractor, "config", None), "min_frames", 3)
+            if len(frames) < int(min_frames):
+                raise IrrecoverableError(
+                    f"Frame extraction produced {len(frames)} validated frames for {session.session_id}; "
+                    f"minimum required is {int(min_frames)}."
+                )
+
+            coverage_report = coverage_analyzer.analyze_coverage(frames)
+            atomic_write_json(reports_dir / "coverage_report.json", coverage_report)
+
+            if coverage_report["overall_status"] != "sufficient":
+                reasons = "; ".join(coverage_report.get("reasons", [])) or "insufficient viewpoint diversity"
+                return self._mark_session_needs_recapture(
+                    session,
+                    reason=f"Capture quality insufficient: {reasons}",
+                    coverage_score=float(coverage_report.get("coverage_score", 0.0)),
+                    extracted_frames=frames,
+                )
 
             return self._persist_session(
                 session,
                 new_status=AssetStatus.CAPTURED,
                 extracted_frames=frames,
+                coverage_score=float(coverage_report.get("coverage_score", 0.0)),
+                publish_state=None,
                 last_pipeline_stage=AssetStatus.CAPTURED.value,
                 failure_reason=None,
             )
         except IrrecoverableError:
             raise
+        except ValueError as e:
+            raise IrrecoverableError(f"Frame extraction failed: {e}")
         except Exception as e:
             raise RecoverableError(f"Frame extraction failed: {e}")
 
     def _handle_reconstruction(self, session: CaptureSession) -> CaptureSession:
         try:
+            from modules.capture_workflow.coverage_analyzer import CoverageAnalyzer
             from modules.reconstruction_engine.job_manager import JobManager
             from modules.reconstruction_engine.runner import ReconstructionRunner
             from modules.shared_contracts.models import ReconstructionJobDraft
@@ -225,10 +274,22 @@ class IngestionWorker:
             frames_dir = self.session_manager.captures_dir / session.session_id / "frames"
             if not frames_dir.exists():
                 session = self._handle_frame_extraction(session)
+                if session.status == AssetStatus.RECAPTURE_REQUIRED:
+                    return session
 
             input_frames = [str(f) for f in frames_dir.glob("*.jpg")]
             if not input_frames:
                 raise IrrecoverableError(f"No frames available for reconstruction in {session.session_id}")
+
+            coverage_report = CoverageAnalyzer().analyze_coverage(input_frames)
+            if coverage_report["overall_status"] != "sufficient":
+                reasons = "; ".join(coverage_report.get("reasons", [])) or "insufficient viewpoint diversity"
+                return self._mark_session_needs_recapture(
+                    session,
+                    reason=f"Capture quality insufficient before reconstruction: {reasons}",
+                    coverage_score=float(coverage_report.get("coverage_score", 0.0)),
+                    extracted_frames=input_frames,
+                )
 
             manager = JobManager(data_root=str(self.data_root))
             runner = ReconstructionRunner()
@@ -251,6 +312,7 @@ class IngestionWorker:
                 new_status=AssetStatus.RECONSTRUCTED,
                 reconstruction_job_id=job.job_id,
                 reconstruction_manifest_path=str(Path(job.job_dir) / "manifest.json"),
+                publish_state=None,
                 last_pipeline_stage=AssetStatus.RECONSTRUCTED.value,
                 failure_reason=None,
             )
@@ -326,28 +388,37 @@ class IngestionWorker:
         manifest = self._load_manifest(session)
         asset_id = session.asset_id or self._build_asset_id(session)
 
-        dimensions, ground_residual = self._measure_cleaned_mesh(session.cleanup_mesh_path)
+        if not session.export_blob_path:
+            raise IrrecoverableError(f"Exported GLB path missing for {session.session_id}")
+
+        try:
+            export_metrics = self.exporter.inspect_exported_asset(session.export_blob_path)
+        except Exception as e:
+            raise IrrecoverableError(f"Exported GLB validation failed: {e}")
 
         texture_path = cleanup_stats.get("cleaned_texture_path") or manifest.texture_path
         texture_path_exists = bool(texture_path and Path(texture_path).exists())
-        has_uv = bool(cleanup_stats.get("uv_preserved", False))
-        has_material = bool(cleanup_stats.get("material_preserved", False))
+        has_uv = bool(export_metrics["has_uv"])
+        has_material = bool(export_metrics["has_material"])
+        has_embedded_texture = bool(export_metrics["has_embedded_texture"])
         texture_status = (
             "complete"
-            if texture_path_exists and has_uv
-            else ("degraded" if texture_path_exists else "missing")
+            if has_embedded_texture and has_uv
+            else ("degraded" if texture_path_exists or has_material else "missing")
         )
 
         validation_input = {
-            "poly_count": metadata.final_polycount,
+            "poly_count": int(export_metrics["face_count"]),
             "texture_status": texture_status,
-            "bbox": dimensions,
-            "ground_offset": ground_residual,
+            "bbox": export_metrics["bbox"],
+            "ground_offset": float(export_metrics["ground_offset"]),
             "cleanup_stats": cleanup_stats,
-            "texture_path_exists": texture_path_exists,
+            "texture_path_exists": bool(texture_path_exists or has_embedded_texture),
             "has_uv": has_uv,
             "has_material": has_material,
-            "texture_applied_successfully": texture_path_exists and has_uv,
+            "texture_applied_successfully": bool(has_embedded_texture and has_uv and has_material),
+            "delivery_geometry_count": int(export_metrics["geometry_count"]),
+            "delivery_component_count": int(export_metrics["component_count"]),
         }
 
         report = self.validator.validate(asset_id, validation_input)
@@ -419,35 +490,21 @@ class IngestionWorker:
 
     def _build_registry_metadata(self, session: CaptureSession, asset_id: str, report: ValidationReport) -> AssetMetadata:
         metadata, _ = self._load_cleanup_artifacts(session)
-        dimensions, _ = self._measure_cleaned_mesh(session.cleanup_mesh_path)
+        if not session.export_blob_path:
+            raise IrrecoverableError(f"Exported GLB path missing for {session.session_id}")
+        export_metrics = self.exporter.inspect_exported_asset(session.export_blob_path)
         return AssetMetadata(
             asset_id=asset_id,
             product_id=session.product_id,
             version=None,
             bbox={
-                "min": metadata.bbox_min,
-                "max": metadata.bbox_max,
-                "dimensions": dimensions,
+                "min": export_metrics["bounds_min"],
+                "max": export_metrics["bounds_max"],
+                "dimensions": export_metrics["bbox"],
             },
             pivot_offset=metadata.pivot_offset,
             quality_grade=report.mobile_performance_grade,
         )
-
-    def _measure_cleaned_mesh(self, cleaned_mesh_path: Optional[str]) -> Tuple[Dict[str, float], float]:
-        if not cleaned_mesh_path or not Path(cleaned_mesh_path).exists():
-            raise IrrecoverableError(f"Cleaned mesh artifact missing: {cleaned_mesh_path}")
-
-        cleaned_mesh = trimesh.load(cleaned_mesh_path)
-        if isinstance(cleaned_mesh, trimesh.Scene):
-            cleaned_mesh = cleaned_mesh.dump(concatenate=True)
-
-        dimensions = {
-            "x": float(cleaned_mesh.bounds[1][0] - cleaned_mesh.bounds[0][0]),
-            "y": float(cleaned_mesh.bounds[1][1] - cleaned_mesh.bounds[0][1]),
-            "z": float(cleaned_mesh.bounds[1][2] - cleaned_mesh.bounds[0][2]),
-        }
-        ground_residual = abs(float(cleaned_mesh.bounds[0][2]))
-        return dimensions, ground_residual
 
     def _load_manifest(self, session: CaptureSession) -> OutputManifest:
         manifest_path = session.reconstruction_manifest_path

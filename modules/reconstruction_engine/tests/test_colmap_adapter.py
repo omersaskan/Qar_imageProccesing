@@ -1,8 +1,8 @@
 import pytest
 import os
-import shutil
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+import trimesh
 from modules.reconstruction_engine.adapter import COLMAPAdapter
 
 
@@ -50,8 +50,11 @@ def test_colmap_adapter_run(mock_copy, mock_popen, tmp_path):
     mock_process.stdout = iter(["loading...", "done."])
     mock_popen.return_value = mock_process
 
+    trimesh.creation.box().export(mesh_file)
+
     with patch.object(adapter, "_mask_is_usable", return_value=True):
-        results = adapter.run_reconstruction(input_frames, output_dir)
+        with patch.object(adapter, "_frame_is_usable", return_value=True):
+            results = adapter.run_reconstruction(input_frames, output_dir)
 
     assert results["mesh_path"] == str(mesh_file)
     assert results["log_path"] == str(output_dir / "reconstruction.log")
@@ -68,7 +71,7 @@ def test_colmap_adapter_run(mock_copy, mock_popen, tmp_path):
         "poisson_mesher",
     ]
 
-def test_colmap_artifact_discovery_fallback(tmp_path):
+def test_colmap_artifact_discovery_requires_real_mesh(tmp_path):
     adapter = COLMAPAdapter(engine_path="fake")
     output_dir = tmp_path / "workspace"
     output_dir.mkdir()
@@ -84,6 +87,7 @@ def test_colmap_artifact_discovery_fallback(tmp_path):
         "accepted_frames": 3,
         "rejected_missing_mask": 0,
         "rejected_bad_mask": 0,
+        "rejected_unreadable_frame": 0,
     }
     prep["images_dir"].mkdir()
     prep["masks_dir"].mkdir()
@@ -95,5 +99,21 @@ def test_colmap_artifact_discovery_fallback(tmp_path):
             mock_process.stdout = iter([])
             mock_popen.return_value = mock_process
 
-            results = adapter.run_reconstruction([], output_dir)
-            assert results["mesh_path"] == str(fused_ply)
+            with pytest.raises(RuntimeError, match="no usable mesh artifacts"):
+                adapter.run_reconstruction([], output_dir)
+
+def test_colmap_adapter_rejects_unreadable_frames(tmp_path):
+    adapter = COLMAPAdapter(engine_path="fake")
+    output_dir = tmp_path / "workspace"
+    output_dir.mkdir()
+
+    input_frames = []
+    for name in ("frame1.jpg", "frame2.jpg", "frame3.jpg"):
+        frame_path = tmp_path / name
+        write_frame_and_mask(frame_path)
+        input_frames.append(str(frame_path))
+
+    with patch.object(adapter, "_frame_is_usable", return_value=False):
+        with patch.object(adapter, "_mask_is_usable", return_value=True):
+            with pytest.raises(RuntimeError, match="unreadable=3"):
+                adapter.run_reconstruction(input_frames, output_dir)

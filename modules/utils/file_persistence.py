@@ -43,6 +43,25 @@ class FileLock:
         except Exception:
             pass
 
+    def _read_metadata(self) -> Dict[str, Any] | None:
+        try:
+            with open(self.lock_file, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+            return None
+
+    def _is_process_alive(self, pid: int | None) -> bool:
+        if pid is None or pid <= 0:
+            return False
+
+        try:
+            os.kill(pid, 0)
+            return True
+        except PermissionError:
+            return True
+        except OSError:
+            return False
+
     def _safe_remove(self, path: Path, retries: int = 3):
         """Attempts to remove a file with retries, especially for Windows file system lag."""
         for i in range(retries):
@@ -72,27 +91,17 @@ class FileLock:
                     
                     is_stale = (time.time() - mtime) > self.stale_threshold
                     
-                    # User requirement: Cleanup empty/corrupt ONLY if stale
                     if is_stale:
-                        # Attempt to read metadata to see if it's corrupt
-                        is_corrupt = False
-                        if size > 0:
-                            try:
-                                with open(self.lock_file, 'r') as f:
-                                    json.load(f)
-                            except (json.JSONDecodeError, UnicodeDecodeError):
-                                is_corrupt = True
-                        else:
-                            is_corrupt = True # Empty file
-                        
-                        if is_corrupt or is_stale:
-                            # If it's stale, we recover regardless of corruption
-                            # but we log if it was also corrupt
-                            reason = "stale" if not is_corrupt else "stale and corrupt/empty"
-                            # We don't have a logger here, but we could use print or just proceed
-                            # Since this is a low-level util, we just recover.
+                        metadata = self._read_metadata() if size > 0 else None
+                        is_corrupt = metadata is None
+                        owner_pid = None if metadata is None else int(metadata.get("pid", 0) or 0)
+                        owner_alive = self._is_process_alive(owner_pid)
+
+                        # Recover only when the stale lock is empty/corrupt or the
+                        # recorded owner process is no longer alive.
+                        if is_corrupt or not owner_alive:
                             if self._safe_remove(self.lock_file):
-                                continue # Retry acquisition
+                                continue
                 except (OSError, FileNotFoundError):
                     pass
 

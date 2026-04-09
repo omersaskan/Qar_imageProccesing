@@ -1,18 +1,15 @@
 import cv2
 import numpy as np
 from typing import Dict, Any, Optional
+
 from .config import QualityThresholds, default_quality_thresholds
 
 
 class QualityAnalyzer:
-    def __init__(self, thresholds: QualityThresholds = default_quality_thresholds):
-        self.thresholds = thresholds
+    def __init__(self, thresholds: Optional[QualityThresholds] = None):
+        self.thresholds = (thresholds or default_quality_thresholds).model_copy(deep=True)
 
     def get_blur_score(self, frame: np.ndarray) -> float:
-        """
-        Blur estimate using Laplacian variance.
-        Higher = sharper.
-        """
         if len(frame.shape) == 3:
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         else:
@@ -20,9 +17,6 @@ class QualityAnalyzer:
         return float(cv2.Laplacian(gray, cv2.CV_64F).var())
 
     def get_exposure_score(self, frame: np.ndarray) -> float:
-        """
-        Mean grayscale brightness.
-        """
         if len(frame.shape) == 3:
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         else:
@@ -59,6 +53,13 @@ class QualityAnalyzer:
         largest_contour_ratio = 0.0
         solidity = 0.0
         mask_confidence = 0.0
+        purity_score = 0.0
+        border_touch_ratio = 0.0
+        bottom_band_ratio = 0.0
+        bottom_span_ratio = 0.0
+        bottom_contact_ratio = 0.0
+        support_area_ratio = 0.0
+        support_suspected = False
         bbox = None
 
         if mask is not None:
@@ -75,10 +76,16 @@ class QualityAnalyzer:
                 mask_confidence = float(
                     mask_meta.get("mask_confidence", mask_meta.get("confidence", 0.0))
                 )
+                purity_score = float(mask_meta.get("purity_score", 0.0))
+                border_touch_ratio = float(mask_meta.get("border_touch_ratio", 0.0))
+                bottom_band_ratio = float(mask_meta.get("bottom_band_ratio", 0.0))
+                bottom_span_ratio = float(mask_meta.get("bottom_span_ratio", 0.0))
+                bottom_contact_ratio = float(mask_meta.get("bottom_contact_ratio", 0.0))
+                support_area_ratio = float(mask_meta.get("support_area_ratio", 0.0))
+                support_suspected = bool(mask_meta.get("support_suspected", False))
                 centroid = mask_meta.get("centroid")
             else:
                 centroid = self._fallback_centroid_from_mask(mask)
-
                 edge_pixels = (
                     np.sum(mask[0, :] > 0)
                     + np.sum(mask[-1, :] > 0)
@@ -91,7 +98,7 @@ class QualityAnalyzer:
                 dx = (float(centroid["x"]) - w / 2) / max(w / 2, 1.0)
                 dy = (float(centroid["y"]) - h / 2) / max(h / 2, 1.0)
                 center_dist = float(np.sqrt(dx ** 2 + dy ** 2))
-                is_framed = bool(center_dist < 0.45)
+                is_framed = bool(center_dist < self.thresholds.max_center_distance)
 
         failure_reasons = []
 
@@ -102,10 +109,10 @@ class QualityAnalyzer:
             failure_reasons.append(f"bad_exposure ({exposure_score:.1f})")
 
         if mask is not None:
-            if occupancy < 0.05:
+            if occupancy < self.thresholds.min_object_occupancy:
                 failure_reasons.append(f"object_too_small ({occupancy:.2%})")
 
-            if occupancy > 0.88:
+            if occupancy > self.thresholds.max_object_occupancy:
                 failure_reasons.append(f"object_too_large ({occupancy:.2%})")
 
             if not is_framed:
@@ -114,28 +121,72 @@ class QualityAnalyzer:
             if is_clipped:
                 failure_reasons.append("subject_clipped")
 
-            if mask_confidence < 0.45:
+            if mask_confidence < self.thresholds.min_mask_confidence:
                 failure_reasons.append(f"low_mask_confidence ({mask_confidence:.2f})")
 
-            if fragment_count > 3:
+            if purity_score < self.thresholds.min_mask_purity:
+                failure_reasons.append(f"low_mask_purity ({purity_score:.2f})")
+
+            if fragment_count > self.thresholds.max_mask_fragments:
                 failure_reasons.append(f"fragmented_mask ({fragment_count})")
 
-            if largest_contour_ratio > 0 and largest_contour_ratio < 0.75:
+            if (
+                largest_contour_ratio > 0
+                and largest_contour_ratio < self.thresholds.min_dominant_contour_ratio
+            ):
                 failure_reasons.append(f"unstable_dominant_contour ({largest_contour_ratio:.2f})")
 
-            if solidity > 0 and solidity < 0.50:
+            if solidity > 0 and solidity < self.thresholds.min_mask_solidity:
                 failure_reasons.append(f"low_solidity ({solidity:.2f})")
+
+            if border_touch_ratio > self.thresholds.max_border_touch_ratio:
+                failure_reasons.append(f"mask_touches_borders ({border_touch_ratio:.2f})")
+
+            if support_suspected:
+                failure_reasons.append("support_contamination_detected")
+
+            if (
+                bottom_band_ratio > self.thresholds.max_bottom_band_ratio
+                and bottom_span_ratio > self.thresholds.max_bottom_span_ratio
+            ):
+                failure_reasons.append(
+                    f"bottom_support_band ({bottom_band_ratio:.2f}/{bottom_span_ratio:.2f})"
+                )
+
+            if support_area_ratio > self.thresholds.max_support_area_ratio:
+                failure_reasons.append(f"large_support_region ({support_area_ratio:.2f})")
 
         overall_pass = bool(
             is_blur_ok
             and is_exposure_ok
-            and (mask is None or (0.05 < occupancy < 0.88))
+            and (
+                mask is None
+                or (
+                    self.thresholds.min_object_occupancy
+                    < occupancy
+                    < self.thresholds.max_object_occupancy
+                )
+            )
             and (mask is None or is_framed)
             and not is_clipped
-            and (mask is None or mask_confidence >= 0.45)
-            and fragment_count <= 3
-            and (largest_contour_ratio == 0.0 or largest_contour_ratio >= 0.75)
-            and (solidity == 0.0 or solidity >= 0.50)
+            and (mask is None or mask_confidence >= self.thresholds.min_mask_confidence)
+            and (mask is None or purity_score >= self.thresholds.min_mask_purity)
+            and fragment_count <= self.thresholds.max_mask_fragments
+            and (
+                largest_contour_ratio == 0.0
+                or largest_contour_ratio >= self.thresholds.min_dominant_contour_ratio
+            )
+            and (solidity == 0.0 or solidity >= self.thresholds.min_mask_solidity)
+            and (mask is None or border_touch_ratio <= self.thresholds.max_border_touch_ratio)
+            and not support_suspected
+            and (
+                mask is None
+                or not (
+                    bottom_band_ratio > self.thresholds.max_bottom_band_ratio
+                    and bottom_span_ratio > self.thresholds.max_bottom_span_ratio
+                )
+            )
+            and (mask is None or support_area_ratio <= self.thresholds.max_support_area_ratio)
         )
 
         return {
@@ -149,6 +200,13 @@ class QualityAnalyzer:
             "largest_contour_ratio": float(largest_contour_ratio),
             "solidity": float(solidity),
             "mask_confidence": float(mask_confidence),
+            "purity_score": float(purity_score),
+            "border_touch_ratio": float(border_touch_ratio),
+            "bottom_band_ratio": float(bottom_band_ratio),
+            "bottom_span_ratio": float(bottom_span_ratio),
+            "bottom_contact_ratio": float(bottom_contact_ratio),
+            "support_area_ratio": float(support_area_ratio),
+            "support_suspected": bool(support_suspected),
             "is_blur_ok": bool(is_blur_ok),
             "is_exposure_ok": bool(is_exposure_ok),
             "is_framed": bool(is_framed),
@@ -156,6 +214,11 @@ class QualityAnalyzer:
             "failure_reasons": failure_reasons,
         }
 
-    def is_product_centered(self, frame: np.ndarray, mask: Optional[np.ndarray] = None, mask_meta: Optional[Dict[str, Any]] = None) -> bool:
+    def is_product_centered(
+        self,
+        frame: np.ndarray,
+        mask: Optional[np.ndarray] = None,
+        mask_meta: Optional[Dict[str, Any]] = None,
+    ) -> bool:
         analysis = self.analyze_frame(frame, mask, mask_meta)
         return analysis["is_framed"]

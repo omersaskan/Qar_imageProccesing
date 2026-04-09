@@ -3,7 +3,7 @@ from .quality_analyzer import QualityAnalyzer
 from .frame_extractor import FrameExtractor
 from .coverage_analyzer import CoverageAnalyzer
 from .packager import Packager, ReconstructionJobDraft
-from .config import QualityThresholds, ExtractionConfig
+from .config import QualityThresholds, ExtractionConfig, CoverageConfig
 
 __all__ = [
     "SessionManager",
@@ -13,5 +13,6 @@ __all__ = [
     "Packager",
     "ReconstructionJobDraft",
     "QualityThresholds",
-    "ExtractionConfig"
+    "ExtractionConfig",
+    "CoverageConfig",
 ]

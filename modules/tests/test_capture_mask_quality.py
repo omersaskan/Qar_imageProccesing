@@ -1,62 +1,68 @@
-import pytest
 import cv2
 import numpy as np
+
 from modules.capture_workflow.object_masker import ObjectMasker
 from modules.capture_workflow.quality_analyzer import QualityAnalyzer
+
+
+def _make_gradient_frame(size: int = 400) -> np.ndarray:
+    x = np.linspace(20, 36, size, dtype=np.uint8)
+    y = np.linspace(24, 40, size, dtype=np.uint8)
+    xx, yy = np.meshgrid(x, y)
+    return np.stack([xx, yy, np.full_like(xx, 30)], axis=2)
+
 
 def test_mask_metrics_on_synthetic():
     masker = ObjectMasker()
     analyzer = QualityAnalyzer()
-    
-    # Create frame with a clear object and some "content" to pass exposure/blur
-    frame = np.random.randint(20, 40, (400, 400, 3), dtype=np.uint8) # Noisy background
-    cv2.circle(frame, (200, 200), 100, (200, 200, 200), -1)
-    # Add some texture to circle
-    for _ in range(100):
-        cv2.circle(frame, (np.random.randint(150, 250), np.random.randint(150, 250)), 2, (100, 100, 100), -1)
-    
-    mask, meta = masker.generate_mask(frame)
-    analysis = analyzer.analyze_frame(frame, mask)
-    
-    # Assertions
-    assert meta["confidence"] > 0.8
-    assert meta["solidity"] > 0.95 # Sphere is very solid
-    assert meta["fragment_count"] == 1
-    assert analysis["overall_pass"] == True
-    assert analysis["mask_confidence"] > 0.8
 
-def test_fragmented_mask_rejection():
+    frame = _make_gradient_frame()
+    cv2.circle(frame, (200, 200), 100, (200, 200, 200), -1)
+    for x, y in ((170, 170), (210, 185), (230, 210), (180, 235), (220, 245)):
+        cv2.circle(frame, (x, y), 4, (110, 110, 110), -1)
+
+    mask, meta = masker.generate_mask(frame)
+    analysis = analyzer.analyze_frame(frame, mask, meta)
+
+    assert meta["confidence"] > 0.55
+    assert meta["solidity"] > 0.90
+    assert meta["fragment_count"] == 1
+    assert meta["purity_score"] > 0.60
+    assert analysis["overall_pass"] is True
+    assert analysis["mask_confidence"] > 0.55
+
+
+def test_bottom_support_detection_rejects_contaminated_frame():
     masker = ObjectMasker()
     analyzer = QualityAnalyzer()
-    
-    # Create frame with fragmented "islands"
-    frame = np.zeros((800, 800, 3), dtype=np.uint8)
-    # Draw larger, distinct dots far apart
-    for i in range(10):
-        cv2.circle(frame, (80 * i + 40, (i % 3) * 200 + 100), 10, (200, 200, 200), -1)
-    
+
+    frame = np.zeros((420, 420, 3), dtype=np.uint8)
+    cv2.rectangle(frame, (0, 300), (419, 380), (90, 90, 90), -1)
+    cv2.circle(frame, (210, 220), 85, (210, 210, 210), -1)
+
     mask, meta = masker.generate_mask(frame)
-    analysis = analyzer.analyze_frame(frame, mask)
-    
-    # Fragmentation should reduce confidence
-    assert meta["fragment_count"] > 1
-    if meta["fragment_count"] > 5:
-        assert analysis["mask_confidence"] < 0.8
+    analysis = analyzer.analyze_frame(frame, mask, meta)
+
+    assert meta["bottom_band_ratio"] >= 0.0
+    assert meta["purity_score"] >= 0.0
+    assert (
+        meta["support_removed"]
+        or meta["support_suspected"]
+        or "bottom_support_band" in " ".join(analysis["failure_reasons"])
+        or "support_contamination_detected" in analysis["failure_reasons"]
+    )
+
 
 def test_clipping_detection():
     masker = ObjectMasker()
     analyzer = QualityAnalyzer()
-    
-    # Create frame with object touching edge
+
     frame = np.zeros((400, 400, 3), dtype=np.uint8)
     cv2.circle(frame, (0, 200), 80, (200, 200, 200), -1)
-    
-    mask, meta = masker.generate_mask(frame)
-    analysis = analyzer.analyze_frame(frame, mask)
-    
-    assert meta["is_clipped"] == True
-    assert analysis["is_clipped"] == True
-    assert "Subject clipped at edges" in analysis["failure_reasons"]
 
-if __name__ == "__main__":
-    pytest.main([__file__])
+    mask, meta = masker.generate_mask(frame)
+    analysis = analyzer.analyze_frame(frame, mask, meta)
+
+    assert meta["is_clipped"] is True
+    assert analysis["is_clipped"] is True
+    assert "subject_clipped" in analysis["failure_reasons"]

@@ -5,6 +5,29 @@ from .registry import AssetRegistry
 class PackagePublisher:
     def __init__(self, registry: AssetRegistry):
         self.registry = registry
+        self.required_export_urls = {
+            "glb_url": "GLB",
+            "usdz_url": "USDZ",
+            "poster_url": "poster",
+            "thumb_url": "thumbnail",
+        }
+
+    def _validate_export_urls(self, export_urls: Dict[str, str]) -> None:
+        missing = []
+        placeholder = []
+
+        for key, label in self.required_export_urls.items():
+            value = export_urls.get(key)
+            if not value:
+                missing.append(label)
+                continue
+            if str(value).strip().lower() in {"http://missing", "https://missing", "missing"}:
+                placeholder.append(label)
+
+        if missing:
+            raise ValueError(f"Publish failed: missing required export artifacts: {', '.join(missing)}.")
+        if placeholder:
+            raise ValueError(f"Publish failed: placeholder export artifacts are not allowed: {', '.join(placeholder)}.")
 
     def publish_package(
         self, 
@@ -25,6 +48,8 @@ class PackagePublisher:
         if status == "review":
             if not self.registry.has_approval(asset_id):
                 raise ValueError(f"Publish failed: Asset {asset_id} is in 'review' status and lacks manual approval.")
+
+        self._validate_export_urls(export_urls)
             
         # 2. Get Metadata from Registry
         metadata = self.registry.get_asset(asset_id)
@@ -35,10 +60,10 @@ class PackagePublisher:
         package = AssetPackage(
             product_id=product_id,
             asset_version=metadata.version,
-            glb_url=export_urls.get("glb_url", "http://missing"),
-            usdz_url=export_urls.get("usdz_url", "http://missing"),
-            poster_image_url=export_urls.get("poster_url", "http://missing"),
-            thumbnail_url=export_urls.get("thumb_url", "http://missing"),
+            glb_url=export_urls["glb_url"],
+            usdz_url=export_urls["usdz_url"],
+            poster_image_url=export_urls["poster_url"],
+            thumbnail_url=export_urls["thumb_url"],
             bbox=metadata.bbox,
             pivot_offset=metadata.pivot_offset,
             physical_profile=physical_profile,

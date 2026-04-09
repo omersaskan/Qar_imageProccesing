@@ -41,6 +41,36 @@ class GLBExporter:
             "has_material": bool(has_material),
         }
 
+    def _material_has_texture(self, mesh: trimesh.Trimesh) -> bool:
+        try:
+            material = getattr(mesh.visual, "material", None)
+            if material is None:
+                return False
+            if getattr(material, "baseColorTexture", None) is not None:
+                return True
+            if getattr(material, "image", None) is not None:
+                return True
+        except Exception:
+            return False
+        return False
+
+    def _flatten_loaded_asset(self, loaded) -> tuple[trimesh.Trimesh, list[trimesh.Trimesh]]:
+        if isinstance(loaded, trimesh.Scene):
+            meshes = [
+                geom
+                for geom in loaded.geometry.values()
+                if isinstance(geom, trimesh.Trimesh) and len(geom.faces) > 0
+            ]
+            if not meshes:
+                raise ValueError("Exported GLB contains no renderable mesh geometry.")
+            combined = trimesh.util.concatenate([mesh.copy() for mesh in meshes])
+            return combined, meshes
+
+        if isinstance(loaded, trimesh.Trimesh):
+            return loaded, [loaded]
+
+        raise ValueError("Exported asset is not a mesh or scene.")
+
     def export(
         self,
         mesh_path: str,
@@ -70,6 +100,10 @@ class GLBExporter:
             raise FileNotFoundError(f"Source mesh not found for GLB export: {mesh_path}")
 
         mesh = self._load_mesh(mesh_path)
+        if not hasattr(mesh, "vertices") or not hasattr(mesh, "faces"):
+            raise ValueError(f"Source asset is not a polygon mesh: {mesh_path}")
+        if len(mesh.vertices) == 0 or len(mesh.faces) == 0:
+            raise ValueError(f"Source mesh has no renderable geometry: {mesh_path}")
         visual_info = self._inspect_visuals(mesh)
 
         used_texture_path = None
@@ -148,3 +182,47 @@ class GLBExporter:
             result["final_polycount"] = metadata.final_polycount
 
         return result
+
+    def inspect_exported_asset(self, glb_path: str) -> Dict[str, Any]:
+        if not os.path.exists(glb_path):
+            raise FileNotFoundError(f"Exported GLB not found: {glb_path}")
+        if os.path.getsize(glb_path) <= 0:
+            raise ValueError(f"Exported GLB is empty: {glb_path}")
+
+        loaded = trimesh.load(glb_path, force="scene")
+        combined, meshes = self._flatten_loaded_asset(loaded)
+
+        if len(combined.vertices) == 0 or len(combined.faces) == 0:
+            raise ValueError(f"Exported GLB has no renderable geometry: {glb_path}")
+
+        has_uv = any(self._inspect_visuals(mesh)["has_uv"] for mesh in meshes)
+        has_material = any(self._inspect_visuals(mesh)["has_material"] for mesh in meshes)
+        has_embedded_texture = any(self._material_has_texture(mesh) for mesh in meshes)
+        component_count = len(combined.split(only_watertight=False))
+        bounds = combined.bounds
+
+        return {
+            "vertex_count": int(len(combined.vertices)),
+            "face_count": int(len(combined.faces)),
+            "geometry_count": int(len(meshes)),
+            "component_count": int(component_count),
+            "has_uv": bool(has_uv),
+            "has_material": bool(has_material),
+            "has_embedded_texture": bool(has_embedded_texture),
+            "bounds_min": {
+                "x": float(bounds[0][0]),
+                "y": float(bounds[0][1]),
+                "z": float(bounds[0][2]),
+            },
+            "bounds_max": {
+                "x": float(bounds[1][0]),
+                "y": float(bounds[1][1]),
+                "z": float(bounds[1][2]),
+            },
+            "bbox": {
+                "x": float(bounds[1][0] - bounds[0][0]),
+                "y": float(bounds[1][1] - bounds[0][1]),
+                "z": float(bounds[1][2] - bounds[0][2]),
+            },
+            "ground_offset": abs(float(bounds[0][2])),
+        }

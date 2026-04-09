@@ -3,6 +3,13 @@ import numpy as np
 from capture_workflow.quality_analyzer import QualityAnalyzer
 from capture_workflow.config import QualityThresholds
 
+
+def _make_checkerboard(size: int = 100, tile: int = 10) -> np.ndarray:
+    grid = np.indices((size, size)).sum(axis=0) // tile
+    image = ((grid % 2) * 255).astype(np.uint8)
+    return np.stack([image, image, image], axis=2)
+
+
 def test_analyze_black_frame():
     analyzer = QualityAnalyzer()
     # 100x100 black frame
@@ -16,8 +23,7 @@ def test_analyze_black_frame():
     assert analysis["overall_pass"] is False
 
 def test_analyze_noise_frame():
-    # Uniform noise should have high blur score (high variance)
-    frame = np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8)
+    frame = _make_checkerboard()
     analyzer = QualityAnalyzer()
     analysis = analyzer.analyze_frame(frame)
     
@@ -30,8 +36,8 @@ def test_config_override():
     # Very strict config
     strict_thresholds = QualityThresholds(min_blur_score=5000.0)
     analyzer = QualityAnalyzer(thresholds=strict_thresholds)
-    
-    frame = np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8)
+
+    frame = _make_checkerboard()
     analysis = analyzer.analyze_frame(frame)
     
     # Noise has variance around 5400, but let's be safe

@@ -61,4 +61,4 @@ class Remesher:
         mesh.process(validate=True)
         mesh.remove_unreferenced_vertices()
         mesh.export(output_path)
-        return len(mesh.vertices)
+        return int(len(mesh.faces))

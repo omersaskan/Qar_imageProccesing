@@ -98,13 +98,35 @@ class COLMAPAdapter(ReconstructionAdapter):
         if not mask_path.exists():
             return False
 
-        mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
+        mask = self._read_image(mask_path, cv2.IMREAD_GRAYSCALE)
         if mask is None:
             return False
 
         h, w = mask.shape[:2]
         occupancy = float(np.sum(mask > 0) / max(h * w, 1))
         return 0.04 < occupancy < 0.90
+
+    def _read_image(self, image_path: Path, read_flag: int):
+        image = cv2.imread(str(image_path), read_flag)
+        if image is not None:
+            return image
+
+        try:
+            image_bytes = np.fromfile(str(image_path), dtype=np.uint8)
+            if image_bytes.size == 0:
+                return None
+            return cv2.imdecode(image_bytes, read_flag)
+        except Exception:
+            return None
+
+    def _frame_is_usable(self, frame_path: Path) -> bool:
+        if not frame_path.exists():
+            return False
+        if frame_path.stat().st_size <= 0:
+            return False
+
+        frame = self._read_image(frame_path, cv2.IMREAD_COLOR)
+        return frame is not None and frame.size > 0
 
     def _prepare_workspace(self, input_frames: List[str], output_dir: Path) -> Dict[str, Any]:
         images_dir = output_dir / "images"
@@ -115,10 +137,16 @@ class COLMAPAdapter(ReconstructionAdapter):
         accepted_frames = 0
         rejected_missing_mask = 0
         rejected_bad_mask = 0
+        rejected_unreadable_frame = 0
 
         for frame_path in input_frames:
             src = Path(frame_path)
             if not src.exists():
+                rejected_unreadable_frame += 1
+                continue
+
+            if not self._frame_is_usable(src):
+                rejected_unreadable_frame += 1
                 continue
 
             mask_src = src.parent / "masks" / f"{src.name}.png"
@@ -140,6 +168,7 @@ class COLMAPAdapter(ReconstructionAdapter):
             "accepted_frames": accepted_frames,
             "rejected_missing_mask": rejected_missing_mask,
             "rejected_bad_mask": rejected_bad_mask,
+            "rejected_unreadable_frame": rejected_unreadable_frame,
         }
 
     def _validate_dense_workspace(self, workspace_path: Path) -> bool:
@@ -155,6 +184,18 @@ class COLMAPAdapter(ReconstructionAdapter):
 
         return True
 
+    def _is_valid_mesh_candidate(self, mesh_path: Path) -> bool:
+        if not mesh_path.exists() or mesh_path.stat().st_size <= 0:
+            return False
+
+        try:
+            mesh = trimesh.load(str(mesh_path))
+            if isinstance(mesh, trimesh.Scene):
+                mesh = mesh.dump(concatenate=True)
+            return isinstance(mesh, trimesh.Trimesh) and len(mesh.vertices) > 0 and len(mesh.faces) > 0
+        except Exception:
+            return False
+
     def _discover_mesh_candidates(self, dense_dir: Path) -> List[str]:
         candidates: List[str] = []
 
@@ -168,20 +209,15 @@ class COLMAPAdapter(ReconstructionAdapter):
 
         for name in preferred:
             p = dense_dir / name
-            if p.exists():
+            if self._is_valid_mesh_candidate(p):
                 candidates.append(str(p))
 
         # any other non-fused mesh-like ply
         for p in dense_dir.glob("*.ply"):
             if "fused" in p.name.lower():
                 continue
-            if str(p) not in candidates:
+            if str(p) not in candidates and self._is_valid_mesh_candidate(p):
                 candidates.append(str(p))
-
-        # point cloud fallback as absolute last resort
-        fused = dense_dir / "fused.ply"
-        if fused.exists() and str(fused) not in candidates:
-            candidates.append(str(fused))
 
         return candidates
 
@@ -232,6 +268,7 @@ class COLMAPAdapter(ReconstructionAdapter):
             raise RuntimeError(
                 "Not enough usable masked frames for reconstruction. "
                 f"accepted={prep['accepted_frames']} "
+                f"unreadable={prep['rejected_unreadable_frame']} "
                 f"missing_mask={prep['rejected_missing_mask']} "
                 f"bad_mask={prep['rejected_bad_mask']}"
             )
@@ -240,6 +277,7 @@ class COLMAPAdapter(ReconstructionAdapter):
         with open(log_path, "w", encoding="utf-8") as log_file:
             log_file.write(
                 f"Workspace prepared. accepted={prep['accepted_frames']} "
+                f"unreadable={prep['rejected_unreadable_frame']} "
                 f"missing_mask={prep['rejected_missing_mask']} "
                 f"bad_mask={prep['rejected_bad_mask']}\n"
             )

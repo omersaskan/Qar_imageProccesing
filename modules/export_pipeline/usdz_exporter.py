@@ -8,15 +8,19 @@ class USDZExporter:
 
     def export(self, mesh_path: str, output_path: str) -> Dict[str, Any]:
         """
-        STUB: Simulates USDZ generation.
-        Produces a minimal valid-format placeholder.
+        Placeholder USDZ generation is intentionally disabled by default.
         """
         if not os.path.exists(mesh_path):
             raise FileNotFoundError(f"Cleaned mesh not found for USDZ export: {mesh_path}")
 
-        # Stub: Generate placeholder USDZ file
+        if os.getenv("MESHYSIZ_ENABLE_PLACEHOLDER_USDZ", "false").lower() != "true":
+            raise RuntimeError(
+                "USDZ export is not implemented in production mode. "
+                "Placeholder USDZ generation is disabled by default."
+            )
+
         with open(output_path, "wb") as f:
-            f.write(b"USDZ\x01\x00\x00\x00\x00\x00\x00\x00") # Minimal USDZ placeholder
+            f.write(b"USDZ\x01\x00\x00\x00\x00\x00\x00\x00")
 
         return {
             "format": "USDZ",

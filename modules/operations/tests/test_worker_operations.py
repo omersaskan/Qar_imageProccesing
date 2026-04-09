@@ -91,3 +91,57 @@ def test_worker_irrecoverable_failure_zero_frames(tmp_path, monkeypatch):
         
     assert updated_session.status == AssetStatus.FAILED
     assert "0 frames" in updated_session.failure_reason
+
+
+def test_worker_irrecoverable_failure_insufficient_coverage(tmp_path, monkeypatch):
+    sessions_dir = tmp_path / "sessions"
+    captures_dir = tmp_path / "captures"
+    sessions_dir.mkdir(parents=True)
+    captures_dir.mkdir(parents=True)
+
+    worker = IngestionWorker()
+    worker.session_manager.sessions_dir = sessions_dir
+    worker.session_manager.captures_dir = captures_dir
+
+    class MockExtractor:
+        def __init__(self):
+            self.config = type("Config", (), {"min_frames": 3})()
+
+        def extract_keyframes(self, *args, **kwargs):
+            return [f"frame_{idx}.jpg" for idx in range(5)]
+
+    class MockCoverageAnalyzer:
+        def analyze_coverage(self, frames):
+            return {
+                "overall_status": "insufficient",
+                "coverage_score": 0.22,
+                "reasons": ["Insufficient viewpoint diversity (2/6 unique views)."],
+            }
+
+    monkeypatch.setattr("modules.capture_workflow.frame_extractor.FrameExtractor", MockExtractor)
+    monkeypatch.setattr("modules.capture_workflow.coverage_analyzer.CoverageAnalyzer", MockCoverageAnalyzer)
+
+    session_id = "test_fail_coverage"
+    session = CaptureSession(
+        session_id=session_id,
+        product_id="test_prod",
+        operator_id="test_ops",
+        status=AssetStatus.CREATED
+    )
+
+    session_file = sessions_dir / f"{session_id}.json"
+    session_file.write_text(session.model_dump_json())
+
+    sess_video_dir = captures_dir / session_id / "video"
+    sess_video_dir.mkdir(parents=True)
+    (sess_video_dir / "raw_video.mp4").write_text("dummy video")
+
+    worker._process_pending_sessions()
+
+    with open(session_file, "r") as f:
+        updated_data = json.load(f)
+        updated_session = CaptureSession.model_validate(updated_data)
+
+    assert updated_session.status == AssetStatus.RECAPTURE_REQUIRED
+    assert updated_session.publish_state == "needs_recapture"
+    assert "Capture quality insufficient" in updated_session.failure_reason

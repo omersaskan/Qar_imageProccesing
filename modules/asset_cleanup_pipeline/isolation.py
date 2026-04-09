@@ -47,6 +47,27 @@ class MeshIsolator:
         bbox = self._bbox_extents(mesh)
         return float(np.min(bbox) / np.max(bbox))
 
+    def _footprint_dominance(self, mesh: trimesh.Trimesh) -> float:
+        bbox = self._bbox_extents(mesh)
+        footprint = float(bbox[0] * bbox[1])
+        height = float(max(bbox[2], 1e-8))
+        return float(footprint / height)
+
+    def _best_component_score(self, mesh: trimesh.Trimesh) -> float:
+        components = mesh.split(only_watertight=False)
+        if not components:
+            return 0.0
+
+        best_score = 0.0
+        for comp in components:
+            if len(comp.faces) < 50:
+                continue
+            best_score = max(best_score, float(self._score_component(comp)["total_score"]))
+
+        if best_score <= 0.0:
+            return float(self._score_component(mesh)["total_score"])
+        return best_score
+
     def _remove_horizontal_planes(
         self,
         mesh: trimesh.Trimesh,
@@ -121,6 +142,116 @@ class MeshIsolator:
 
         return working, stats
 
+    def _remove_bottom_support_bands(
+        self,
+        mesh: trimesh.Trimesh,
+        max_iter: int = 2,
+    ) -> Tuple[trimesh.Trimesh, Dict[str, Any]]:
+        """
+        Removes large low-z support slabs even when they are not perfectly horizontal.
+
+        This catches contamination that survives normal-based plane removal:
+        - slightly tilted tables
+        - thick support slabs
+        - connected low support geometry around the base
+        """
+        working = mesh.copy()
+        stats = {
+            "removed_support_bands": 0,
+            "removed_support_faces": 0,
+            "removed_support_vertices": 0,
+        }
+
+        for _ in range(max_iter):
+            if len(working.faces) == 0:
+                break
+
+            bounds = working.bounds
+            extents = np.maximum(bounds[1] - bounds[0], 1e-8)
+            total_height = float(extents[2])
+            total_footprint = float(extents[0] * extents[1])
+            if total_height <= 1e-8 or total_footprint <= 1e-8:
+                break
+
+            current_score = self._best_component_score(working)
+            centers = working.triangles_center
+            total_faces = max(len(working.faces), 1)
+            best_candidate = None
+
+            for frac in (0.12, 0.18, 0.24):
+                z_cut = float(bounds[0][2] + total_height * frac)
+                face_indices = np.where(centers[:, 2] <= z_cut)[0]
+                if len(face_indices) < max(40, int(0.06 * total_faces)):
+                    continue
+
+                candidate_band = working.submesh([face_indices], append=True, repair=False)
+                candidate_band = self._ensure_mesh(candidate_band)
+                if len(candidate_band.faces) == 0:
+                    continue
+
+                band_extents = self._bbox_extents(candidate_band)
+                footprint_ratio = float((band_extents[0] * band_extents[1]) / max(total_footprint, 1e-8))
+                thickness_ratio = float(band_extents[2] / max(total_height, 1e-8))
+                flatness_ratio = self._flatness_ratio(candidate_band)
+                face_share = float(len(face_indices) / max(total_faces, 1))
+                wide_band = bool(
+                    band_extents[0] >= extents[0] * 0.55
+                    or band_extents[1] >= extents[1] * 0.55
+                )
+
+                if not (
+                    footprint_ratio >= 0.42
+                    and thickness_ratio <= 0.22
+                    and flatness_ratio <= 0.18
+                    and face_share >= 0.08
+                    and wide_band
+                ):
+                    continue
+
+                trimmed = working.copy()
+                keep_mask = np.ones(len(working.faces), dtype=bool)
+                keep_mask[face_indices] = False
+                trimmed.update_faces(keep_mask)
+                trimmed.remove_unreferenced_vertices()
+
+                if len(trimmed.faces) == 0:
+                    continue
+
+                trimmed_score = self._best_component_score(trimmed)
+                score_gain = float(trimmed_score - current_score)
+                candidate_quality = (
+                    footprint_ratio * 0.35
+                    + face_share * 0.20
+                    + max(0.0, 0.25 - thickness_ratio) * 1.2
+                    + max(0.0, score_gain) * 1.6
+                )
+
+                if best_candidate is None or candidate_quality > best_candidate["quality"]:
+                    best_candidate = {
+                        "face_indices": face_indices,
+                        "quality": candidate_quality,
+                        "score_gain": score_gain,
+                    }
+
+            if best_candidate is None:
+                break
+
+            if best_candidate["score_gain"] < 0.05 and len(best_candidate["face_indices"]) < int(0.18 * total_faces):
+                break
+
+            remove_mask = np.zeros(len(working.faces), dtype=bool)
+            remove_mask[best_candidate["face_indices"]] = True
+            removed_vertex_ids = np.unique(working.faces[remove_mask].reshape(-1))
+
+            stats["removed_support_bands"] += 1
+            stats["removed_support_faces"] += int(np.sum(remove_mask))
+            stats["removed_support_vertices"] += int(len(removed_vertex_ids))
+
+            working.update_faces(~remove_mask)
+            working.remove_unreferenced_vertices()
+
+        return working, stats
+
     def _score_component(self, comp: trimesh.Trimesh) -> Dict[str, float]:
         faces = max(len(comp.faces), 1)
         bbox = self._bbox_extents(comp)
@@ -139,12 +270,16 @@ class MeshIsolator:
         aspect_ratio = float(np.max(bbox) / max(np.min(bbox), 1e-8))
         aspect_penalty = 1.0 if aspect_ratio <= 12.0 else max(0.2, 12.0 / aspect_ratio)
 
+        footprint_dominance = self._footprint_dominance(comp)
+        footprint_penalty = 1.0 if footprint_dominance <= 10.0 else max(0.15, 10.0 / footprint_dominance)
+
         total_score = (
             face_score * 0.30
             + compactness_score * 0.20
             + flatness_penalty * 0.20
             + centrality_score * 0.15
-            + aspect_penalty * 0.15
+            + aspect_penalty * 0.10
+            + footprint_penalty * 0.05
         )
 
         return {
@@ -155,6 +290,8 @@ class MeshIsolator:
             "centrality_score": float(centrality_score),
             "aspect_penalty": float(aspect_penalty),
             "aspect_ratio": float(aspect_ratio),
+            "footprint_dominance": float(footprint_dominance),
+            "footprint_penalty": float(footprint_penalty),
         }
 
     def isolate_product(self, mesh: trimesh.Trimesh) -> Tuple[trimesh.Trimesh, dict]:
@@ -168,6 +305,7 @@ class MeshIsolator:
 
         # 1) remove dominant planes
         current_mesh, plane_stats = self._remove_horizontal_planes(mesh)
+        current_mesh, support_stats = self._remove_bottom_support_bands(current_mesh)
 
         # 2) split components
         components = current_mesh.split(only_watertight=False)
@@ -176,6 +314,7 @@ class MeshIsolator:
                 "initial_faces": initial_faces,
                 "initial_vertices": initial_vertices,
                 **plane_stats,
+                **support_stats,
                 "component_count": 0,
                 "removed_islands": 0,
                 "final_faces": int(len(current_mesh.faces)),
@@ -211,6 +350,7 @@ class MeshIsolator:
             "initial_faces": initial_faces,
             "initial_vertices": initial_vertices,
             **plane_stats,
+            **support_stats,
             "component_count": len(components),
             "removed_islands": removed_islands,
             "final_faces": int(len(best_comp.faces)),
@@ -221,6 +361,7 @@ class MeshIsolator:
             "flatness_score": float(best_scores["flatness_score"]),
             "selected_component_score": float(best_scores["total_score"]),
             "aspect_ratio": float(best_scores["aspect_ratio"]),
+            "footprint_dominance": float(best_scores["footprint_dominance"]),
         }
 
         return best_comp, stats
