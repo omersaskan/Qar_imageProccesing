@@ -28,9 +28,30 @@ class Settings(BaseSettings):
     failed_frames_days: int = Field(14, validation_alias="RETENTION_FAILED_FRAMES_DAYS")
     reconstruction_scratch_hours: int = Field(48, validation_alias="RETENTION_RECON_SCRATCH_HOURS")
 
+    # Enforcement
+    strict_ml_segmentation: bool = Field(True, validation_alias="STRICT_ML_SEGMENTATION")
+
     @property
     def is_dev(self) -> bool:
         return self.env == AppEnvironment.LOCAL_DEV
+
+    def check_ml_deps(self) -> list[str]:
+        """Returns list of missing ML dependencies."""
+        import importlib.util
+        missing = []
+        for dep in ["rembg", "onnxruntime"]:
+            if importlib.util.find_spec(dep) is None:
+                missing.append(dep)
+        return missing
+
+    def check_processing_deps(self) -> list[str]:
+        """Returns list of missing critical processing dependencies."""
+        import importlib.util
+        missing = []
+        for dep in ["fast_simplification"]:
+            if importlib.util.find_spec(dep) is None:
+                missing.append(dep)
+        return missing
 
     def validate_setup(self):
         """Validates that the current environment has all necessary configuration."""
@@ -42,6 +63,14 @@ class Settings(BaseSettings):
             if not cp.exists():
                 if not cp.with_suffix(".bat").exists() and not cp.with_suffix(".exe").exists():
                     raise ValueError(f"COLMAP binary not found at {self.colmap_path}")
+
+            # Dependency Validation
+            if self.strict_ml_segmentation:
+                missing_ml = self.check_ml_deps()
+                if missing_ml:
+                    import logging
+                    logger = logging.getLogger("settings")
+                    logger.warning(f"CRITICAL: Missing ML dependencies in {self.env.value}: {missing_ml}")
 
 # Singleton instance
 settings = Settings()

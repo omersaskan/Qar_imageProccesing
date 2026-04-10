@@ -130,6 +130,14 @@ class GuidanceAggregator:
                     "message": "Object masking is struggling. Ensure a cleaner background and good contrast.",
                     "severity": GuidanceSeverity.WARNING
                 })
+        
+        # Check for explicit ML unavailability (Phase 3 Hardening)
+        if report.get("ml_segmentation_unavailable"):
+            messages.append({
+                "code": "MASKING_DEGRADED",
+                "message": "Capture was processed in degraded mode: ML segmentation was unavailable. Results may be contaminated.",
+                "severity": GuidanceSeverity.WARNING
+            })
 
     def _enrich_from_validation(self, report: Dict[str, Any], messages: List[Dict[str, Any]]):
         contamination = report.get("contamination_score", 0.0)

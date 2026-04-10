@@ -1,0 +1,19 @@
+Metadata-Version: 2.4
+Name: meshysiz-asset-factory
+Version: 0.1.0
+Summary: 3D Asset Factory for Product Visualization
+Author: Meshysiz Team
+Requires-Python: >=3.11
+Requires-Dist: pydantic>=2.0.0
+Requires-Dist: Pillow>=10.0.0
+Requires-Dist: trimesh
+Requires-Dist: numpy
+Requires-Dist: opencv-python
+Requires-Dist: xatlas
+Requires-Dist: fastapi
+Requires-Dist: uvicorn
+Requires-Dist: fast-simplification
+Requires-Dist: rembg
+Requires-Dist: onnxruntime
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0.0; extra == "dev"

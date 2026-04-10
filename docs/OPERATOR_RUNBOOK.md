@@ -67,20 +67,48 @@ The `IngestionWorker` runs a periodic cleanup service every hour.
 | **Manifests/Reports** | Permanent | Permanent |
 | **Audit History** | Permanent | Permanent |
 
-## 5. Troubleshooting Common Failures
+## 5. Python Dependency Verification
+
+To ensure production-grade assets, the system requires specific Python libraries. Missing dependencies will cause the `/api/ready` check to fail and will block ingestion in `pilot` or `production` environments.
+
+### Required Packages
+- **rembg**: ML-first object segmentation.
+- **onnxruntime**: Inference engine for segmentation models (CPU-first).
+- **fast-simplification**: High-performance mesh decimation.
+
+### Installation Guidance (CPU-First)
+Run the following commands in the application's Python environment:
+```powershell
+# Standard installation (CPU)
+pip install rembg onnxruntime fast-simplification
+```
+
+### Optional GPU Acceleration
+If a compatible NVIDIA GPU is available, you may use the GPU-optimized inference engine instead of the standard `onnxruntime`:
+```powershell
+# Optional: Replace onnxruntime with GPU support
+pip uninstall onnxruntime
+pip install onnxruntime-gpu
+```
+
+## 6. Troubleshooting Common Failures
 
 ### 1. `not_ready` status in `/api/ready`
-- **Cause**: Incorrect `RECON_ENGINE_PATH` or `DATA_ROOT`.
-- **Action**: Check `.env` and verify the service user has read/write permissions to those paths.
+- **Cause**: Incorrect `RECON_ENGINE_PATH`, `DATA_ROOT`, or missing Python dependencies.
+- **Action**: Check `.env` paths first. If structural checks pass, check the `dependencies` object in the API response and install missing packages as shown in Section 5.
 
-### 2. `unauthorized` (401) errors
+### 2. `503 Service Unavailable` on Upload
+- **Cause**: "System Environment Incomplete". One or more critical dependencies are missing in a non-dev environment.
+- **Action**: Ingestion is blocked to prevent degraded quality. Install required dependencies (Section 5) and restart the service.
+
+### 3. `unauthorized` (401) errors
 - **Cause**: Missing or mismatching `X-API-KEY` header.
-- **Action**: Verify the key in `.env` and the client header. Note: The key is NEVER logged for security.
+- **Action**: Verify the key in `.env` and the client header.
 
-### 3. Session stuck in `CREATED`
+### 4. Session stuck in `CREATED`
 - **Cause**: IngestionWorker not running or crashed.
 - **Action**: Check `GET /api/worker/status`. Verify local filesystem locks in `data/worker.process`.
 
-### 4. Recon Scratch Missing
-- **Cause**: Retention policy pruned the heavy intermediate data.
-- **Action**: This is normal behavior after 48 hours to save disk space. Final GLBs and manifests are preserved.
+### 5. Recon Scratch Missing
+- **Cause**: Retention policy pruned the heavy intermediate data after 48 hours.
+- **Action**: Normal behavior. Final GLBs and manifests are preserved.

@@ -69,22 +69,42 @@ async def health_check():
 
 @app.get("/api/ready", dependencies=[Depends(verify_api_key)])
 async def readiness_check():
-    """Checks if the system is fully configured and ready to process jobs."""
+    """Checks if the system is fully configured and ready for production jobs."""
     issues = []
     
-    # Check data root
+    # 1. Structural Checks
     dr = Path(settings.data_root)
-    if not dr.exists(): issues.append(f"Data root missing: {dr}")
+    if not dr.exists(): 
+        issues.append(f"Data root missing: {dr}")
     
-    # Check binaries
     cp = Path(settings.colmap_path)
     if not cp.exists() and not cp.with_suffix(".exe").exists() and not cp.with_suffix(".bat").exists():
-        issues.append(f"COLMAP bin missing: {cp}")
-        
+        issues.append(f"COLMAP binary missing: {cp}")
+
+    # 2. Dependency Checks (Refined)
+    missing_ml = settings.check_ml_deps()
+    missing_proc = settings.check_processing_deps()
+    
+    if missing_ml:
+        issues.append(f"Missing ML Segmentation dependencies: {', '.join(missing_ml)}")
+    if missing_proc:
+        issues.append(f"Missing Critical Processing dependencies: {', '.join(missing_proc)}")
+
+    # Determination logic
+    is_ready = True
+    if issues and not settings.is_dev:
+        # In Pilot/Prod, ANY structural or critical dep issue is a hard stop
+        # ML deps also trigger not_ready if strict_ml_segmentation is on
+        is_ready = False
+ 
     return {
-        "status": "ready" if not issues else "not_ready",
+        "status": "ready" if is_ready else "not_ready",
+        "env": settings.env.value,
         "issues": issues,
-        "env": settings.env.value
+        "dependencies": {
+            "ml_segmentation_ready": not bool(missing_ml),
+            "critical_processing_ready": not bool(missing_proc)
+        }
     }
 
 @app.post("/api/sessions/upload", dependencies=[Depends(verify_api_key)])
@@ -101,7 +121,20 @@ async def upload_video(
 
     # Generate unique session ID
     session_id = f"cap_{uuid.uuid4().hex[:8]}"
+
+    # Dependency Gating (Phase 3 Hardening)
+    missing_ml = settings.check_ml_deps()
+    missing_proc = settings.check_processing_deps()
     
+    if (missing_ml or missing_proc) and not settings.is_dev:
+        detail = "System Environment Incomplete: "
+        if missing_ml: detail += f"Missing ML dependencies ({', '.join(missing_ml)}). "
+        if missing_proc: detail += f"Missing Processing dependencies ({', '.join(missing_proc)}). "
+        detail += "Consult the Operator Runbook for installation guidance."
+        
+        logger.error(f"Upload blocked for session {session_id} due to environment issues.")
+        raise HTTPException(status_code=503, detail=detail)
+
     try:
         # 1. Create Session folders and record
         session = session_manager.create_session(session_id, product_id, operator_id)
@@ -234,7 +267,7 @@ async def get_logs(limit: int = 50):
 @app.get("/api/sessions/{session_id}/guidance", dependencies=[Depends(verify_api_key)])
 async def get_session_guidance(session_id: str):
     """Returns the structured guidance report for a session."""
-    reports_dir = Path(settings.op.data_root) / "captures" / session_id / "reports"
+    reports_dir = Path(settings.data_root) / "captures" / session_id / "reports"
     guidance_path = reports_dir / "guidance_report.json"
     
     if not guidance_path.exists():
@@ -255,7 +288,7 @@ async def get_session_guidance(session_id: str):
 @app.get("/api/sessions/{session_id}/guidance/summary", dependencies=[Depends(verify_api_key)])
 async def get_session_guidance_summary(session_id: str):
     """Returns the human-readable Markdown summary of the guidance."""
-    reports_dir = Path(settings.op.data_root) / "captures" / session_id / "reports"
+    reports_dir = Path(settings.data_root) / "captures" / session_id / "reports"
     summary_path = reports_dir / "guidance_summary.md"
     
     if not summary_path.exists():
