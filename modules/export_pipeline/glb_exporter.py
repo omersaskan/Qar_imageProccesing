@@ -41,14 +41,29 @@ class GLBExporter:
             "has_material": bool(has_material),
         }
 
-    def _material_has_texture(self, mesh: trimesh.Trimesh) -> bool:
+    def _material_has_texture(self, mesh: trimesh.Trimesh, slot_name: str = "baseColorTexture") -> bool:
         try:
             material = getattr(mesh.visual, "material", None)
             if material is None:
                 return False
-            if getattr(material, "baseColorTexture", None) is not None:
-                return True
-            if getattr(material, "image", None) is not None:
+            
+            tex = getattr(material, slot_name, None)
+            # Legacy fallback for older trimesh versions or generic simple materials
+            if tex is None and slot_name == "baseColorTexture":
+                 tex = getattr(material, "image", None)
+                
+            if tex is not None:
+                # PIL Image or similar
+                if hasattr(tex, "size"):
+                    if tex.size[0] <= 2 and tex.size[1] <= 2:
+                        return False
+                    return True
+                # Numpy array
+                if hasattr(tex, "shape"):
+                    if tex.shape[0] <= 2 and tex.shape[1] <= 2:
+                        return False
+                    return True
+                # Fallback if it has something but we can't tell its size easily
                 return True
         except Exception:
             return False
@@ -195,11 +210,70 @@ class GLBExporter:
         if len(combined.vertices) == 0 or len(combined.faces) == 0:
             raise ValueError(f"Exported GLB has no renderable geometry: {glb_path}")
 
-        has_uv = any(self._inspect_visuals(mesh)["has_uv"] for mesh in meshes)
-        has_material = any(self._inspect_visuals(mesh)["has_material"] for mesh in meshes)
-        has_embedded_texture = any(self._material_has_texture(mesh) for mesh in meshes)
+        has_uv = False
+        has_material = False
+        has_embedded_texture = False
+        texture_count = 0
+        material_count = 0
+        
+        # semantics
+        basecolor_present = False
+        metallic_roughness_present = False
+        normal_present = False
+        occlusion_present = False
+        emissive_present = False
+
+        for mesh in meshes:
+            vis = self._inspect_visuals(mesh)
+            if vis["has_uv"]:
+                has_uv = True
+                
+            if getattr(mesh.visual, "material", None) is not None:
+                has_material = True
+                material_count += 1
+                
+                # Check specific PBR slots
+                if self._material_has_texture(mesh, "baseColorTexture"):
+                    basecolor_present = True
+                    has_embedded_texture = True
+                    texture_count += 1
+                if self._material_has_texture(mesh, "metallicRoughnessTexture"):
+                    metallic_roughness_present = True
+                    texture_count += 1
+                if self._material_has_texture(mesh, "normalTexture"):
+                    normal_present = True
+                    texture_count += 1
+                if self._material_has_texture(mesh, "occlusionTexture"):
+                    occlusion_present = True
+                    texture_count += 1
+                if self._material_has_texture(mesh, "emissiveTexture"):
+                    emissive_present = True
+                    texture_count += 1
+                    
         component_count = len(combined.split(only_watertight=False))
         bounds = combined.bounds
+        
+        # Honest Integrity status (preservation)
+        if has_embedded_texture and has_uv and has_material:
+            integrity_status = "complete"
+        elif has_embedded_texture or has_uv:
+            integrity_status = "degraded"
+        else:
+            integrity_status = "missing"
+            
+        # Honest Semantic status (richness)
+        if not has_uv:
+            semantic_status = "geometry_only"
+        elif not has_embedded_texture:
+            semantic_status = "uv_only"
+        elif basecolor_present and normal_present and metallic_roughness_present:
+            semantic_status = "pbr_complete"
+        elif basecolor_present and (normal_present or metallic_roughness_present):
+            semantic_status = "pbr_partial"
+        elif basecolor_present:
+            semantic_status = "diffuse_textured"
+        else:
+            semantic_status = "material_incomplete"
 
         return {
             "vertex_count": int(len(combined.vertices)),
@@ -209,6 +283,16 @@ class GLBExporter:
             "has_uv": bool(has_uv),
             "has_material": bool(has_material),
             "has_embedded_texture": bool(has_embedded_texture),
+            "texture_count": texture_count,
+            "material_count": material_count,
+            "texture_integrity_status": integrity_status,
+            "material_semantic_status": semantic_status,
+            "basecolor_present": basecolor_present,
+            "metallic_roughness_present": metallic_roughness_present,
+            "normal_present": normal_present,
+            "occlusion_present": occlusion_present,
+            "emissive_present": emissive_present,
+            "material_integrity_status": "present" if has_material else "missing",
             "bounds_min": {
                 "x": float(bounds[0][0]),
                 "y": float(bounds[0][1]),

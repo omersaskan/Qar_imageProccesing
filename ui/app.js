@@ -35,6 +35,15 @@ const mainViewer = document.getElementById('main-viewer');
 const viewerTitle = document.getElementById('viewer-title');
 const viewerStatus = document.getElementById('viewer-status');
 
+// Guidance Elements
+const guidanceSection = document.getElementById('guidance-section');
+const guidanceStatusBadge = document.getElementById('guidance-status-badge');
+const nextActionText = document.getElementById('next-action-text');
+const guidanceMessages = document.getElementById('guidance-messages');
+const refreshGuidanceBtn = document.getElementById('refresh-guidance-btn');
+
+let activeSessionId = null;
+
 // --- Initialization ---
 
 async function init() {
@@ -42,7 +51,63 @@ async function init() {
     await fetchLogs();
     
     setInterval(fetchLogs, 5000);
+    setInterval(pollGuidance, 10000); // Poll guidance every 10s
     setupUploadHandlers();
+    
+    refreshGuidanceBtn.onclick = () => pollGuidance();
+}
+
+async function pollGuidance() {
+    // If we have an active session or a session needing recapture, track it
+    const activeProducts = state.products.filter(p => p.has_active_session || p.status === 'processing');
+    if (activeProducts.length > 0) {
+        // For simplicity, take the first one or the one the user just uploaded
+        // In a real app, this would be tied to a selection
+        const productId = activeProducts[0].id;
+        try {
+            // Get history to find the session ID
+            const resp = await fetch(`${API_BASE}/products/${productId}/history`);
+            const history = await resp.json();
+            if (history.length > 0) {
+                const latestSession = history[0].asset_id;
+                await fetchGuidance(latestSession);
+            }
+        } catch (err) {
+            console.warn("Guidance polling failed:", err);
+        }
+    } else {
+        guidanceSection.classList.add('hidden');
+    }
+}
+
+async function fetchGuidance(sessionId) {
+    try {
+        const response = await fetch(`${API_BASE}/sessions/${sessionId}/guidance`);
+        const guidance = await response.json();
+        renderGuidance(guidance);
+    } catch (err) {
+        console.error("Failed to fetch guidance:", err);
+    }
+}
+
+function renderGuidance(guidance) {
+    if (!guidance || guidance.status === 'CREATED' && !guidance.messages.length) {
+        guidanceSection.classList.add('hidden');
+        return;
+    }
+
+    guidanceSection.classList.remove('hidden');
+    guidanceStatusBadge.textContent = guidance.status;
+    guidanceStatusBadge.className = `badge ${guidance.status.toLowerCase()}`;
+    
+    nextActionText.textContent = guidance.next_action;
+    
+    guidanceMessages.innerHTML = (guidance.messages || []).map(msg => `
+        <div class="guidance-item ${msg.severity}">
+            <span class="symbol">${msg.severity === 'critical' ? '🔴' : msg.severity === 'warning' ? '🟡' : 'ℹ️'}</span>
+            <span class="msg-text">${msg.message}</span>
+        </div>
+    `).join('');
 }
 
 // --- Upload Handlers ---

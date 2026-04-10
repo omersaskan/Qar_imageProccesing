@@ -104,12 +104,14 @@ class AssetCleaner:
 
         isolated_mesh.export(str(isolation_temp_path))
 
+        pre_aligned_path = job_cleaned_dir / "pre_aligned_mesh.obj"
+
         # ------------------------------------------------------------
         # 3. Remesh / decimate
         # ------------------------------------------------------------
         final_polycount = self.remesher.process(
             str(isolation_temp_path),
-            str(cleaned_mesh_path),
+            str(pre_aligned_path),
             profile,
         )
 
@@ -117,7 +119,7 @@ class AssetCleaner:
         # 4. Alignment
         # ------------------------------------------------------------
         _, pivot_offset = self.alignment.align_to_ground(
-            str(cleaned_mesh_path),
+            str(pre_aligned_path),
             str(cleaned_mesh_path),
         )
 
@@ -167,6 +169,7 @@ class AssetCleaner:
             "final_polycount": int(final_polycount),
             "bbox_min": bbox_min,
             "bbox_max": bbox_max,
+            "pre_aligned_mesh_path": str(pre_aligned_path),
             "cleaned_mesh_path": str(cleaned_mesh_path),
             "metadata_path": str(metadata_path),
             "cleaned_texture_path": cleaned_texture_path,

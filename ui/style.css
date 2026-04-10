@@ -346,6 +346,51 @@ body {
     z-index: 2000;
 }
 
+/* Guidance Item Styles */
+.guidance-item {
+    padding: 0.75rem 1rem;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    font-size: 0.95rem;
+    border: 1px solid rgba(255,255,255,0.05);
+}
+
+.guidance-item.info {
+    background: rgba(0, 123, 255, 0.1);
+    color: #a5d2ff;
+    border-color: rgba(0, 123, 255, 0.2);
+}
+
+.guidance-item.warning {
+    background: rgba(255, 193, 7, 0.1);
+    color: #ffe08a;
+    border-color: rgba(255, 193, 7, 0.2);
+}
+
+.guidance-item.critical {
+    background: rgba(220, 53, 69, 0.1);
+    color: #ffb4ba;
+    border-color: rgba(220, 53, 69, 0.2);
+    font-weight: 600;
+}
+
+.btn-secondary {
+    background: rgba(255,255,255,0.05);
+    color: #fff;
+    border: 1px solid rgba(255,255,255,0.1);
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.btn-secondary:hover {
+    background: rgba(255,255,255,0.1);
+    border-color: var(--accent-color);
+}
+
 .hidden { display: none !important; }
 
 /* Existing Modal */

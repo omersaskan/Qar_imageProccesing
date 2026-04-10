@@ -10,7 +10,10 @@ from modules.asset_cleanup_pipeline.profiles import CleanupProfileType
 from modules.asset_registry.registry import AssetRegistry
 from modules.capture_workflow.session_manager import SessionManager
 from modules.export_pipeline.glb_exporter import GLBExporter
-from modules.operations.logging_config import get_component_logger
+from modules.operations.guidance import GuidanceAggregator
+from modules.operations.logging_config import get_component_logger, log_stage
+from modules.operations.settings import settings, AppEnvironment
+from modules.operations.retention import RetentionService
 from modules.qa_validation.validator import AssetValidator
 from modules.reconstruction_engine.output_manifest import OutputManifest
 from modules.shared_contracts.lifecycle import AssetStatus, ReconstructionStatus
@@ -34,10 +37,11 @@ class IrrecoverableError(WorkerError):
 
 
 class IngestionWorker:
-    def __init__(self, interval_sec: int = 5, data_root: str = "data"):
-        self.interval = interval_sec
-        self.data_root = Path(data_root).resolve()
-        self.registry = AssetRegistry()
+    def __init__(self, interval_sec: Optional[int] = None, data_root: Optional[str] = None):
+        self.interval = interval_sec or settings.worker_interval_sec
+        self.data_root = Path(data_root or settings.data_root).resolve()
+        
+        self.registry = AssetRegistry(data_root=str(self.data_root / "registry"))
         self.session_manager = SessionManager(data_root=str(self.data_root))
         self.running = False
         self._thread: Optional[threading.Thread] = None
@@ -51,6 +55,10 @@ class IngestionWorker:
         self.validator = AssetValidator()
         self.exporter = GLBExporter()
         self.job_tracker = self.registry
+        self.guidance_aggregator = GuidanceAggregator()
+        self.retention_service = RetentionService(data_root=str(self.data_root))
+        
+        self._last_retention_check = 0.0
 
     def start(self):
         if self.running:
@@ -71,7 +79,7 @@ class IngestionWorker:
         self.running = True
         self._thread = threading.Thread(target=self._run, daemon=True, name="meshysiz-worker")
         self._thread.start()
-        logger.info("IngestionWorker started.")
+        logger.info(f"IngestionWorker started (interval={self.interval}s, root={self.data_root}).")
 
     def stop(self):
         self.running = False
@@ -89,9 +97,20 @@ class IngestionWorker:
         while self.running:
             try:
                 self._process_pending_sessions()
+                
+                # Retention check every hour
+                now = time.time()
+                if now - self._last_retention_check > 3600:
+                    self._handle_retention()
+                    self._last_retention_check = now
+                    
             except Exception as e:
                 logger.error(f"Worker iteration failed: {str(e)}")
             time.sleep(self.interval)
+
+    def _handle_retention(self):
+        """Invoke the retention service logic."""
+        self.retention_service.run_cleanup()
 
     def _process_pending_sessions(self):
         sessions_dir = self.session_manager.sessions_dir
@@ -162,6 +181,11 @@ class IngestionWorker:
                     last_pipeline_stage=AssetStatus.FAILED.value,
                 )
             logger.info(f"Session {session_id} marked as FAILED. Reason: {reason}")
+            
+            # Refresh guidance on failure
+            updated = self.session_manager.get_session(session_id)
+            if updated:
+                self._update_guidance(updated)
         except Exception as e:
             logger.error(f"Failed to mark session {session_id} as FAILED: {e}")
 
@@ -181,11 +205,13 @@ class IngestionWorker:
         }
         if extracted_frames is not None:
             fields["extracted_frames"] = extracted_frames
-        return self._persist_session(
+        updated = self._persist_session(
             session,
             new_status=AssetStatus.RECAPTURE_REQUIRED,
             **fields,
         )
+        self._update_guidance(updated)
+        return updated
 
     def _advance_session(self, session: CaptureSession, next_status: AssetStatus, log_msg: str):
         try:
@@ -248,7 +274,7 @@ class IngestionWorker:
                     extracted_frames=frames,
                 )
 
-            return self._persist_session(
+            updated = self._persist_session(
                 session,
                 new_status=AssetStatus.CAPTURED,
                 extracted_frames=frames,
@@ -257,6 +283,8 @@ class IngestionWorker:
                 last_pipeline_stage=AssetStatus.CAPTURED.value,
                 failure_reason=None,
             )
+            self._update_guidance(updated)
+            return updated
         except IrrecoverableError:
             raise
         except ValueError as e:
@@ -337,6 +365,87 @@ class IngestionWorker:
             )
         except Exception as e:
             raise IrrecoverableError(f"Mesh cleanup failed: {e}")
+            
+        # PHASE 2.2A TEXTURING: Execute on the cleaned final geometry BEFORE it was aligned
+        texturing_status = "absent"
+        if manifest.engine_type == "colmap":
+            mesh_parent = Path(manifest.mesh_path).parent
+            colmap_dir = mesh_parent.parent if mesh_parent.name == "dense" else mesh_parent
+            
+            if colmap_dir.joinpath("dense").exists():
+                from modules.reconstruction_engine.openmvs_texturer import OpenMVSTexturer
+                from modules.utils.file_persistence import calculate_checksum
+                import trimesh
+                
+                texturer = OpenMVSTexturer()
+                texturing_dir = Path(cleaned_mesh_path).parent / "texturing"
+                texturing_dir.mkdir(exist_ok=True, parents=True)
+                
+                try:
+                    # 1. Texture the un-shifted geometry
+                    texture_results = texturer.run_texturing(
+                        colmap_workspace=colmap_dir,
+                        dense_workspace=colmap_dir / "dense",
+                        selected_mesh=cleanup_stats["pre_aligned_mesh_path"],
+                        output_dir=texturing_dir
+                    )
+                    
+                    textured_path = texture_results["textured_mesh_path"]
+                    tex_mesh = trimesh.load(textured_path, force="mesh")
+                    scene_mesh = tex_mesh.dump(concatenate=True) if isinstance(tex_mesh, trimesh.Scene) else tex_mesh
+                    has_uv = False
+                    if hasattr(scene_mesh.visual, 'uv') and scene_mesh.visual.uv is not None and len(scene_mesh.visual.uv) > 0:
+                        has_uv = True
+                    
+                    if has_uv:
+                        texturing_status = "real"
+                        
+                        # 2. Re-apply the alignment shift to the textured OBJ directly (preserves UVs/MTL reliably)
+                        pivot = metadata.pivot_offset
+                        aligned_textured_obj = str(Path(cleaned_mesh_path).parent / "textured_aligned_mesh.obj")
+                        
+                        with open(textured_path, "r", encoding="utf-8") as f_in, open(aligned_textured_obj, "w", encoding="utf-8") as f_out:
+                            for line in f_in:
+                                if line.startswith("v "):
+                                    parts = line.strip().split()
+                                    if len(parts) >= 4:
+                                        x = float(parts[1]) + pivot["x"]
+                                        y = float(parts[2]) + pivot["y"]
+                                        z = float(parts[3]) + pivot["z"]
+                                        f_out.write(f"v {x:.6f} {y:.6f} {z:.6f}\n")
+                                        continue
+                                f_out.write(line)
+                                
+                        texture_results["textured_mesh_path"] = aligned_textured_obj
+                        
+                        # Update output manifest source of truth to reflect the textured mesh
+                        manifest.textured_mesh_path = texture_results["textured_mesh_path"]
+                        manifest.texture_atlas_paths = texture_results["texture_atlas_paths"]
+                        manifest.texturing_engine = texture_results["texturing_engine"]
+                        manifest.texturing_log_path = texture_results["log_path"]
+                        manifest.mesh_metadata.uv_present = has_uv
+                        
+                        # ALIGN MANIFEST TRUTH
+                        manifest.mesh_path = manifest.textured_mesh_path
+                        manifest.mesh_metadata.vertex_count = len(scene_mesh.vertices)
+                        manifest.mesh_metadata.face_count = len(scene_mesh.faces)
+                        manifest.mesh_metadata.has_texture = True
+                        manifest.checksum = calculate_checksum(manifest.mesh_path)
+                        
+                        cleanup_stats["cleaned_texture_path"] = manifest.texture_atlas_paths[0] if manifest.texture_atlas_paths else None
+                        cleaned_mesh_path = manifest.textured_mesh_path
+                        session.cleanup_mesh_path = cleaned_mesh_path
+                    else:
+                        texturing_status = "degraded"
+                        logger.warning("Texturing produced mesh but no UV coordinates detected.")
+                        
+                except Exception as e:
+                    logger.warning(f"Texturing stage failed/degraded: {e}")
+                    texturing_status = "degraded"
+                    
+        manifest.texturing_status = texturing_status
+        manifest_file = Path(session.reconstruction_manifest_path) if session.reconstruction_manifest_path else self.data_root / "reconstructions" / f"job_{session.session_id}" / "manifest.json"
+        atomic_write_json(manifest_file, manifest.model_dump(mode="json"))
 
         metadata_path = Path(cleaned_mesh_path).parent / "normalized_metadata.json"
         cleanup_stats_path = Path(cleaned_mesh_path).parent / "cleanup_stats.json"
@@ -358,7 +467,8 @@ class IngestionWorker:
         manifest = self._load_manifest(session)
 
         asset_id = session.asset_id or self._build_asset_id(session)
-        texture_path = cleanup_stats.get("cleaned_texture_path") or manifest.texture_path
+        primary_texture = manifest.texture_atlas_paths[0] if manifest.texture_atlas_paths else manifest.texture_path
+        texture_path = cleanup_stats.get("cleaned_texture_path") or primary_texture
         texture_path_exists = bool(texture_path and Path(texture_path).exists())
         blob_path = self.blobs_dir / f"{asset_id}.glb"
 
@@ -396,16 +506,13 @@ class IngestionWorker:
         except Exception as e:
             raise IrrecoverableError(f"Exported GLB validation failed: {e}")
 
-        texture_path = cleanup_stats.get("cleaned_texture_path") or manifest.texture_path
+        primary_texture = manifest.texture_atlas_paths[0] if manifest.texture_atlas_paths else manifest.texture_path
+        texture_path = cleanup_stats.get("cleaned_texture_path") or primary_texture
         texture_path_exists = bool(texture_path and Path(texture_path).exists())
         has_uv = bool(export_metrics["has_uv"])
         has_material = bool(export_metrics["has_material"])
         has_embedded_texture = bool(export_metrics["has_embedded_texture"])
-        texture_status = (
-            "complete"
-            if has_embedded_texture and has_uv
-            else ("degraded" if texture_path_exists or has_material else "missing")
-        )
+        texture_status = export_metrics.get("texture_integrity_status", "missing")
 
         validation_input = {
             "poly_count": int(export_metrics["face_count"]),
@@ -416,7 +523,17 @@ class IngestionWorker:
             "texture_path_exists": bool(texture_path_exists or has_embedded_texture),
             "has_uv": has_uv,
             "has_material": has_material,
-            "texture_applied_successfully": bool(has_embedded_texture and has_uv and has_material),
+            "has_embedded_texture": has_embedded_texture,
+            "texture_count": export_metrics.get("texture_count", 0),
+            "material_count": export_metrics.get("material_count", 0),
+            "texture_integrity_status": texture_status,
+            "material_semantic_status": export_metrics.get("material_semantic_status", "geometry_only"),
+            "basecolor_present": bool(export_metrics.get("basecolor_present", False)),
+            "normal_present": bool(export_metrics.get("normal_present", False)),
+            "metallic_roughness_present": bool(export_metrics.get("metallic_roughness_present", False)),
+            "occlusion_present": bool(export_metrics.get("occlusion_present", False)),
+            "emissive_present": bool(export_metrics.get("emissive_present", False)),
+            "material_integrity_status": export_metrics.get("material_integrity_status", "missing"),
             "delivery_geometry_count": int(export_metrics["geometry_count"]),
             "delivery_component_count": int(export_metrics["component_count"]),
         }
@@ -428,7 +545,7 @@ class IngestionWorker:
         atomic_write_json(validation_report_path, report.model_dump(mode="json"))
 
         logger.info(f"Validation Decision for {session.session_id}: {report.final_decision.upper()}")
-        return self._persist_session(
+        updated = self._persist_session(
             session,
             new_status=AssetStatus.VALIDATED,
             asset_id=asset_id,
@@ -437,6 +554,8 @@ class IngestionWorker:
             last_pipeline_stage=AssetStatus.VALIDATED.value,
             failure_reason=None,
         )
+        self._update_guidance(updated)
+        return updated
 
     def _handle_publish(self, session: CaptureSession) -> CaptureSession:
         if session.publish_state in {"draft", "published"}:
@@ -551,24 +670,47 @@ class IngestionWorker:
         with open(report_path, "r", encoding="utf-8") as f:
             return ValidationReport.model_validate(json.load(f))
 
-    def _finalize_ingestion(self, session: CaptureSession) -> CaptureSession:
-        """
-        Compatibility wrapper for existing tools/tests.
-        Executes the remaining phase handlers sequentially starting from the
-        current session status.
-        """
-        current = self.session_manager.get_session(session.session_id) or session
-
-        if current.status == AssetStatus.RECONSTRUCTED:
-            current = self._handle_cleanup(current)
-        if current.status == AssetStatus.CLEANED:
-            current = self._handle_export(current)
-        if current.status == AssetStatus.EXPORTED:
-            current = self._handle_validation(current)
-        if current.status == AssetStatus.VALIDATED and current.publish_state not in {"draft", "published"}:
-            current = self._handle_publish(current)
-
         return current
+
+    def _update_guidance(self, session: CaptureSession):
+        """
+        Generates and persists the latest guidance report based on current session state.
+        """
+        try:
+            reports_dir = self.session_manager.get_capture_path(session.session_id) / "reports"
+            reports_dir.mkdir(parents=True, exist_ok=True)
+
+            coverage_report = None
+            cov_path = reports_dir / "coverage_report.json"
+            if cov_path.exists():
+                with open(cov_path, "r", encoding="utf-8") as f:
+                    coverage_report = json.load(f)
+
+            validation_report = None
+            val_path = reports_dir / "validation_report.json"
+            if val_path.exists():
+                with open(val_path, "r", encoding="utf-8") as f:
+                    validation_report = json.load(f)
+
+            guidance = self.guidance_aggregator.generate_guidance(
+                session_id=session.session_id,
+                status=session.status,
+                coverage_report=coverage_report,
+                validation_report=validation_report,
+                failure_reason=session.failure_reason
+            )
+
+            # Persist artifacts
+            guidance_json_path = reports_dir / "guidance_report.json"
+            guidance_md_path = reports_dir / "guidance_summary.md"
+            
+            atomic_write_json(guidance_json_path, guidance.model_dump(mode="json"))
+            with open(guidance_md_path, "w", encoding="utf-8") as f:
+                f.write(self.guidance_aggregator.to_markdown(guidance))
+
+            logger.info(f"Guidance updated for {session.session_id}")
+        except Exception as e:
+            logger.warning(f"Failed to update guidance for {session.session_id}: {e}")
 
 
 worker_instance = IngestionWorker()

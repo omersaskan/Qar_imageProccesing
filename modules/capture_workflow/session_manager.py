@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 from typing import Optional, Any
-from modules.shared_contracts.models import CaptureSession
+from modules.shared_contracts.models import CaptureSession, SessionEvent
 from modules.shared_contracts.lifecycle import AssetStatus, assert_transition
 from modules.utils.path_safety import validate_safe_path, ensure_dir, validate_identifier
 from modules.utils.file_persistence import atomic_write_json, FileLock
@@ -34,6 +34,13 @@ class SessionManager:
         ensure_dir(session_capture_dir / "frames")
         ensure_dir(session_capture_dir / "reports")
         
+        # Record initial event
+        session.history.append(SessionEvent(
+            from_status="none",
+            to_status=AssetStatus.CREATED.value,
+            note="Session created"
+        ))
+
         self.save_session(session)
         return session
 
@@ -66,11 +73,22 @@ class SessionManager:
             if not session:
                 raise ValueError(f"Session {session_id} not found")
 
+            old_status = session.status
             if new_status is not None:
-                assert_transition(session.status, new_status)
+                assert_transition(old_status, new_status)
                 session.status = new_status
+                
+                # Record event
+                event = SessionEvent(
+                    from_status=old_status.value,
+                    to_status=new_status.value,
+                    note=fields.get("failure_reason") or fields.get("note") or f"Transition to {new_status.value}",
+                    stage=fields.get("last_pipeline_stage") or session.last_pipeline_stage
+                )
+                session.history.append(event)
 
             for field_name, value in fields.items():
+                if field_name == "note": continue # internal metadata
                 if not hasattr(session, field_name):
                     raise AttributeError(f"CaptureSession has no field '{field_name}'")
                 setattr(session, field_name, value)

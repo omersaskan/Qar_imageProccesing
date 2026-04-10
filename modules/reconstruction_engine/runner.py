@@ -2,6 +2,7 @@ import os
 import shutil
 import time
 from pathlib import Path
+import logging
 from typing import List, Optional, Tuple
 
 import cv2

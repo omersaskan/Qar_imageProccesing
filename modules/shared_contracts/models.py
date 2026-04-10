@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from enum import Enum
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field, HttpUrl, field_validator
 from .lifecycle import AssetStatus, ReconstructionStatus
@@ -8,6 +9,14 @@ class Product(BaseModel):
     name: str
     description: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class SessionEvent(BaseModel):
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    from_status: str
+    to_status: str
+    note: Optional[str] = None
+    stage: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 class CaptureSession(BaseModel):
     session_id: str
@@ -29,6 +38,7 @@ class CaptureSession(BaseModel):
     asset_version: Optional[str] = None
     publish_state: Optional[str] = None
     last_pipeline_stage: Optional[str] = None
+    history: List[SessionEvent] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     @field_validator("status", mode="before")
@@ -97,6 +107,11 @@ class ValidationReport(BaseModel):
     flatness_score: float = 1.0
     compactness_score: float = 1.0
     selected_component_score: float = 1.0
+    
+    # Phase 2.2C: Material Semantics
+    material_quality_grade: str = "F"
+    material_semantic_status: str = "geometry_only"
+    
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class AssetPackage(BaseModel):
@@ -111,3 +126,19 @@ class AssetPackage(BaseModel):
     physical_profile: ProductPhysicalProfile
     validation_status: str
     package_status: str = "ready_for_ar"
+
+class GuidanceSeverity(str, Enum):
+    INFO = "info"
+    WARNING = "warning"
+    CRITICAL = "critical"
+
+class CaptureGuidance(BaseModel):
+    session_id: str
+    status: AssetStatus
+    next_action: str
+    should_recapture: bool
+    is_ready_for_review: bool
+    messages: List[Dict[str, Any]] = Field(default_factory=list) # [{code: str, message: str, severity: GuidanceSeverity}]
+    coverage_summary: Optional[Dict[str, Any]] = None
+    validation_summary: Optional[Dict[str, Any]] = None
+    last_updated: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

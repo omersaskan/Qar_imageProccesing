@@ -30,6 +30,25 @@
             <p>Production-ready asset tracking & version management</p>
         </header>
 
+        <!-- Guidance Widget -->
+        <section id="guidance-section" class="card glass hidden" style="margin-bottom: 2rem;">
+            <div class="card-header" style="padding: 1rem; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; justify-content: space-between; align-items: center;">
+                <h2 style="margin: 0; font-size: 1.2rem;">Operator Guidance</h2>
+                <span id="guidance-status-badge" class="badge">PENDING</span>
+            </div>
+            <div class="card-body" style="padding: 1.5rem;">
+                <div id="guidance-next-action" class="next-action-box" style="background: rgba(255,255,255,0.05); padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem; border: 1px solid rgba(255,255,255,0.1);">
+                    <strong>Next Action:</strong> <span id="next-action-text" style="color: var(--accent-color); font-weight: 600;">Loading...</span>
+                </div>
+                <div id="guidance-messages" class="guidance-list" style="display: flex; flex-direction: column; gap: 0.75rem;">
+                    <!-- Dynamic Messages -->
+                </div>
+                <div class="guidance-footer" style="margin-top: 1.5rem; text-align: right;">
+                   <button id="refresh-guidance-btn" class="btn-secondary">Refresh Guidance</button>
+                </div>
+            </div>
+        </section>
+
         <section class="stats-grid">
             <div class="stat-card glass">
                 <span class="label">Total Products</span>

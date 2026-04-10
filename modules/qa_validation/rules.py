@@ -20,12 +20,12 @@ class ValidationThresholds(BaseModel):
     min_compactness_score: float = Field(0.01, ge=0, le=1.0)
     min_selected_component_score: float = Field(0.20, ge=0, le=1.0)
 
-    # texture / UV thresholds
-    require_uv_for_texture_pass: bool = True
-
     # delivered artifact thresholds
     max_delivery_component_count_pass: int = Field(2, ge=1)
     max_delivery_component_count_review: int = Field(5, ge=1)
+    
+    # material / semantic requirements
+    require_pbr_complete: bool = False
 
 
 def validate_polycount(count: int, thresholds: ValidationThresholds) -> str:
@@ -38,17 +38,34 @@ def validate_polycount(count: int, thresholds: ValidationThresholds) -> str:
 
 def validate_texture(status: str) -> str:
     """
-    status expected:
-    - complete
-    - degraded
-    - missing
+    Integrity focus: whether mapping/packaging survived.
     """
     status = status.lower()
     if status == "complete":
         return "pass"
     if status in {"degraded", "minor_missing"}:
         return "review"
+    if status == "missing":
+        return "fail"
     return "fail"
+
+
+def validate_material_semantics(status: str) -> str:
+    """
+    Richness focus: diffuse vs partial PBR vs complete PBR.
+    - geometry_only -> fail
+    - uv_only -> review
+    - diffuse_textured -> pass
+    - pbr_partial -> pass
+    - pbr_complete -> pass
+    """
+    status = status.lower()
+    if status in {"pbr_complete", "pbr_partial", "diffuse_textured"}:
+        return "pass"
+    if status in {"uv_only", "material_incomplete"}:
+        return "review"
+    return "fail" # geometry_only or unknown
+
 
 
 def validate_bbox(dimensions: Dict[str, float], thresholds: ValidationThresholds) -> str:
@@ -131,37 +148,33 @@ def validate_contamination(stats: Dict[str, Any], thresholds: ValidationThreshol
 
 def validate_texture_integrity(asset_data: Dict[str, Any], thresholds: ValidationThresholds) -> Dict[str, str]:
     """
-    Checks:
-    - texture exists but no UV
-    - texture exists but application failed
-    - texture exists but material missing
+    Honest checks based entirely on the delivered GLB stats.
+    Uses: texture_integrity_status, has_uv, has_material, texture_count.
     """
     results: Dict[str, str] = {}
-
-    texture_path_exists = bool(asset_data.get("texture_path_exists", False))
+    
+    status = str(asset_data.get("texture_integrity_status", "missing")).lower()
+    sem_status = str(asset_data.get("material_semantic_status", "geometry_only")).lower()
     has_uv = bool(asset_data.get("has_uv", False))
     has_material = bool(asset_data.get("has_material", False))
-    texture_applied_successfully = bool(asset_data.get("texture_applied_successfully", False))
+    texture_count = int(asset_data.get("texture_count", 0))
 
-    # texture + UV integrity
-    if texture_path_exists and not has_uv and thresholds.require_uv_for_texture_pass:
-        results["texture_uv_integrity"] = "review"
-    elif texture_path_exists and has_uv:
+    # 1. Core Integrity (did it survive?)
+    if status == "complete":
         results["texture_uv_integrity"] = "pass"
-    else:
-        results["texture_uv_integrity"] = "pass" if not texture_path_exists else "review"
-
-    # texture application
-    if texture_path_exists and not texture_applied_successfully:
-        results["texture_application"] = "review"
-    else:
         results["texture_application"] = "pass"
-
-    # material integrity
-    if texture_path_exists and not has_material:
-        results["material_integrity"] = "review"
-    else:
         results["material_integrity"] = "pass"
+    elif status == "degraded":
+        results["texture_uv_integrity"] = "pass" if has_uv else "review"
+        results["texture_application"] = "pass" if texture_count > 0 else "review"
+        results["material_integrity"] = "pass" if has_material else "review"
+    else:
+        results["texture_uv_integrity"] = "fail"
+        results["texture_application"] = "fail"
+        results["material_integrity"] = "fail"
+        
+    # 2. Semantic Richness (how good is it?)
+    results["material_semantics"] = validate_material_semantics(sem_status)
 
     return results
 

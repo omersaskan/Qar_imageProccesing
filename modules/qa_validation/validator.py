@@ -28,11 +28,22 @@ class AssetValidator:
         - texture_path_exists: bool
         - has_uv: bool
         - has_material: bool
-        - texture_applied_successfully: bool
+        - has_embedded_texture: bool
+        - texture_count: int
+        - material_count: int
+        - texture_integrity_status: str
+        - material_integrity_status: str
+        - material_semantic_status: str
+        - basecolor_present: bool
+        - normal_present: bool
+        - metallic_roughness_present: bool
         """
 
         poly_decision = validate_polycount(asset_data.get("poly_count", 0), self.thresholds)
-        texture_decision = validate_texture(asset_data.get("texture_status", "unknown"))
+        texture_status = asset_data.get("texture_integrity_status", "missing")
+        semantic_status = asset_data.get("material_semantic_status", "geometry_only")
+        
+        texture_decision = validate_texture(texture_status)
         bbox_decision = validate_bbox(asset_data.get("bbox", {}), self.thresholds)
         ground_decision = validate_ground_alignment(asset_data.get("ground_offset", 99.0), self.thresholds)
 
@@ -75,6 +86,9 @@ class AssetValidator:
             + min(0.20, comp_overflow) * 0.15
             + texture_penalty * 0.15
         )
+        
+        # New: Material Quality Grade
+        material_grade = self._calculate_material_grade(asset_data)
 
         combined_report = {}
         combined_report.update(contamination_decisions)
@@ -84,7 +98,7 @@ class AssetValidator:
         return ValidationReport(
             asset_id=asset_id,
             poly_count=asset_data.get("poly_count", 0),
-            texture_status=asset_data.get("texture_status", "unknown"),
+            texture_status=texture_status,
             bbox_reasonable=(bbox_decision == "pass"),
             ground_aligned=(ground_decision == "pass"),
             component_count=comp_count,
@@ -92,6 +106,8 @@ class AssetValidator:
             contamination_score=contamination_score,
             contamination_report=combined_report,
             mobile_performance_grade=self._calculate_grade(asset_data.get("poly_count", 0)),
+            material_quality_grade=material_grade,
+            material_semantic_status=semantic_status,
             final_decision=final_decision,
         )
 
@@ -103,3 +119,16 @@ class AssetValidator:
         if poly_count <= 100_000:
             return "C"
         return "D"
+
+    def _calculate_material_grade(self, asset_data: Dict[str, Any]) -> str:
+        status = str(asset_data.get("material_semantic_status", "geometry_only")).lower()
+        if status == "pbr_complete":
+            return "S"  # State of the art PBR
+        if status == "pbr_partial":
+            return "A"  # High quality but missing minor channels
+        if status == "diffuse_textured":
+            return "B"  # Valid photogrammetry
+        if status == "uv_only":
+            return "C"  # Map ready but untextured
+        return "F"  # Fail / Geometry only
+
