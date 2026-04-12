@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Calibration Dataset Schema",
+  "description": "Schema for real-world calibration dataset entries for the Qar/ModelPlate pipeline.",
+  "version": "1.0.0",
+  "type": "object",
+  "required": ["fixture_id", "label", "coverage_report"],
+  "properties": {
+    "fixture_id": {
+      "type": "string",
+      "description": "Unique identifier for this fixture (e.g. 'real_cap_001')"
+    },
+    "description": {
+      "type": "string",
+      "description": "Human-readable description of capture scenario and conditions"
+    },
+    "session_id": {
+      "type": "string",
+      "description": "Original session_id from the pipeline (if extracted from real session)"
+    },
+    "product_type": {
+      "type": "string",
+      "description": "Type of product being scanned (e.g. 'sneaker', 'bag', 'bottle', 'electronics', 'jewelry')"
+    },
+    "capture_environment": {
+      "type": "string",
+      "enum": ["studio", "office", "outdoor", "handheld", "turntable", "unknown"],
+      "description": "Capture environment / setup"
+    },
+    "label": {
+      "type": "string",
+      "enum": ["good", "recapture", "bad", "noisy", "insufficient"],
+      "description": "Ground truth outcome label for this capture"
+    },
+    "expected_action": {
+      "type": "string",
+      "enum": ["accept", "recapture", "review", "fail"],
+      "description": "Expected pipeline action: what the system SHOULD decide"
+    },
+    "observed_issue_classes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "low_diversity",
+          "narrow_motion",
+          "scale_flat",
+          "too_few_frames",
+          "masking_fallback",
+          "low_confidence",
+          "ml_unavailable",
+          "contamination_high",
+          "contamination_fragmented",
+          "texture_failure",
+          "blur",
+          "overexposure",
+          "underexposure",
+          "object_too_small",
+          "object_too_large",
+          "object_clipped",
+          "background_cluttered",
+          "none"
+        ]
+      },
+      "description": "List of known issue classes present in this capture"
+    },
+    "source": {
+      "type": "string",
+      "enum": ["synthetic", "real", "extracted"],
+      "description": "How this fixture was created: synthetic (hand-authored), real (from production), extracted (via extract_fixture.py)"
+    },
+    "extracted_at": {
+      "type": "string",
+      "description": "ISO8601 timestamp when this fixture was extracted (if source=extracted)"
+    },
+    "coverage_report": {
+      "type": "object",
+      "description": "Output of CoverageAnalyzer.analyze_coverage() — required for coverage evaluation",
+      "required": ["overall_status"],
+      "properties": {
+        "overall_status": {"type": "string", "enum": ["sufficient", "insufficient"]},
+        "coverage_score": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "unique_views": {"type": "integer", "minimum": 0},
+        "readable_frames": {"type": "integer", "minimum": 0},
+        "diversity": {"type": "string"},
+        "reasons": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "validation_report": {
+      "type": ["object", "null"],
+      "description": "Output of AssetValidator.validate() — optional, used for contamination/quality evaluation",
+      "properties": {
+        "final_decision": {"type": "string", "enum": ["pass", "review", "fail"]},
+        "contamination_score": {"type": "number"},
+        "mobile_performance_grade": {"type": "string"},
+        "poly_count": {"type": "integer"}
+      }
+    },
+    "guidance_report": {
+      "type": ["object", "null"],
+      "description": "Output of GuidanceAggregator.generate_guidance() — optional, used for guidance evaluation",
+      "properties": {
+        "next_action": {"type": "string"},
+        "should_recapture": {"type": "boolean"},
+        "is_ready_for_review": {"type": "boolean"},
+        "messages": {"type": "array"}
+      }
+    },
+    "notes": {
+      "type": "string",
+      "description": "Operator notes, edge cases, or tuning observations"
+    },
+    "operator_id": {
+      "type": "string",
+      "description": "Operator who labeled this fixture"
+    },
+    "labeled_at": {
+      "type": "string",
+      "description": "ISO8601 timestamp when this fixture was labeled"
+    }
+  }
+}

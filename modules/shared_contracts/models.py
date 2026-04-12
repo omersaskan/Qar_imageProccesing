@@ -41,6 +41,26 @@ class CaptureSession(BaseModel):
     history: List[SessionEvent] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
+    # --- SPRINT 1: TICKET-001 — Retry Safety Fields ---
+    # Number of recoverable-error retries attempted so far.
+    retry_count: int = Field(0, ge=0)
+    # The pipeline stage where the last retry occurred (e.g. "captured", "cleaned").
+    last_retry_stage: Optional[str] = None
+    # UTC timestamp of the most recent error/retry event.
+    last_error_at: Optional[datetime] = None
+
+    # --- SPRINT 2: TICKET-005 — Session-safe export metrics ---
+    # Path to the persisted export_metrics JSON produced during _handle_validation.
+    # This replaces the unsafe worker-instance-level _last_export_metrics cache that
+    # could be overwritten by a concurrent session processed in the same worker cycle.
+    export_metrics_path: Optional[str] = None
+
+    # --- SPRINT 2: TICKET-006 — Progress-aware timeout ---
+    # Updated whenever the session successfully advances a pipeline stage.
+    # Timeout decisions use this timestamp rather than (only) created_at, so that
+    # a long-but-progressing job is not incorrectly terminated.
+    last_pipeline_progress_at: Optional[datetime] = None
+
     @field_validator("status", mode="before")
     @classmethod
     def validate_status(cls, v: Any) -> Any:
@@ -94,24 +114,24 @@ class ValidationReport(BaseModel):
     bbox_reasonable: bool
     ground_aligned: bool
     mobile_performance_grade: str
-    
+
     # Contamination metrics
     component_count: int = 1
     largest_component_share: float = 1.0
     contamination_score: float = 0.0 # 0.0 (clean) to 1.0 (contaminated)
     contamination_report: Dict[str, Any] = Field(default_factory=dict)
-    
+
     final_decision: str # pass, fail, review
-    
+
     # Phase 3: New Robust Scoring
     flatness_score: float = 1.0
     compactness_score: float = 1.0
     selected_component_score: float = 1.0
-    
+
     # Phase 2.2C: Material Semantics
     material_quality_grade: str = "F"
     material_semantic_status: str = "geometry_only"
-    
+
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class AssetPackage(BaseModel):

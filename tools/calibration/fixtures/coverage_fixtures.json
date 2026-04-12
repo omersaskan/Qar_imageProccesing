@@ -1,0 +1,122 @@
+[
+  {
+    "fixture_id": "fix_001",
+    "description": "Good full-orbit capture — 8 unique views, top-down included",
+    "label": "good",
+    "coverage_report": {
+      "num_frames": 45,
+      "readable_frames": 43,
+      "unique_views": 9,
+      "diversity": "sufficient",
+      "top_down_captured": true,
+      "center_x_span": 0.22,
+      "center_y_span": 0.18,
+      "scale_variation": 1.35,
+      "aspect_variation": 0.20,
+      "coverage_score": 0.91,
+      "fallback_frames": 1,
+      "low_confidence_frames": 0,
+      "overall_status": "sufficient",
+      "recommended_action": "reconstruct",
+      "reasons": []
+    }
+  },
+  {
+    "fixture_id": "fix_002",
+    "description": "Too few unique views — product was mainly shot head-on",
+    "label": "recapture",
+    "coverage_report": {
+      "num_frames": 30,
+      "readable_frames": 28,
+      "unique_views": 3,
+      "diversity": "insufficient",
+      "top_down_captured": false,
+      "center_x_span": 0.05,
+      "center_y_span": 0.04,
+      "scale_variation": 1.08,
+      "aspect_variation": 0.06,
+      "coverage_score": 0.31,
+      "fallback_frames": 2,
+      "low_confidence_frames": 1,
+      "overall_status": "insufficient",
+      "recommended_action": "needs_recapture",
+      "reasons": [
+        "Insufficient viewpoint diversity (3/5 unique views).",
+        "Object motion across accepted views is too narrow."
+      ]
+    }
+  },
+  {
+    "fixture_id": "fix_003",
+    "description": "Insufficient frames — very short clip",
+    "label": "insufficient",
+    "coverage_report": {
+      "num_frames": 6,
+      "readable_frames": 5,
+      "unique_views": 4,
+      "diversity": "insufficient",
+      "top_down_captured": false,
+      "center_x_span": 0.12,
+      "center_y_span": 0.09,
+      "scale_variation": 1.12,
+      "aspect_variation": 0.10,
+      "coverage_score": 0.40,
+      "fallback_frames": 0,
+      "low_confidence_frames": 0,
+      "overall_status": "insufficient",
+      "recommended_action": "needs_recapture",
+      "reasons": [
+        "Too few readable object-centric frames (5/8)."
+      ]
+    }
+  },
+  {
+    "fixture_id": "fix_004",
+    "description": "Degraded masking — heuristic fallback on majority of frames",
+    "label": "noisy",
+    "coverage_report": {
+      "num_frames": 35,
+      "readable_frames": 30,
+      "unique_views": 6,
+      "diversity": "sufficient",
+      "top_down_captured": false,
+      "center_x_span": 0.15,
+      "center_y_span": 0.10,
+      "scale_variation": 1.20,
+      "aspect_variation": 0.14,
+      "coverage_score": 0.62,
+      "fallback_frames": 18,
+      "low_confidence_frames": 12,
+      "overall_status": "insufficient",
+      "recommended_action": "needs_recapture",
+      "reasons": [
+        "Too many frames relied on heuristic fallback (18).",
+        "Too many frames have low semantic confidence (12)."
+      ]
+    }
+  },
+  {
+    "fixture_id": "fix_005",
+    "description": "Scale-flat — all shots from same level, no depth variation",
+    "label": "recapture",
+    "coverage_report": {
+      "num_frames": 40,
+      "readable_frames": 38,
+      "unique_views": 7,
+      "diversity": "sufficient",
+      "top_down_captured": false,
+      "center_x_span": 0.18,
+      "center_y_span": 0.06,
+      "scale_variation": 1.05,
+      "aspect_variation": 0.07,
+      "coverage_score": 0.55,
+      "fallback_frames": 0,
+      "low_confidence_frames": 1,
+      "overall_status": "insufficient",
+      "recommended_action": "needs_recapture",
+      "reasons": [
+        "Accepted views show too little scale/shape variation."
+      ]
+    }
+  }
+]
