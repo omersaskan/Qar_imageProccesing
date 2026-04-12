@@ -11,6 +11,8 @@ import numpy as np
 import trimesh
 
 from .mesh_selector import MeshSelector
+from .failures import InsufficientInputError, RuntimeReconstructionError
+from modules.utils.mask_resolution import resolve_mask_path
 
 
 class ReconstructionAdapter(ABC):
@@ -85,14 +87,18 @@ class COLMAPAdapter(ReconstructionAdapter):
             cwd=str(cwd),
         )
 
+        first_error_line = None
         if process.stdout:
             for line in process.stdout:
+                if not first_error_line and ("Failed" in line or "Error" in line or "unrecognised" in line):
+                    first_error_line = line.strip()
                 log_file.write(line)
                 log_file.flush()
 
         process.wait()
         if process.returncode != 0:
-            raise RuntimeError(f"Command failed with exit code {process.returncode}: {' '.join(cmd)}")
+            msg = f"Command failed with exit code {process.returncode}: {' '.join(cmd)}"
+            raise RuntimeReconstructionError(msg, output_snippet=first_error_line)
 
     def _mask_is_usable(self, mask_path: Path) -> bool:
         if not mask_path.exists():
@@ -138,6 +144,8 @@ class COLMAPAdapter(ReconstructionAdapter):
         rejected_missing_mask = 0
         rejected_bad_mask = 0
         rejected_unreadable_frame = 0
+        
+        match_mode_counts = {"stem": 0, "legacy": 0, "none": 0}
 
         for frame_path in input_frames:
             src = Path(frame_path)
@@ -149,8 +157,10 @@ class COLMAPAdapter(ReconstructionAdapter):
                 rejected_unreadable_frame += 1
                 continue
 
-            mask_src = src.parent / "masks" / f"{src.name}.png"
-            if not mask_src.exists():
+            mask_src, match_mode = resolve_mask_path(src)
+            match_mode_counts[match_mode] += 1
+            
+            if mask_src is None:
                 rejected_missing_mask += 1
                 continue
 
@@ -169,6 +179,7 @@ class COLMAPAdapter(ReconstructionAdapter):
             "rejected_missing_mask": rejected_missing_mask,
             "rejected_bad_mask": rejected_bad_mask,
             "rejected_unreadable_frame": rejected_unreadable_frame,
+            "match_mode_counts": match_mode_counts,
         }
 
     def _validate_dense_workspace(self, workspace_path: Path) -> bool:
@@ -265,21 +276,25 @@ class COLMAPAdapter(ReconstructionAdapter):
         masks_dir: Path = prep["masks_dir"]
 
         if prep["accepted_frames"] < 3:
-            raise RuntimeError(
+            counts = prep["match_mode_counts"]
+            raise InsufficientInputError(
                 "Not enough usable masked frames for reconstruction. "
                 f"accepted={prep['accepted_frames']} "
                 f"unreadable={prep['rejected_unreadable_frame']} "
                 f"missing_mask={prep['rejected_missing_mask']} "
-                f"bad_mask={prep['rejected_bad_mask']}"
+                f"bad_mask={prep['rejected_bad_mask']} "
+                f"modes(stem={counts['stem']}, legacy={counts['legacy']}, none={counts['none']})"
             )
 
         log_path = output_dir / "reconstruction.log"
         with open(log_path, "w", encoding="utf-8") as log_file:
+            counts = prep["match_mode_counts"]
             log_file.write(
                 f"Workspace prepared. accepted={prep['accepted_frames']} "
                 f"unreadable={prep['rejected_unreadable_frame']} "
                 f"missing_mask={prep['rejected_missing_mask']} "
-                f"bad_mask={prep['rejected_bad_mask']}\n"
+                f"bad_mask={prep['rejected_bad_mask']} "
+                f"modes(stem={counts['stem']}, legacy={counts['legacy']}, none={counts['none']})\n"
             )
 
             try:
@@ -292,8 +307,8 @@ class COLMAPAdapter(ReconstructionAdapter):
                     "--database_path", str(db_path),
                     "--image_path", str(images_dir),
                     "--ImageReader.mask_path", str(masks_dir),
-                    "--SiftExtraction.use_gpu", "1" if self._use_gpu else "0",
-                    "--SiftExtraction.max_image_size", str(self._max_image_size),
+                    "--FeatureExtraction.use_gpu", "1" if self._use_gpu else "0",
+                    "--FeatureExtraction.max_image_size", str(self._max_image_size),
                 ]
                 self._run_command(cmd_extract, output_dir, log_file)
 

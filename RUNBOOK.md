@@ -67,6 +67,11 @@ registry.rollback_version("product_id")
 - **Sebep**: Aynı `asset_id` ile ikinci bir kayıt denemesi.
 - **Aksiyon**: `AssetRegistry` içindeki mevcut sürümleri kontrol edin. Her sürümün benzersiz bir ID'ye sahip olması zorunludur.
 
+### `Recapture Required` (Status)
+- **Sebep**: Maskeler bulunamadı (`missing_mask`), maske kalitesi düşük (`bad_mask`) veya viewpoint çeşitliliği yetersiz.
+- **Detay**: `COLMAPAdapter` veya `CoverageAnalyzer` aşamalarında tetiklenebilir. Loglarda `modes(stem=X, legacy=Y, none=Z)` şeklinde maske çözümleme detayları görülebilir.
+- **Aksiyon**: Capture kalitesini artırın veya objenin kameraya her yönden (360 derece) göründüğünden emin olun.
+
 ---
 
 ## 3. İzleme (Monitoring)

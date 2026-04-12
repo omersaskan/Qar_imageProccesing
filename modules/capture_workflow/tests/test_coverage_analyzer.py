@@ -8,20 +8,26 @@ from modules.capture_workflow.coverage_analyzer import CoverageAnalyzer
 from modules.capture_workflow.config import CoverageConfig
 
 
-def _write_frame_with_mask(frame_path: Path, center_x: int, radius: int, color_shift: int = 0) -> None:
+def _write_frame_with_mask(frame_path: Path, center_x: int, radius: int, color_shift: int = 0, legacy_naming: bool = True) -> None:
     frame_path.parent.mkdir(parents=True, exist_ok=True)
     masks_dir = frame_path.parent / "masks"
     masks_dir.mkdir(parents=True, exist_ok=True)
-
+    
     frame = np.zeros((320, 320, 3), dtype=np.uint8)
     frame[:] = (20 + color_shift, 25 + color_shift, 30 + color_shift)
     mask = np.zeros((320, 320), dtype=np.uint8)
-
+    
     cv2.circle(frame, (center_x, 160), radius, (180, 180, 200), -1)
     cv2.circle(mask, (center_x, 160), radius, 255, -1)
-
+    
     Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)).save(frame_path)
-    Image.fromarray(mask).save(masks_dir / f"{frame_path.name}.png")
+    
+    if legacy_naming:
+        # frame_0000.jpg.png
+        Image.fromarray(mask).save(masks_dir / f"{frame_path.name}.png")
+    else:
+        # frame_0000.png
+        Image.fromarray(mask).save(masks_dir / f"{frame_path.stem}.png")
 
 
 def test_coverage_sufficient(tmp_path):
@@ -85,3 +91,20 @@ def test_coverage_thresholds_are_configurable(tmp_path):
 
     assert report["overall_status"] == "sufficient"
     assert report["recommended_action"] == "reconstruct"
+
+
+def test_coverage_supports_stem_based_paths(tmp_path):
+    analyzer = CoverageAnalyzer()
+    frames = []
+
+    for index in range(5):
+        frame_path = tmp_path / f"frame_{index:04d}.jpg"
+        # Explicitly use stem-based naming (frame_0000.png)
+        _write_frame_with_mask(frame_path, center_x=160, radius=58, color_shift=0, legacy_naming=False)
+        frames.append(str(frame_path))
+
+    report = analyzer.analyze_coverage(frames)
+
+    # We expect readable_frames to be 5, proving stem-based resolution worked
+    assert report["num_frames"] == 5
+    assert report["readable_frames"] == 5

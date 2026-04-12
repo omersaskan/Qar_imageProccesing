@@ -297,6 +297,7 @@ class IngestionWorker:
             from modules.capture_workflow.coverage_analyzer import CoverageAnalyzer
             from modules.reconstruction_engine.job_manager import JobManager
             from modules.reconstruction_engine.runner import ReconstructionRunner
+            from modules.reconstruction_engine.failures import InsufficientInputError
             from modules.shared_contracts.models import ReconstructionJobDraft
 
             frames_dir = self.session_manager.captures_dir / session.session_id / "frames"
@@ -344,12 +345,24 @@ class IngestionWorker:
                 last_pipeline_stage=AssetStatus.RECONSTRUCTED.value,
                 failure_reason=None,
             )
+        except InsufficientInputError as e:
+            return self._mark_session_needs_recapture(
+                session,
+                reason=f"Reconstruction failed due to insufficient masked input: {str(e)}"
+            )
         except IrrecoverableError:
             raise
         except Exception as e:
             msg = str(e)
-            if "not configured" in msg or "prohibited" in msg or "VIOLATION" in msg:
-                raise IrrecoverableError(f"Engine configuration error: {msg}")
+            # Gate deterministic failures (Config, Security, or CLI errors)
+            irrerecoverable_keywords = {
+                "not configured", "prohibited", "VIOLATION", 
+                "unrecognised option", "Failed to parse options",
+                "CUDA", "GPU failure"
+            }
+            if any(k in msg for k in irrerecoverable_keywords):
+                raise IrrecoverableError(f"Engine configuration or deterministic failure: {msg}")
+            
             raise RecoverableError(f"Engine failure: {e}")
 
     def _handle_cleanup(self, session: CaptureSession) -> CaptureSession:

@@ -6,6 +6,7 @@ import json
 import numpy as np
 
 from .config import CoverageConfig, default_coverage_config
+from modules.utils.mask_resolution import resolve_mask_path, resolve_meta_path
 
 
 class CoverageAnalyzer:
@@ -33,18 +34,15 @@ class CoverageAnalyzer:
         except Exception:
             return None
 
-    def _mask_path_for_frame(self, frame_path: Path) -> Path:
-        return frame_path.parent / "masks" / f"{frame_path.name}.png"
-
-    def _meta_path_for_frame(self, frame_path: Path) -> Path:
-        return frame_path.parent / "masks" / f"{frame_path.name}.json"
-
     def _extract_signature(self, frame_path: Path) -> Optional[Dict[str, Any]]:
         frame = self._read_image(frame_path, cv2.IMREAD_COLOR)
         if frame is None or frame.size == 0:
             return None
 
-        mask_path = self._mask_path_for_frame(frame_path)
+        mask_path, _ = resolve_mask_path(frame_path)
+        if mask_path is None:
+            return None
+            
         mask = self._read_image(mask_path, cv2.IMREAD_GRAYSCALE)
         if mask is None or np.sum(mask > 0) <= 0:
             return None
@@ -71,8 +69,8 @@ class CoverageAnalyzer:
         
         fallback_used = False
         confidence = 1.0
-        meta_path = self._meta_path_for_frame(frame_path)
-        if meta_path.exists():
+        meta_path, _ = resolve_meta_path(frame_path)
+        if meta_path and meta_path.exists():
             try:
                 with open(meta_path, "r", encoding="utf-8") as f:
                     meta = json.load(f)

@@ -176,6 +176,10 @@ class ReconstructionRunner:
 
         try:
             results = self.adapter.run_reconstruction(validated_frames, execution_dir)
+        except InsufficientInputError:
+            if final_dir is not None and execution_dir.exists():
+                self._sync_workspace_back(execution_dir, final_dir)
+            raise
         except Exception as e:
             if final_dir is not None and execution_dir.exists():
                 self._sync_workspace_back(execution_dir, final_dir)

@@ -1,3 +1,4 @@
+from typing import Optional
 from modules.shared_contracts.errors import AssetFactoryError
 
 class ReconstructionError(AssetFactoryError):
@@ -14,7 +15,12 @@ class PreprocessingError(ReconstructionError):
 
 class RuntimeReconstructionError(ReconstructionError):
     """Raised when the geometric reconstruction engine fails during execution."""
-    pass
+    def __init__(self, message: str, output_snippet: Optional[str] = None):
+        if output_snippet:
+            full_msg = f"{message} | Reason: {output_snippet.strip()}"
+        else:
+            full_msg = message
+        super().__init__(full_msg)
 
 class MissingArtifactError(ReconstructionError):
     """Raised when expected outputs (mesh, texture, manifest) are missing after successful run."""
