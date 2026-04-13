@@ -12,7 +12,11 @@ import numpy as np
 import trimesh
 
 from .mesh_selector import MeshSelector
-from .failures import InsufficientInputError, RuntimeReconstructionError, InsufficientReconstructionError
+from .failures import (
+    InsufficientInputError,
+    RuntimeReconstructionError,
+    InsufficientReconstructionError,
+)
 from modules.utils.mask_resolution import resolve_mask_path
 from modules.operations.settings import settings
 
@@ -27,81 +31,125 @@ class ColmapCommandBuilder:
         self.bin = binary_path
         self.use_gpu = use_gpu
 
-    def feature_extractor(self, db_path: Path, images_dir: Path, masks_dir: Path, max_size: int) -> List[str]:
+    def feature_extractor(
+        self,
+        db_path: Path,
+        images_dir: Path,
+        masks_dir: Optional[Path],
+        max_size: int,
+    ) -> List[str]:
         cmd = [
-            self.bin, "feature_extractor",
-            "--database_path", str(db_path),
-            "--image_path", str(images_dir),
-            "--ImageReader.mask_path", str(masks_dir),
-            "--FeatureExtraction.use_gpu", "1" if self.use_gpu else "0",
-            "--FeatureExtraction.max_image_size", str(max_size),
+            self.bin,
+            "feature_extractor",
+            "--database_path",
+            str(db_path),
+            "--image_path",
+            str(images_dir),
+            "--FeatureExtraction.use_gpu",
+            "1" if self.use_gpu else "0",
+            "--FeatureExtraction.max_image_size",
+            str(max_size),
         ]
+
+        # IMPORTANT:
+        # Only pass mask_path if we intentionally want COLMAP to read masks
+        # and we have a complete copied mask set for the accepted images.
+        if masks_dir is not None:
+            cmd += ["--ImageReader.mask_path", str(masks_dir)]
+
         return cmd
 
     def matcher(self, mode: str, db_path: Path) -> List[str]:
         matcher_type = "exhaustive_matcher" if mode == "exhaustive" else "sequential_matcher"
         cmd = [
-            self.bin, matcher_type,
-            "--database_path", str(db_path),
-            # COLMAP 4.0.3 uses FeatureMatching instead of SiftMatching for GPU toggle
-            "--FeatureMatching.use_gpu", "1" if self.use_gpu else "0",
+            self.bin,
+            matcher_type,
+            "--database_path",
+            str(db_path),
+            "--FeatureMatching.use_gpu",
+            "1" if self.use_gpu else "0",
         ]
         return cmd
 
     def mapper(self, db_path: Path, images_dir: Path, output_path: Path) -> List[str]:
         cmd = [
-            self.bin, "mapper",
-            "--database_path", str(db_path),
-            "--image_path", str(images_dir),
-            "--output_path", str(output_path),
-            # Optional GPU BA for 4.x
-            "--Mapper.ba_use_gpu", "1" if self.use_gpu else "0",
+            self.bin,
+            "mapper",
+            "--database_path",
+            str(db_path),
+            "--image_path",
+            str(images_dir),
+            "--output_path",
+            str(output_path),
+            "--Mapper.ba_use_gpu",
+            "1" if self.use_gpu else "0",
         ]
         return cmd
 
     def image_undistorter(self, images_dir: Path, input_path: Path, output_path: Path) -> List[str]:
         return [
-            self.bin, "image_undistorter",
-            "--image_path", str(images_dir),
-            "--input_path", str(input_path),
-            "--output_path", str(output_path),
-            "--output_type", "COLMAP",
+            self.bin,
+            "image_undistorter",
+            "--image_path",
+            str(images_dir),
+            "--input_path",
+            str(input_path),
+            "--output_path",
+            str(output_path),
+            "--output_type",
+            "COLMAP",
         ]
 
     def patch_match_stereo(self, workspace_path: Path) -> List[str]:
         return [
-            self.bin, "patch_match_stereo",
-            "--workspace_path", str(workspace_path),
-            "--PatchMatchStereo.gpu_index", "0" if self.use_gpu else "-1",
-            "--PatchMatchStereo.geom_consistency", "1",
-            "--PatchMatchStereo.filter", "1",
+            self.bin,
+            "patch_match_stereo",
+            "--workspace_path",
+            str(workspace_path),
+            "--PatchMatchStereo.gpu_index",
+            "0" if self.use_gpu else "-1",
+            "--PatchMatchStereo.geom_consistency",
+            "1",
+            "--PatchMatchStereo.filter",
+            "1",
         ]
 
     def stereo_fusion(self, workspace_path: Path, output_path: Path) -> List[str]:
         return [
-            self.bin, "stereo_fusion",
-            "--workspace_path", str(workspace_path),
-            "--output_path", str(output_path),
+            self.bin,
+            "stereo_fusion",
+            "--workspace_path",
+            str(workspace_path),
+            "--output_path",
+            str(output_path),
         ]
 
     def poisson_mesher(self, input_path: Path, output_path: Path) -> List[str]:
         return [
-            self.bin, "poisson_mesher",
-            "--input_path", str(input_path),
-            "--output_path", str(output_path),
+            self.bin,
+            "poisson_mesher",
+            "--input_path",
+            str(input_path),
+            "--output_path",
+            str(output_path),
         ]
 
     def delaunay_mesher(self, workspace_path: Path, output_path: Path) -> List[str]:
         return [
-            self.bin, "delaunay_mesher",
-            "--input_path", str(workspace_path),
-            "--output_path", str(output_path),
+            self.bin,
+            "delaunay_mesher",
+            "--input_path",
+            str(workspace_path),
+            "--output_path",
+            str(output_path),
         ]
 
     def model_analyzer(self, model_path: Path) -> List[str]:
         return [
-            self.bin, "model_analyzer",
-            "--path", str(model_path),
+            self.bin,
+            "model_analyzer",
+            "--path",
+            str(model_path),
         ]
 
 
@@ -109,11 +157,11 @@ class OpenMVSCommandBuilder:
     """
     Builder for OpenMVS pipeline commands.
     """
+
     def __init__(self, bin_path: str):
         self.bin = Path(bin_path)
 
     def _get_bin(self, name: str) -> str:
-        # On Windows, binaries might be .exe
         p = self.bin / name
         if p.with_suffix(".exe").exists():
             return str(p.with_suffix(".exe"))
@@ -122,58 +170,72 @@ class OpenMVSCommandBuilder:
     def interface_colmap(self, workspace_path: Path, output_mvs: Path) -> List[str]:
         return [
             self._get_bin("InterfaceCOLMAP"),
-            "-i", str(workspace_path),
-            "-o", str(output_mvs),
-            "--working-dir", str(workspace_path),
+            "-i",
+            str(workspace_path),
+            "-o",
+            str(output_mvs),
+            "--working-dir",
+            str(workspace_path),
         ]
 
     def densify_point_cloud(self, input_mvs: Path, output_mvs: Path) -> List[str]:
         return [
             self._get_bin("DensifyPointCloud"),
-            "-i", str(input_mvs),
-            "-o", str(output_mvs),
-            "--resolution-level", "1",
-            "--number-views", "0", # 0 = all
-            "--max-threads", "0",
+            "-i",
+            str(input_mvs),
+            "-o",
+            str(output_mvs),
+            "--resolution-level",
+            "1",
+            "--number-views",
+            "0",
+            "--max-threads",
+            "0",
         ]
 
     def reconstruct_mesh(self, input_mvs: Path, output_mvs: Path) -> List[str]:
         return [
             self._get_bin("ReconstructMesh"),
-            "-i", str(input_mvs),
-            "-o", str(output_mvs),
+            "-i",
+            str(input_mvs),
+            "-o",
+            str(output_mvs),
         ]
 
     def refine_mesh(self, input_mvs: Path, output_mvs: Path) -> List[str]:
         return [
             self._get_bin("RefineMesh"),
-            "-i", str(input_mvs),
-            "-o", str(output_mvs),
-            "--resolution-level", "1",
-            "--max-iterations", "5",
+            "-i",
+            str(input_mvs),
+            "-o",
+            str(output_mvs),
+            "--resolution-level",
+            "1",
+            "--max-iterations",
+            "5",
         ]
 
     def texture_mesh(self, input_mvs: Path, output_mvs: Path) -> List[str]:
         return [
             self._get_bin("TextureMesh"),
-            "-i", str(input_mvs),
-            "-o", str(output_mvs),
-            "--resolution-level", "0", # Full res texture
+            "-i",
+            str(input_mvs),
+            "-o",
+            str(output_mvs),
+            "--resolution-level",
+            "0",
         ]
 
 
 class ReconstructionAdapter(ABC):
     @abstractmethod
     def run_reconstruction(
-        self, 
-        input_frames: List[str], 
+        self,
+        input_frames: List[str],
         output_dir: Path,
         density: float = 1.0,
-        enforce_masks: bool = True
+        enforce_masks: bool = True,
     ) -> dict:
-        """
-        Runs the reconstruction process and returns a dictionary with artifact info.
-        """
         raise NotImplementedError
 
     @property
@@ -191,13 +253,11 @@ class COLMAPAdapter(ReconstructionAdapter):
     """
     Product-focused COLMAP reconstruction adapter.
 
-    Improvements over the old version:
-    - filters frames by usable mask occupancy
-    - keeps explicit COLMAP chain
-    - discovers multiple mesh candidates
-    - selects best candidate with MeshSelector
-    - returns real vertex_count / face_count
-    - attempts to discover any texture-like artifact instead of always returning a dummy path
+    Key fixes in this version:
+    - mask_path is only passed to COLMAP when masks are actually available
+    - copied_mask_count is tracked explicitly
+    - unmasked fallback is now truly unmasked
+    - logging makes the mask decision visible in reconstruction.log
     """
 
     def __init__(self, engine_path: Optional[str] = None):
@@ -216,7 +276,7 @@ class COLMAPAdapter(ReconstructionAdapter):
 
         self._use_gpu = os.getenv("RECON_USE_GPU", "true").lower() == "true"
         self._max_image_size = int(os.getenv("RECON_MAX_IMAGE_SIZE", "2000"))
-        self._matcher = os.getenv("RECON_MATCHER", "exhaustive").lower()  # exhaustive | sequential
+        self._matcher = os.getenv("RECON_MATCHER", "exhaustive").lower()
         self.mesh_selector = MeshSelector()
         self.builder = ColmapCommandBuilder(self._engine_path, self._use_gpu)
 
@@ -244,7 +304,9 @@ class COLMAPAdapter(ReconstructionAdapter):
         first_error_line = None
         if process.stdout:
             for line in process.stdout:
-                if not first_error_line and ("Failed" in line or "Error" in line or "unrecognised" in line):
+                if not first_error_line and (
+                    "Failed" in line or "Error" in line or "unrecognised" in line
+                ):
                     first_error_line = line.strip()
                 log_file.write(line)
                 log_file.flush()
@@ -289,11 +351,11 @@ class COLMAPAdapter(ReconstructionAdapter):
         return frame is not None and frame.size > 0
 
     def _prepare_workspace(
-        self, 
-        input_frames: List[str], 
+        self,
+        input_frames: List[str],
         output_dir: Path,
         sampling_step: int = 1,
-        enforce_masks: bool = True
+        enforce_masks: bool = True,
     ) -> Dict[str, Any]:
         images_dir = output_dir / "images"
         masks_dir = output_dir / "masks"
@@ -301,11 +363,12 @@ class COLMAPAdapter(ReconstructionAdapter):
         masks_dir.mkdir(parents=True, exist_ok=True)
 
         accepted_frames = 0
+        copied_mask_count = 0
         rejected_missing_mask = 0
         rejected_bad_mask = 0
         rejected_unreadable_frame = 0
         rejected_sampling = 0
-        
+
         match_mode_counts = {"stem": 0, "legacy": 0, "none": 0}
 
         for i, frame_path in enumerate(input_frames):
@@ -324,7 +387,7 @@ class COLMAPAdapter(ReconstructionAdapter):
 
             mask_src, match_mode = resolve_mask_path(src)
             match_mode_counts[match_mode] += 1
-            
+
             if enforce_masks:
                 if mask_src is None:
                     rejected_missing_mask += 1
@@ -335,20 +398,59 @@ class COLMAPAdapter(ReconstructionAdapter):
                     continue
 
             shutil.copy2(src, images_dir / src.name)
+
+            # Copy mask only if it exists. Naming here intentionally matches
+            # COLMAP's expectation: frame_0000.jpg -> frame_0000.jpg.png
             if mask_src and mask_src.exists():
                 shutil.copy2(mask_src, masks_dir / f"{src.name}.png")
+                copied_mask_count += 1
+
             accepted_frames += 1
 
         return {
             "images_dir": images_dir,
             "masks_dir": masks_dir,
             "accepted_frames": accepted_frames,
+            "copied_mask_count": copied_mask_count,
             "rejected_missing_mask": rejected_missing_mask,
             "rejected_bad_mask": rejected_bad_mask,
             "rejected_unreadable_frame": rejected_unreadable_frame,
             "rejected_sampling": rejected_sampling,
             "match_mode_counts": match_mode_counts,
         }
+
+    def _resolve_effective_masks_dir(
+        self,
+        prep: Dict[str, Any],
+        enforce_masks: bool,
+        min_required_frames: int,
+    ) -> Optional[Path]:
+        accepted_frames = int(prep["accepted_frames"])
+        copied_mask_count = int(prep["copied_mask_count"])
+
+        if accepted_frames < min_required_frames:
+            counts = prep["match_mode_counts"]
+            raise InsufficientInputError(
+                "Not enough usable frames for reconstruction. "
+                f"accepted={accepted_frames} "
+                f"copied_masks={copied_mask_count} "
+                f"unreadable={prep['rejected_unreadable_frame']} "
+                f"missing_mask={prep['rejected_missing_mask']} "
+                f"bad_mask={prep['rejected_bad_mask']} "
+                f"modes(stem={counts['stem']}, legacy={counts['legacy']}, none={counts['none']})"
+            )
+
+        # If masks are enforced, every accepted image must have a copied mask.
+        if enforce_masks:
+            if copied_mask_count != accepted_frames:
+                raise InsufficientInputError(
+                    "Mask enforcement requested, but not all accepted frames have copied masks. "
+                    f"accepted={accepted_frames}, copied_masks={copied_mask_count}"
+                )
+            return prep["masks_dir"]
+
+        # Unmasked fallback: do NOT pass a mask directory to COLMAP.
+        return prep["masks_dir"] if copied_mask_count == accepted_frames and copied_mask_count > 0 else None
 
     def _validate_dense_workspace(self, workspace_path: Path) -> int:
         dense_dir = workspace_path / "dense"
@@ -358,7 +460,7 @@ class COLMAPAdapter(ReconstructionAdapter):
             raise RuntimeError(f"Dense workspace folder missing: {dense_dir}")
         if not fused_ply.exists():
             raise RuntimeError("Dense point cloud (fused.ply) missing.")
-        
+
         file_size = fused_ply.stat().st_size
         if file_size < 1024:
             raise RuntimeError(f"Fused point cloud too small ({file_size} bytes).")
@@ -366,7 +468,6 @@ class COLMAPAdapter(ReconstructionAdapter):
         return self._get_ply_point_count(fused_ply)
 
     def _get_ply_point_count(self, ply_path: Path) -> int:
-        """Roughly estimate point count from PLY file size if parsing is too slow."""
         try:
             with open(ply_path, "rb") as f:
                 header = ""
@@ -375,7 +476,7 @@ class COLMAPAdapter(ReconstructionAdapter):
                     header += line
                     if "end_header" in line:
                         break
-                
+
                 if "element vertex" in header:
                     for line in header.splitlines():
                         if "element vertex" in line:
@@ -385,98 +486,80 @@ class COLMAPAdapter(ReconstructionAdapter):
             return 0
 
     def _parse_analyzer_output(self, output: str) -> Dict[str, int]:
-        """
-        Parses the raw stdout/stderr from model_analyzer.
-        Supports both legacy 'Points3D' and COLMAP 4.0.3 'Points' formats.
-        Robust against log prefixes and varied whitespace.
-        """
         stats = {"registered_images": 0, "points_3d": 0}
-        
-        # Regex patterns as requested
-        # r"Registered\s+images\s*:\s*(\d+)"
-        # r"Points(?:3D)?\s*:\s*(\d+)"
-        
+
         for line in output.splitlines():
-            # 1. Registered Images
             reg_match = re.search(r"Registered\s+images\s*:\s*(\d+)", line)
             if reg_match:
                 stats["registered_images"] = int(reg_match.group(1))
                 continue
-            
-            # 2. Points (excluding observations)
+
             if "observations" not in line:
                 points_match = re.search(r"Points(?:3D)?\s*:\s*(\d+)", line)
                 if points_match:
                     stats["points_3d"] = int(points_match.group(1))
-                    
+
         return stats
 
     def _parse_model_stats(self, sparse_dir: Path, log_file) -> Dict[str, int]:
         cmd = self.builder.model_analyzer(sparse_dir)
         try:
-            # Using Popen-style capture for maximum compatibility with .bat files on Windows
             process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
                 cwd=str(sparse_dir.parent.parent or "."),
-                shell=True if self._engine_path.lower().endswith(".bat") else False
+                shell=True if self._engine_path and self._engine_path.lower().endswith(".bat") else False,
             )
             stdout, _ = process.communicate(timeout=30)
-            
-            # Log for debugging if empty
+
             if not stdout.strip():
                 log_file.write(f"\nWarning: model_analyzer returned empty output for {sparse_dir.name}\n")
-            
+
             return self._parse_analyzer_output(stdout)
-            
+
         except Exception as e:
             log_file.write(f"\nWarning: model_analyzer failed on {sparse_dir.name}: {e}\n")
             return {"registered_images": 0, "points_3d": 0}
 
     def _select_best_sparse_model(self, sparse_dir: Path, log_file) -> Optional[Dict[str, Any]]:
-        """
-        Iterates through all sub-models in the sparse directory and selects the best one.
-        Criteria:
-        1. Highest registered_images
-        2. Tie-break: highest sparse_points
-        3. Tie-break: lowest index (stable)
-        """
         if not sparse_dir.exists():
             return None
 
         candidates = []
-        # Sub-models are usually named '0', '1', '2', etc.
         for item in sorted(sparse_dir.glob("*"), key=lambda x: x.name):
             if not item.is_dir():
                 continue
-            
+
             stats = self._parse_model_stats(item, log_file)
             if stats["registered_images"] > 0:
-                candidates.append({
-                    "path": item,
-                    "registered_images": stats["registered_images"],
-                    "points_3d": stats["points_3d"]
-                })
-        
+                candidates.append(
+                    {
+                        "path": item,
+                        "registered_images": stats["registered_images"],
+                        "points_3d": stats["points_3d"],
+                    }
+                )
+
         if not candidates:
             return None
 
-        # Apply multi-level sorting
-        # Sort by images desc, points desc, then path name asc (for stability)
         candidates.sort(
             key=lambda x: (-x["registered_images"], -x["points_3d"], x["path"].name)
         )
-        
+
         best = candidates[0]
-        
+
         log_file.write("\n--- Sparse Model Candidates ---\n")
         for c in candidates:
             mark = " (SELECTED)" if c == best else ""
-            log_file.write(f"Model {c['path'].name}: {c['registered_images']} images, {c['points_3d']} points{mark}\n")
+            log_file.write(
+                f"Model {c['path'].name}: {c['registered_images']} images, "
+                f"{c['points_3d']} points{mark}\n"
+            )
         log_file.write("-" * 31 + "\n")
-        
+
         return best
 
     def _is_valid_mesh_candidate(self, mesh_path: Path) -> bool:
@@ -487,14 +570,17 @@ class COLMAPAdapter(ReconstructionAdapter):
             mesh = trimesh.load(str(mesh_path))
             if isinstance(mesh, trimesh.Scene):
                 mesh = mesh.dump(concatenate=True)
-            return isinstance(mesh, trimesh.Trimesh) and len(mesh.vertices) > 0 and len(mesh.faces) > 0
+            return (
+                isinstance(mesh, trimesh.Trimesh)
+                and len(mesh.vertices) > 0
+                and len(mesh.faces) > 0
+            )
         except Exception:
             return False
 
     def _discover_mesh_candidates(self, dense_dir: Path) -> List[str]:
         candidates: List[str] = []
 
-        # preferred mesh outputs
         preferred = [
             "meshed-poisson.ply",
             "meshed-delaunay.ply",
@@ -507,7 +593,6 @@ class COLMAPAdapter(ReconstructionAdapter):
             if self._is_valid_mesh_candidate(p):
                 candidates.append(str(p))
 
-        # any other non-fused mesh-like ply
         for p in dense_dir.glob("*.ply"):
             if "fused" in p.name.lower():
                 continue
@@ -517,11 +602,6 @@ class COLMAPAdapter(ReconstructionAdapter):
         return candidates
 
     def _discover_texture_candidate(self, workspace_dir: Path) -> str:
-        """
-        COLMAP poisson/delaunay outputs usually won't give a real textured mesh.
-        But if some downstream step or future extension dumps a texture image,
-        we can pick it up here. Otherwise return a known non-existing sentinel path.
-        """
         search_roots = [
             workspace_dir,
             workspace_dir / "dense",
@@ -533,7 +613,6 @@ class COLMAPAdapter(ReconstructionAdapter):
                 continue
             for ext in exts:
                 for p in root.glob(ext):
-                    # skip obvious non-texture inputs if needed
                     if "texture" in p.name.lower() or "albedo" in p.name.lower():
                         return str(p)
 
@@ -552,100 +631,98 @@ class COLMAPAdapter(ReconstructionAdapter):
             return {"vertex_count": 0, "face_count": 0}
 
     def run_reconstruction(
-        self, 
-        input_frames: List[str], 
+        self,
+        input_frames: List[str],
         output_dir: Path,
         density: float = 1.0,
-        enforce_masks: bool = True
+        enforce_masks: bool = True,
     ) -> dict:
         if not self._engine_path:
             raise RuntimeError("Reconstruction engine path (RECON_ENGINE_PATH) not configured.")
 
         sampling_step = max(1, int(1.0 / density)) if density < 1.0 else 1
-        prep = self._prepare_workspace(input_frames, output_dir, sampling_step=sampling_step, enforce_masks=enforce_masks)
+        prep = self._prepare_workspace(
+            input_frames,
+            output_dir,
+            sampling_step=sampling_step,
+            enforce_masks=enforce_masks,
+        )
         images_dir: Path = prep["images_dir"]
-        masks_dir: Path = prep["masks_dir"]
 
-        if prep["accepted_frames"] < 3:
-            counts = prep["match_mode_counts"]
-            raise InsufficientInputError(
-                "Not enough usable masked frames for reconstruction. "
-                f"accepted={prep['accepted_frames']} "
-                f"unreadable={prep['rejected_unreadable_frame']} "
-                f"missing_mask={prep['rejected_missing_mask']} "
-                f"bad_mask={prep['rejected_bad_mask']} "
-                f"modes(stem={counts['stem']}, legacy={counts['legacy']}, none={counts['none']})"
-            )
+        effective_masks_dir = self._resolve_effective_masks_dir(
+            prep=prep,
+            enforce_masks=enforce_masks,
+            min_required_frames=3,
+        )
 
         log_path = output_dir / "reconstruction.log"
         with open(log_path, "w", encoding="utf-8") as log_file:
             counts = prep["match_mode_counts"]
             log_file.write(
                 f"Workspace prepared. accepted={prep['accepted_frames']} "
+                f"copied_masks={prep['copied_mask_count']} "
                 f"unreadable={prep['rejected_unreadable_frame']} "
                 f"missing_mask={prep['rejected_missing_mask']} "
                 f"bad_mask={prep['rejected_bad_mask']} "
-                f"modes(stem={counts['stem']}, legacy={counts['legacy']}, none={counts['none']})\n"
+                f"modes(stem={counts['stem']}, legacy={counts['legacy']}, none={counts['none']}) "
+                f"mask_mode={'masked' if effective_masks_dir is not None else 'unmasked'}\n"
             )
 
             try:
                 db_path = output_dir / "database.db"
 
-                # Feature extraction
                 cmd_extract = self.builder.feature_extractor(
-                    db_path, images_dir, masks_dir, self._max_image_size
+                    db_path,
+                    images_dir,
+                    effective_masks_dir,
+                    self._max_image_size,
                 )
                 self._run_command(cmd_extract, output_dir, log_file)
 
-                # Matching
                 cmd_match = self.builder.matcher(self._matcher, db_path)
                 self._run_command(cmd_match, output_dir, log_file)
 
-                # Sparse map
                 sparse_dir = output_dir / "sparse"
                 sparse_dir.mkdir(exist_ok=True)
                 cmd_map = self.builder.mapper(db_path, images_dir, sparse_dir)
                 self._run_command(cmd_map, output_dir, log_file)
 
-                # Stage gating
                 best_model = self._select_best_sparse_model(sparse_dir, log_file)
                 if not best_model:
-                    raise RuntimeReconstructionError("Sparse reconstruction finished but no valid sub-model found.")
-                
+                    raise RuntimeReconstructionError(
+                        "Sparse reconstruction finished but no valid sub-model found."
+                    )
+
                 model_path = best_model["path"]
                 registered_images = best_model["registered_images"]
                 sparse_points = best_model["points_3d"]
                 selected_model_name = model_path.name
-                
+
                 if registered_images < 5 or sparse_points < 100:
                     raise InsufficientReconstructionError(
-                        f"Best sparse model too small for densification. model={selected_model_name}, images={registered_images}, points={sparse_points}"
+                        f"Best sparse model too small for densification. "
+                        f"model={selected_model_name}, images={registered_images}, points={sparse_points}"
                     )
 
-                # Dense prep
                 dense_dir = output_dir / "dense"
                 dense_dir.mkdir(exist_ok=True)
-                cmd_undistort = self.builder.image_undistorter(
-                    images_dir, model_path, dense_dir
-                )
+                cmd_undistort = self.builder.image_undistorter(images_dir, model_path, dense_dir)
                 self._run_command(cmd_undistort, output_dir, log_file)
 
-                # Dense depth
                 cmd_stereo = self.builder.patch_match_stereo(dense_dir)
                 self._run_command(cmd_stereo, output_dir, log_file)
 
-                # Fusion
                 cmd_fuse = self.builder.stereo_fusion(dense_dir, dense_dir / "fused.ply")
                 self._run_command(cmd_fuse, output_dir, log_file)
-                
+
                 fused_points = self._validate_dense_workspace(output_dir)
                 log_file.write(f"Dense fusion successful. Fused points: {fused_points}\n")
 
-                # Meshing: try poisson, then delaunay
                 poisson_ok = False
                 try:
                     cmd_mesh = self.builder.poisson_mesher(
-                        dense_dir / "fused.ply", dense_dir / "meshed-poisson.ply"
+                        dense_dir / "fused.ply",
+                        dense_dir / "meshed-poisson.ply",
                     )
                     self._run_command(cmd_mesh, output_dir, log_file)
                     poisson_ok = True
@@ -655,9 +732,9 @@ class COLMAPAdapter(ReconstructionAdapter):
 
                 if not poisson_ok:
                     try:
-                        # FIX: delaunay_mesher expects dense root, not fused.ply
                         cmd_mesh = self.builder.delaunay_mesher(
-                            dense_dir, dense_dir / "meshed-delaunay.ply"
+                            dense_dir,
+                            dense_dir / "meshed-delaunay.ply",
                         )
                         self._run_command(cmd_mesh, output_dir, log_file)
                         mesher_used = "delaunay"
@@ -689,15 +766,14 @@ class COLMAPAdapter(ReconstructionAdapter):
             "registered_images": registered_images,
             "sparse_points": sparse_points,
             "dense_points_fused": fused_points,
-            "mesher_used": mesher_used if 'mesher_used' in locals() else "unknown",
-            "selected_sparse_model": selected_model_name if 'selected_model_name' in locals() else "none"
+            "mesher_used": mesher_used if "mesher_used" in locals() else "unknown",
+            "selected_sparse_model": selected_model_name if "selected_model_name" in locals() else "none",
         }
 
 
 class OpenMVSAdapter(COLMAPAdapter):
     """
     Advanced adapter that uses COLMAP for SfM and OpenMVS for MVS/Texturing.
-    Requires COLMAP undistorted images as input.
     """
 
     def __init__(self, colmap_path: Optional[str] = None, openmvs_path: Optional[str] = None):
@@ -710,83 +786,120 @@ class OpenMVSAdapter(COLMAPAdapter):
         return "colmap_openmvs"
 
     def run_reconstruction(
-        self, 
-        input_frames: List[str], 
+        self,
+        input_frames: List[str],
         output_dir: Path,
         density: float = 1.0,
-        enforce_masks: bool = True
+        enforce_masks: bool = True,
     ) -> dict:
         log_path = output_dir / "reconstruction.log"
-        # We append because preparation might have already logged something
         with open(log_path, "a", encoding="utf-8") as log_file:
             log_file.write(f"\n--- OpenMVS Pipeline Start ({density=}, {enforce_masks=}) ---\n")
-            
-            # Use COLMAP sparse reconstruction first
+
             sampling_step = max(1, int(1.0 / density)) if density < 1.0 else 1
-            prep = self._prepare_workspace(input_frames, output_dir, sampling_step=sampling_step, enforce_masks=enforce_masks)
-            
-            if prep["accepted_frames"] < 5:
-                raise InsufficientInputError(f"Insufficient frames for OpenMVS: {prep['accepted_frames']}")
+            prep = self._prepare_workspace(
+                input_frames,
+                output_dir,
+                sampling_step=sampling_step,
+                enforce_masks=enforce_masks,
+            )
+
+            images_dir = prep["images_dir"]
+            effective_masks_dir = self._resolve_effective_masks_dir(
+                prep=prep,
+                enforce_masks=enforce_masks,
+                min_required_frames=5,
+            )
+
+            counts = prep["match_mode_counts"]
+            log_file.write(
+                f"OpenMVS workspace prepared. accepted={prep['accepted_frames']} "
+                f"copied_masks={prep['copied_mask_count']} "
+                f"missing_mask={prep['rejected_missing_mask']} "
+                f"bad_mask={prep['rejected_bad_mask']} "
+                f"modes(stem={counts['stem']}, legacy={counts['legacy']}, none={counts['none']}) "
+                f"mask_mode={'masked' if effective_masks_dir is not None else 'unmasked'}\n"
+            )
 
             db_path = output_dir / "database.db"
-            images_dir = prep["images_dir"]
-            masks_dir = prep["masks_dir"]
             sparse_dir = output_dir / "sparse"
             sparse_dir.mkdir(exist_ok=True)
             dense_dir = output_dir / "dense"
             dense_dir.mkdir(exist_ok=True)
 
             try:
-                # SfM
-                self._run_command(self.builder.feature_extractor(db_path, images_dir, masks_dir, self._max_image_size), output_dir, log_file)
+                self._run_command(
+                    self.builder.feature_extractor(
+                        db_path,
+                        images_dir,
+                        effective_masks_dir,
+                        self._max_image_size,
+                    ),
+                    output_dir,
+                    log_file,
+                )
                 self._run_command(self.builder.matcher(self._matcher, db_path), output_dir, log_file)
                 self._run_command(self.builder.mapper(db_path, images_dir, sparse_dir), output_dir, log_file)
-                
+
                 best_model = self._select_best_sparse_model(sparse_dir, log_file)
                 if not best_model:
-                     raise RuntimeReconstructionError("SfM failed to produce a valid sparse model.")
-                
+                    raise RuntimeReconstructionError("SfM failed to produce a valid sparse model.")
+
                 registered_images = best_model["registered_images"]
                 sparse_points = best_model["points_3d"]
 
                 if registered_images < 5:
-                    raise InsufficientReconstructionError(f"SfM only registered {registered_images} images.")
+                    raise InsufficientReconstructionError(
+                        f"SfM only registered {registered_images} images."
+                    )
 
-                # Undistort (Required for OpenMVS)
-                self._run_command(self.builder.image_undistorter(images_dir, best_model["path"], dense_dir), output_dir, log_file)
+                self._run_command(
+                    self.builder.image_undistorter(images_dir, best_model["path"], dense_dir),
+                    output_dir,
+                    log_file,
+                )
 
-                # Step 2: OpenMVS Chain
                 mvs_project = dense_dir / "project.mvs"
                 mvs_dense = dense_dir / "project_dense.mvs"
                 mvs_mesh = dense_dir / "project_mesh.mvs"
                 mvs_textured = dense_dir / "project_textured.mvs"
 
-                # InterfaceCOLMAP
-                self._run_command(self.mvs_builder.interface_colmap(dense_dir, mvs_project), dense_dir, log_file)
-
-                # Densify
-                self._run_command(self.mvs_builder.densify_point_cloud(mvs_project, mvs_dense), dense_dir, log_file)
-
-                # Reconstruct Mesh
-                self._run_command(self.mvs_builder.reconstruct_mesh(mvs_dense, mvs_mesh), dense_dir, log_file)
-
-                # Texture
-                self._run_command(self.mvs_builder.texture_mesh(mvs_mesh, mvs_textured), dense_dir, log_file)
+                self._run_command(
+                    self.mvs_builder.interface_colmap(dense_dir, mvs_project),
+                    dense_dir,
+                    log_file,
+                )
+                self._run_command(
+                    self.mvs_builder.densify_point_cloud(mvs_project, mvs_dense),
+                    dense_dir,
+                    log_file,
+                )
+                self._run_command(
+                    self.mvs_builder.reconstruct_mesh(mvs_dense, mvs_mesh),
+                    dense_dir,
+                    log_file,
+                )
+                self._run_command(
+                    self.mvs_builder.texture_mesh(mvs_mesh, mvs_textured),
+                    dense_dir,
+                    log_file,
+                )
 
                 final_mesh = dense_dir / "project_textured.obj"
                 final_tex = dense_dir / "project_textured.png"
 
                 if not final_mesh.exists():
-                    # Fallback to mesh project file (ply) if obj texturing failed
                     mvs_mesh_ply = dense_dir / "project_mesh.ply"
                     if mvs_mesh_ply.exists():
                         log_file.write("\nWarning: Texturing failed, using untextured mesh.\n")
                         final_mesh = mvs_mesh_ply
                     else:
-                        raise RuntimeReconstructionError("OpenMVS completed but no mesh output found.")
+                        raise RuntimeReconstructionError(
+                            "OpenMVS completed but no mesh output found."
+                        )
 
                 stats = self._mesh_stats(str(final_mesh))
-                
+
                 return {
                     "mesh_path": str(final_mesh),
                     "texture_path": str(final_tex) if final_tex.exists() else str(output_dir / "_no_texture.png"),
@@ -797,16 +910,15 @@ class OpenMVSAdapter(COLMAPAdapter):
                     "sparse_points": sparse_points,
                     "engine_type": self.engine_type,
                     "textured": final_tex.exists(),
-                    "selected_sparse_model": best_model["path"].name
+                    "selected_sparse_model": best_model["path"].name,
                 }
 
             except Exception as e:
                 log_file.write(f"\nOpenMVS Pipeline Error: {str(e)}\n")
                 if settings.openmvs_fail_hard:
                     raise
-                else:
-                    log_file.write("openmvs_fail_hard is False, bubbling up for COLMAP fallback.\n")
-                    raise RuntimeReconstructionError(f"OpenMVS failed: {e}")
+                log_file.write("openmvs_fail_hard is False, bubbling up for COLMAP fallback.\n")
+                raise RuntimeReconstructionError(f"OpenMVS failed: {e}")
 
 
 class SimulatedAdapter(ReconstructionAdapter):
@@ -819,11 +931,11 @@ class SimulatedAdapter(ReconstructionAdapter):
         return True
 
     def run_reconstruction(
-        self, 
-        input_frames: List[str], 
+        self,
+        input_frames: List[str],
         output_dir: Path,
         density: float = 1.0,
-        enforce_masks: bool = True
+        enforce_masks: bool = True,
     ) -> dict:
         time.sleep(0.5)
 
