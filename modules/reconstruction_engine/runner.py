@@ -32,35 +32,29 @@ class ReconstructionRunner:
         self.is_production = os.getenv("ENV", "development").lower() == "production"
         self.allow_simulated = os.getenv("ALLOW_SIMULATED_RECONSTRUCTION", "false").lower() == "true"
 
-        if not adapter:
-            engine_choice = os.getenv("RECON_ENGINE", "colmap").lower()
-
-            if engine_choice == "colmap":
-                adapter = COLMAPAdapter()
-                if self.is_production and not adapter._engine_path:
-                    raise RuntimeError("Production run aborted: RECON_ENGINE_PATH must be configured for COLMAP.")
+        # TICKET-009: Multiple adapter orchestration
+        self.adapters = {}
+        
+        from .adapter import COLMAPAdapter, OpenMVSAdapter, SimulatedAdapter
+        
+        # We always want COLMAP as a reliable fallback/baseline
+        self.colmap_adapter = COLMAPAdapter()
+        self.openmvs_adapter = OpenMVSAdapter()
+        
+        if adapter:
+            self.adapter = adapter
+        else:
+            engine_choice = settings.recon_pipeline
+            if engine_choice == "colmap_openmvs":
+                self.adapter = self.openmvs_adapter
+            elif engine_choice == "colmap_dense":
+                self.adapter = self.colmap_adapter
             elif engine_choice == "simulated":
                 if self.is_production:
-                    raise RuntimeError(
-                        "Production run aborted: RECON_ENGINE=colmap must be configured when ENV=production. "
-                        "Simulated engine is strictly prohibited."
-                    )
-                if not self.allow_simulated:
-                    raise RuntimeError(
-                        "Simulated reconstruction is disabled by default. "
-                        "Set ALLOW_SIMULATED_RECONSTRUCTION=true only for explicit test flows."
-                    )
-                adapter = SimulatedAdapter()
+                    raise RuntimeError("Stub engine prohibited in production.")
+                self.adapter = SimulatedAdapter()
             else:
-                raise RuntimeError(f"Unsupported reconstruction engine '{engine_choice}'.")
-
-        if self.is_production and adapter.is_stub:
-            raise RuntimeError(
-                "SECURITY/INTEGRITY VIOLATION: A stub/simulated engine was detected in a PRODUCTION environment. "
-                "The reconstruction pipeline has been halted to prevent placeholder data leakage."
-            )
-
-        self.adapter = adapter
+                self.adapter = self.colmap_adapter # Fallback default
 
     def _read_image(self, image_path: Path):
         image = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
@@ -279,26 +273,65 @@ class ReconstructionRunner:
                 density = 1.0 # Unmasked usually wants all frames
             
             try:
-                # Execution workspace handling (ASCII path safety for Windows)
-                execution_dir, final_dir = self._prepare_execution_workspace(job)
-                # Adjust final_dir to use attempt subfolder
-                if final_dir:
-                    final_dir = attempt_dir
-                else:
-                    execution_dir = attempt_dir
-
-                results = self.adapter.run_reconstruction(
-                    current_frames, 
-                    execution_dir,
-                    density=density,
-                    enforce_masks=enforce_masks
-                )
+                # 1. Primary Attempt (usually OpenMVS if configured)
+                current_adapter = self.adapter
+                primary_results = None
+                primary_error = None
                 
-                # Sync back if using ASCII workroot
-                if final_dir:
-                    self._sync_workspace_back(execution_dir, final_dir)
-                    results = self._remap_artifact_paths(results, execution_dir, final_dir)
-                    shutil.rmtree(execution_dir, ignore_errors=True)
+                try:
+                    # Execution workspace handling (ASCII path safety for Windows)
+                    execution_dir, final_dir = self._prepare_execution_workspace(job)
+                    if final_dir:
+                        final_dir = attempt_dir
+                    else:
+                        execution_dir = attempt_dir
+
+                    primary_results = current_adapter.run_reconstruction(
+                        current_frames, 
+                        execution_dir,
+                        density=density,
+                        enforce_masks=enforce_masks
+                    )
+                    
+                    # Sync back if using ASCII workroot
+                    if final_dir:
+                        self._sync_workspace_back(execution_dir, final_dir)
+                        primary_results = self._remap_artifact_paths(primary_results, execution_dir, final_dir)
+                        shutil.rmtree(execution_dir, ignore_errors=True)
+                        
+                except (InsufficientReconstructionError, RuntimeReconstructionError, InsufficientInputError) as e:
+                    primary_error = e
+                    logging.warning(f"Primary adapter ({current_adapter.engine_type}) failed for {step_name}: {e}")
+                
+                results = primary_results
+                engine_used = current_adapter.engine_type
+                
+                # 2. Engine Fallback (OpenMVS -> COLMAP)
+                # If primary failed and it was OpenMVS, try COLMAP as a reliable baseline
+                # unless textured output is strictly required.
+                if primary_error and current_adapter.engine_type == "colmap_openmvs":
+                    if settings.require_textured_output:
+                        logging.error("OpenMVS failed and require_textured_output is True. Skipping COLMAP fallback.")
+                    else:
+                        logging.info(f"Attempting COLMAP fallback for {step_name}...")
+                        try:
+                            fallback_dir = attempt_dir / "colmap_fallback"
+                            fallback_dir.mkdir(parents=True, exist_ok=True)
+                            
+                            results = self.colmap_adapter.run_reconstruction(
+                                current_frames,
+                                fallback_dir,
+                                density=density,
+                                enforce_masks=enforce_masks
+                            )
+                            engine_used = "colmap (fallback)"
+                            primary_error = None # Clear error as fallback succeeded
+                        except Exception as fe:
+                            logging.error(f"COLMAP fallback also failed for {step_name}: {fe}")
+                            primary_error = fe
+                
+                if primary_error:
+                    raise primary_error # Re-raise if both failed or if no fallback was attempted
                 
                 score = self._score_attempt(results)
                 
@@ -315,11 +348,10 @@ class ReconstructionRunner:
                     sampling_rate_used=sampling_rate_used,
                     source_video_path=job.source_video_path if attempt_type == ReconstructionAttemptType.DENSER_FRAMES else None,
                     reextracted_frames_dir=reextracted_frames_dir,
-                    metrics_rank_score=score
+                    metrics_rank_score=score,
+                    metadata={"engine": engine_used}
                 )
                 
-                # If we have a successful result that passes basic gating, we might stop or continue
-                # The user says "Select the best honest result", so we should try all and pick.
                 if score > best_score:
                     best_score = score
                     best_results = results

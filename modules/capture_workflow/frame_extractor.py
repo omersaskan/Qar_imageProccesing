@@ -148,7 +148,7 @@ class FrameExtractor:
             and bbox_iou > 0.85
         )
 
-    def extract_keyframes(self, video_path: str, output_dir: str) -> List[str]:
+    def extract_keyframes(self, video_path: str, output_dir: str) -> tuple[List[str], Dict[str, Any]]:
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
             raise ValueError(f"Could not open video file: {video_path}")
@@ -221,7 +221,6 @@ class FrameExtractor:
                 self._write_verified_image(mask_path, focused_mask, "Mask", cv2.IMREAD_GRAYSCALE)
                 
                 with open(meta_path, "w", encoding="utf-8") as f:
-                    # Filter out non-serializable elements from meta if any, though primitives are expected
                     clean_meta = {k: v for k, v in mask_meta.items() if isinstance(v, (int, float, str, bool, type(None), dict, list))}
                     json.dump(clean_meta, f, indent=2)
                 
@@ -242,14 +241,18 @@ class FrameExtractor:
         finally:
             cap.release()
 
-        logger.info(f"[Extraction] Product-aware summary for {Path(video_path).name}:")
+        extraction_report = {
+            "total_frames_read": frame_count,
+            "rejection_counts": rejection_counts,
+            "saved_count": len(extracted_paths),
+            "video_filename": Path(video_path).name,
+            "timestamp": datetime.now().isoformat()
+        }
+
+        logger.info(f"[Extraction] Product-aware summary for {extraction_report['video_filename']}:")
         logger.info(f"   - Total frames read: {frame_count}")
         logger.info(f"   - Rejected by quality/mask: {rejection_counts['quality_or_mask']}")
         logger.info(f"   - Rejected by similarity: {rejection_counts['redundant_similarity']}")
-        logger.info(f"   - Skipped by sampling: {rejection_counts['sampling']}")
         logger.info(f"   - Total saved: {len(extracted_paths)}")
 
-        if not extracted_paths:
-            logger.warning("Zero product-focused keyframes extracted.")
-
-        return extracted_paths
+        return extracted_paths, extraction_report

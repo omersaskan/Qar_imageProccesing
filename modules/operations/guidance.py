@@ -75,6 +75,10 @@ _FAILURE_PATTERNS = [
     ("ORBIT_GAP_LEFT",      "ORBIT_GAP_LEFT",         _CRIT),
     ("ORBIT_GAP_RIGHT",     "ORBIT_GAP_RIGHT",        _CRIT),
     ("LOW_HORIZONTAL",      "LOW_HORIZONTAL_COVERAGE",_CRIT),
+    
+    # Coaching variants (soft)
+    ("COACHING",            "ORBIT_GAP_LEFT",         _WARN),
+    
     ("CONTINUITY",          "WEAK_ORBIT_CONTINUITY",  _WARN),
     ("SPREAD",              "INSUFFICIENT_VIEWPOINT_SPREAD", _WARN),
     
@@ -206,26 +210,32 @@ class GuidanceAggregator:
         return messages
 
     def to_markdown(self, guidance: CaptureGuidance) -> str:
-        _severity_text = {
-            GuidanceSeverity.CRITICAL: "KRİTİK",
-            GuidanceSeverity.WARNING:  "UYARI",
-            GuidanceSeverity.INFO:     "BİLGİ",
-        }
-
         lines = [
             f"# Çekim Kılavuzu - {guidance.session_id}",
             f"**Durum:** `{guidance.status.value.upper()}`",
             f"**Sonraki Adım:** {guidance.next_action}",
             "",
-            "## Operatör Talimatları",
         ]
 
-        if not guidance.messages:
-            lines.append("- Özel bir talimat yok. İşlem normal devam ediyor.")
-        else:
-            for msg in guidance.messages:
-                sev = _severity_text.get(msg["severity"], "-")
-                lines.append(f"- {sev}: {msg['message']}")
+        fatals = [m for m in guidance.messages if m["severity"] == GuidanceSeverity.CRITICAL]
+        coaching = [m for m in guidance.messages if m["severity"] in {GuidanceSeverity.WARNING, GuidanceSeverity.INFO}]
+
+        if fatals:
+            lines.append("## 🛑 KRİTİK ENGELLER (Yeniden Çekim Gerekli)")
+            for msg in fatals:
+                lines.append(f"- **{msg['message']}**")
+            lines.append("")
+
+        if coaching:
+            lines.append("## 💡 GELİŞTİRME ÖNERİLERİ (Coaching)")
+            for msg in coaching:
+                label = "Öneri" if msg["severity"] == GuidanceSeverity.INFO else "Uyarı"
+                lines.append(f"- *{label}:* {msg['message']}")
+            lines.append("")
+
+        if not fatals and not coaching:
+            lines.append("## ℹ️ Durum")
+            lines.append("- İşlem normal seyrinde devam ediyor. Özel bir talimat bulunmamaktadır.")
 
         lines.append("")
         return "\n".join(lines)

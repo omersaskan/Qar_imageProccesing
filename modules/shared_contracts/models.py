@@ -24,6 +24,7 @@ class CaptureSession(BaseModel):
     operator_id: str
     status: AssetStatus = AssetStatus.CREATED
     source_video_url: Optional[HttpUrl] = None
+    source_video_path: Optional[str] = None
     extracted_frames: List[str] = Field(default_factory=list)
     coverage_score: float = Field(0.0, ge=0.0, le=1.0)
     failure_reason: Optional[str] = None
@@ -87,6 +88,8 @@ class ReconstructionJob(BaseModel):
     job_dir: str # Local path to job directory
     manifest_path: Optional[str] = None
     source_video_path: Optional[str] = None
+    quality_report: Dict[str, Any] = Field(default_factory=dict)
+    coverage_report: Dict[str, Any] = Field(default_factory=dict)
     failure_reason: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     started_at: Optional[datetime] = None

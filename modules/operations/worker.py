@@ -437,7 +437,9 @@ class IngestionWorker:
             if not video_path.exists():
                 raise IrrecoverableError(f"Video file missing at {video_path}.")
 
-            frames = extractor.extract_keyframes(str(video_path), str(output_dir))
+            frames, extraction_report = extractor.extract_keyframes(str(video_path), str(output_dir))
+            atomic_write_json(reports_dir / "quality_report.json", extraction_report)
+
             if not frames:
                 raise IrrecoverableError(
                     f"Frame extraction produced 0 frames for {session.session_id}."
@@ -453,13 +455,14 @@ class IngestionWorker:
             atomic_write_json(reports_dir / "coverage_report.json", coverage_report)
 
             if coverage_report["overall_status"] != "sufficient":
-                reasons = (
-                    "; ".join(coverage_report.get("reasons", []))
-                    or "insufficient viewpoint diversity"
-                )
+                # User guidance: soft warnings are in 'reasons' but only hard_reasons should trigger recapture strictly.
+                # CoverageAnalyzer now returns overall_status="insufficient" only if hard_reasons exist.
+                hard_reasons_list = coverage_report.get("hard_reasons", [])
+                reasons_str = "; ".join(hard_reasons_list) if hard_reasons_list else "unspecified capture quality issue"
+                
                 return self._mark_session_needs_recapture(
                     session,
-                    reason=f"Capture quality insufficient: {reasons}",
+                    reason=f"Capture quality insufficient: {reasons_str}",
                     coverage_score=float(coverage_report.get("coverage_score", 0.0)),
                     extracted_frames=frames,
                 )
@@ -469,6 +472,7 @@ class IngestionWorker:
                 new_status=AssetStatus.CAPTURED,
                 extracted_frames=frames,
                 coverage_score=float(coverage_report.get("coverage_score", 0.0)),
+                source_video_path=str(video_path), # Persist for denser extraction fallback
                 publish_state=None,
                 last_pipeline_stage=AssetStatus.CAPTURED.value,
                 failure_reason=None,
@@ -525,6 +529,13 @@ class IngestionWorker:
                     extracted_frames=input_frames,
                 )
 
+            # Load reports if they exist
+            quality_report = {}
+            qual_path = reports_dir / "quality_report.json"
+            if qual_path.exists():
+                with open(qual_path, "r", encoding="utf-8") as f:
+                    quality_report = json.load(f)
+
             manager = JobManager(data_root=str(self.data_root))
             runner = ReconstructionRunner()
             job_id = f"job_{session.session_id}"
@@ -534,6 +545,9 @@ class IngestionWorker:
                 capture_session_id=session.session_id,
                 input_frames=input_frames,
                 product_id=session.product_id,
+                source_video_path=session.source_video_path,
+                quality_report=quality_report,
+                coverage_report=coverage_report,
             )
 
             job = manager.create_job(draft)

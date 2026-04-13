@@ -98,3 +98,40 @@ class SessionManager:
     
     def get_capture_path(self, session_id: str) -> Path:
         return self.captures_dir / session_id
+
+    def reset_session(self, session_id: str, to_status: AssetStatus = AssetStatus.CREATED) -> CaptureSession:
+        """
+        Safely resets a session from RECAPTURE_REQUIRED or FAILED back to a processing state.
+        Clears failure reasons and stale validation/export artifacts.
+        """
+        file_path = self.sessions_dir / f"{session_id}.json"
+        with FileLock(file_path):
+            session = self.get_session(session_id)
+            if not session:
+                raise ValueError(f"Session {session_id} not found")
+
+            # We allow resets from terminal or stuck states
+            old_status = session.status
+            session.status = to_status
+            session.failure_reason = None
+            session.publish_state = None
+            session.last_pipeline_stage = to_status.value
+            
+            # Reset retry counters
+            session.retry_count = 0
+            session.last_retry_stage = None
+            session.last_error_at = None
+            
+            # Clear stale report paths to force re-generation
+            session.validation_report_path = None
+            session.export_metrics_path = None
+            
+            # Record reset event
+            session.history.append(SessionEvent(
+                from_status=old_status.value,
+                to_status=to_status.value,
+                note=f"Manual session reset to {to_status.value} for recovery."
+            ))
+
+            self._save_no_lock(session)
+            return session

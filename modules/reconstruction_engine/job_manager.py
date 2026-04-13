@@ -44,6 +44,9 @@ class JobManager:
             status=ReconstructionStatus.QUEUED,
             input_frames=draft.input_frames,
             job_dir=str(job_dir),
+            source_video_path=draft.source_video_path,
+            quality_report=draft.quality_report,
+            coverage_report=draft.coverage_report,
             created_at=datetime.now(timezone.utc)
         )
 

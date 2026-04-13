@@ -117,7 +117,11 @@ class CoverageAnalyzer:
 
     def analyze_coverage(self, extracted_frames: List[str]) -> Dict[str, Any]:
         signatures: List[Dict[str, Any]] = []
-        geom_analyzer = GeometricAnalyzer()
+        geom_analyzer = GeometricAnalyzer(
+            gap_threshold=self.config.geom_gap_threshold,
+            continuity_threshold=self.config.geom_continuity_threshold,
+            min_viewpoint_spread=self.config.geom_min_viewpoint_spread
+        )
         unreadable_frames = 0
         fallback_frames = 0
         low_confidence_frames = 0
@@ -135,7 +139,9 @@ class CoverageAnalyzer:
 
         num_frames = len(extracted_frames)
         readable_frames = len(signatures)
-        reasons = []
+        
+        hard_reasons = []
+        soft_reasons = []
 
         if readable_frames == 0:
             return {
@@ -148,6 +154,8 @@ class CoverageAnalyzer:
                 "overall_status": "insufficient",
                 "recommended_action": "needs_recapture",
                 "reasons": ["No readable masked frames available for coverage analysis."],
+                "hard_reasons": ["No readable masked frames available for coverage analysis."],
+                "soft_reasons": []
             }
 
         representatives: List[Dict[str, Any]] = []
@@ -170,37 +178,27 @@ class CoverageAnalyzer:
         scale_variation = float(max(areas) / max(min(areas), 1e-6)) if areas else 1.0
         aspect_variation = float(max(aspects) - min(aspects)) if aspects else 0.0
 
+        # --- Base Hard Constraints ---
         if readable_frames < self.config.min_readable_frames:
-            reasons.append(
+            hard_reasons.append(
                 f"Too few readable object-centric frames ({readable_frames}/{self.config.min_readable_frames})."
             )
 
         if unique_views < self.config.min_unique_views:
-            reasons.append(
+            hard_reasons.append(
                 f"Insufficient viewpoint diversity ({unique_views}/{self.config.min_unique_views} unique views)."
             )
 
-        if (
-            center_x_span < self.config.min_center_x_span
-            and center_y_span < self.config.min_center_y_span
-        ):
-            reasons.append("Object motion across accepted views is too narrow.")
-
-        if (
-            scale_variation < self.config.min_scale_variation
-            and aspect_variation < self.config.min_aspect_variation
-        ):
-            reasons.append("Accepted views show too little scale/shape variation.")
-
-        if unreadable_frames > 0:
-            reasons.append(f"{unreadable_frames} extracted frames could not be analyzed.")
+        if unreadable_frames > (num_frames * 0.5):
+            hard_reasons.append(f"Too many unreadable frames ({unreadable_frames}/{num_frames}).")
             
         if fallback_frames > max(1, readable_frames * 0.5):
-            reasons.append(f"Too many frames relied on heuristic fallback ({fallback_frames}).")
+            hard_reasons.append(f"Too many frames relied on heuristic fallback ({fallback_frames}).")
             
-        if low_confidence_frames > max(1, readable_frames * 0.3):
-            reasons.append(f"Too many frames have low semantic confidence ({low_confidence_frames}).")
+        if low_confidence_frames > max(1, readable_frames * 0.4):
+            hard_reasons.append(f"Too many frames have low semantic confidence ({low_confidence_frames}).")
 
+        # --- Geometric Scoring (for decision weighting) ---
         coverage_score = (
             min(1.0, readable_frames / max(self.config.min_readable_frames, 1)) * 0.30
             + min(1.0, unique_views / max(self.config.min_unique_views, 1)) * 0.40
@@ -221,6 +219,36 @@ class CoverageAnalyzer:
             )
             * 0.15
         )
+        coverage_score = float(np.clip(coverage_score, 0.0, 1.0))
+
+        # --- Advanced Geometric Analysis (Conditional Severity) ---
+        geom_report = geom_analyzer.analyze_orbit(signatures)
+        
+        # Always soft for coaching
+        soft_reasons.extend(geom_report.get("soft_codes", []))
+        
+        # Conditional Hard Fails
+        # Gaps/Coverage are hard fails ONLY if quality is already suspect
+        is_strong_capture = (
+            unique_views >= self.config.min_unique_views * 1.2 
+            and coverage_score >= 0.65
+        )
+        
+        # Combined flat motion check
+        if (
+            center_x_span < self.config.min_center_x_span
+            and center_y_span < self.config.min_center_y_span
+        ):
+            if scale_variation < self.config.min_scale_variation and aspect_variation < self.config.min_aspect_variation:
+                hard_reasons.append("Object motion and scale variation across views is too narrow.")
+            else:
+                soft_reasons.append("Limited object motion across views (coaching suggested).")
+
+        for code in geom_report.get("hard_codes", []):
+            if not is_strong_capture:
+                hard_reasons.append(code)
+            else:
+                soft_reasons.append(f"{code}_COACHING")
 
         diversity_status = "sufficient" if unique_views >= self.config.min_unique_views else "insufficient"
         elevated_view_proxy = bool(
@@ -229,11 +257,7 @@ class CoverageAnalyzer:
             or center_y_span >= self.config.elevated_view_center_y_span
         )
         
-        # New Geometric Analysis
-        geom_report = geom_analyzer.analyze_orbit(signatures)
-        reasons.extend(geom_report.get("codes", []))
-        
-        overall_status = "sufficient" if not reasons else "insufficient"
+        overall_status = "sufficient" if not hard_reasons else "insufficient"
 
         return {
             "num_frames": num_frames,
@@ -245,11 +269,13 @@ class CoverageAnalyzer:
             "center_y_span": center_y_span,
             "scale_variation": scale_variation,
             "aspect_variation": aspect_variation,
-            "coverage_score": float(np.clip(coverage_score, 0.0, 1.0)),
+            "coverage_score": coverage_score,
             "fallback_frames": fallback_frames,
             "low_confidence_frames": low_confidence_frames,
             "geometric_info": geom_report,
             "overall_status": overall_status,
             "recommended_action": "reconstruct" if overall_status == "sufficient" else "needs_recapture",
-            "reasons": reasons,
+            "hard_reasons": hard_reasons,
+            "soft_reasons": soft_reasons,
+            "reasons": hard_reasons + soft_reasons, # backward comp for guidance
         }

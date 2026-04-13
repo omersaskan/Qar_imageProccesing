@@ -62,6 +62,15 @@ class Settings(BaseSettings):
     # accepted. Stricter environments should raise this. Default: 5 GB.
     min_free_disk_gb: float = Field(5.0, validation_alias="MIN_FREE_DISK_GB")
 
+    # --- RECONSTRUCTION ENGINES ---
+    # Global switch for the default pipeline: "colmap_dense" or "colmap_openmvs"
+    recon_pipeline: str = Field("colmap_dense", validation_alias="RECON_PIPELINE")
+    
+    # OpenMVS specific flags
+    openmvs_fail_hard: bool = Field(False, validation_alias="OPENMVS_FAIL_HARD")
+    openmvs_textured_output: bool = Field(True, validation_alias="OPENMVS_TEXTURED_OUTPUT")
+    require_textured_output: bool = Field(False, validation_alias="REQUIRE_TEXTURED_OUTPUT")
+
     @property
     def is_dev(self) -> bool:
         return self.env == AppEnvironment.LOCAL_DEV

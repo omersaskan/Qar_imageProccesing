@@ -84,6 +84,11 @@ class CoverageConfig(BaseModel):
     span_score_y_target: float = Field(0.14, gt=0.0)
     scale_score_target: float = Field(0.35, gt=0.0)
     aspect_score_target: float = Field(0.22, gt=0.0)
+    
+    # Geometric Analysis Thresholds
+    geom_gap_threshold: float = Field(0.25, ge=0.0)
+    geom_continuity_threshold: float = Field(0.15, ge=0.0)
+    geom_min_viewpoint_spread: float = Field(0.6, ge=0.0)
 
 
 default_quality_thresholds = QualityThresholds()

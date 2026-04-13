@@ -104,6 +104,63 @@ class ColmapCommandBuilder:
         ]
 
 
+class OpenMVSCommandBuilder:
+    """
+    Builder for OpenMVS pipeline commands.
+    """
+    def __init__(self, bin_path: str):
+        self.bin = Path(bin_path)
+
+    def _get_bin(self, name: str) -> str:
+        # On Windows, binaries might be .exe
+        p = self.bin / name
+        if p.with_suffix(".exe").exists():
+            return str(p.with_suffix(".exe"))
+        return str(p)
+
+    def interface_colmap(self, workspace_path: Path, output_mvs: Path) -> List[str]:
+        return [
+            self._get_bin("InterfaceCOLMAP"),
+            "-i", str(workspace_path),
+            "-o", str(output_mvs),
+            "--working-dir", str(workspace_path),
+        ]
+
+    def densify_point_cloud(self, input_mvs: Path, output_mvs: Path) -> List[str]:
+        return [
+            self._get_bin("DensifyPointCloud"),
+            "-i", str(input_mvs),
+            "-o", str(output_mvs),
+            "--resolution-level", "1",
+            "--number-views", "0", # 0 = all
+            "--max-threads", "0",
+        ]
+
+    def reconstruct_mesh(self, input_mvs: Path, output_mvs: Path) -> List[str]:
+        return [
+            self._get_bin("ReconstructMesh"),
+            "-i", str(input_mvs),
+            "-o", str(output_mvs),
+        ]
+
+    def refine_mesh(self, input_mvs: Path, output_mvs: Path) -> List[str]:
+        return [
+            self._get_bin("RefineMesh"),
+            "-i", str(input_mvs),
+            "-o", str(output_mvs),
+            "--resolution-level", "1",
+            "--max-iterations", "5",
+        ]
+
+    def texture_mesh(self, input_mvs: Path, output_mvs: Path) -> List[str]:
+        return [
+            self._get_bin("TextureMesh"),
+            "-i", str(input_mvs),
+            "-o", str(output_mvs),
+            "--resolution-level", "0", # Full res texture
+        ]
+
+
 class ReconstructionAdapter(ABC):
     @abstractmethod
     def run_reconstruction(
@@ -621,6 +678,121 @@ class COLMAPAdapter(ReconstructionAdapter):
             "mesher_used": mesher_used if 'mesher_used' in locals() else "unknown",
             "selected_sparse_model": selected_model_name if 'selected_model_name' in locals() else "none"
         }
+
+
+class OpenMVSAdapter(COLMAPAdapter):
+    """
+    Advanced adapter that uses COLMAP for SfM and OpenMVS for MVS/Texturing.
+    Requires COLMAP undistorted images as input.
+    """
+
+    def __init__(self, colmap_path: Optional[str] = None, openmvs_path: Optional[str] = None):
+        super().__init__(colmap_path)
+        self._openmvs_path = openmvs_path or settings.openmvs_path
+        self.mvs_builder = OpenMVSCommandBuilder(self._openmvs_path)
+
+    @property
+    def engine_type(self) -> str:
+        return "colmap_openmvs"
+
+    def run_reconstruction(
+        self, 
+        input_frames: List[str], 
+        output_dir: Path,
+        density: float = 1.0,
+        enforce_masks: bool = True
+    ) -> dict:
+        log_path = output_dir / "reconstruction.log"
+        # We append because preparation might have already logged something
+        with open(log_path, "a", encoding="utf-8") as log_file:
+            log_file.write(f"\n--- OpenMVS Pipeline Start ({density=}, {enforce_masks=}) ---\n")
+            
+            # Use COLMAP sparse reconstruction first
+            sampling_step = max(1, int(1.0 / density)) if density < 1.0 else 1
+            prep = self._prepare_workspace(input_frames, output_dir, sampling_step=sampling_step, enforce_masks=enforce_masks)
+            
+            if prep["accepted_frames"] < 5:
+                raise InsufficientInputError(f"Insufficient frames for OpenMVS: {prep['accepted_frames']}")
+
+            db_path = output_dir / "database.db"
+            images_dir = prep["images_dir"]
+            masks_dir = prep["masks_dir"]
+            sparse_dir = output_dir / "sparse"
+            sparse_dir.mkdir(exist_ok=True)
+            dense_dir = output_dir / "dense"
+            dense_dir.mkdir(exist_ok=True)
+
+            try:
+                # SfM
+                self._run_command(self.builder.feature_extractor(db_path, images_dir, masks_dir, self._max_image_size), output_dir, log_file)
+                self._run_command(self.builder.matcher(self._matcher, db_path), output_dir, log_file)
+                self._run_command(self.builder.mapper(db_path, images_dir, sparse_dir), output_dir, log_file)
+                
+                best_model = self._select_best_sparse_model(sparse_dir, log_file)
+                if not best_model:
+                     raise RuntimeReconstructionError("SfM failed to produce a valid sparse model.")
+                
+                registered_images = best_model["registered_images"]
+                sparse_points = best_model["points_3d"]
+
+                if registered_images < 5:
+                    raise InsufficientReconstructionError(f"SfM only registered {registered_images} images.")
+
+                # Undistort (Required for OpenMVS)
+                self._run_command(self.builder.image_undistorter(images_dir, best_model["path"], dense_dir), output_dir, log_file)
+
+                # Step 2: OpenMVS Chain
+                mvs_project = dense_dir / "project.mvs"
+                mvs_dense = dense_dir / "project_dense.mvs"
+                mvs_mesh = dense_dir / "project_mesh.mvs"
+                mvs_textured = dense_dir / "project_textured.mvs"
+
+                # InterfaceCOLMAP
+                self._run_command(self.mvs_builder.interface_colmap(dense_dir, mvs_project), dense_dir, log_file)
+
+                # Densify
+                self._run_command(self.mvs_builder.densify_point_cloud(mvs_project, mvs_dense), dense_dir, log_file)
+
+                # Reconstruct Mesh
+                self._run_command(self.mvs_builder.reconstruct_mesh(mvs_dense, mvs_mesh), dense_dir, log_file)
+
+                # Texture
+                self._run_command(self.mvs_builder.texture_mesh(mvs_mesh, mvs_textured), dense_dir, log_file)
+
+                final_mesh = dense_dir / "project_textured.obj"
+                final_tex = dense_dir / "project_textured.png"
+
+                if not final_mesh.exists():
+                    # Fallback to mesh project file (ply) if obj texturing failed
+                    mvs_mesh_ply = dense_dir / "project_mesh.ply"
+                    if mvs_mesh_ply.exists():
+                        log_file.write("\nWarning: Texturing failed, using untextured mesh.\n")
+                        final_mesh = mvs_mesh_ply
+                    else:
+                        raise RuntimeReconstructionError("OpenMVS completed but no mesh output found.")
+
+                stats = self._mesh_stats(str(final_mesh))
+                
+                return {
+                    "mesh_path": str(final_mesh),
+                    "texture_path": str(final_tex) if final_tex.exists() else str(output_dir / "_no_texture.png"),
+                    "log_path": str(log_path),
+                    "vertex_count": stats["vertex_count"],
+                    "face_count": stats["face_count"],
+                    "registered_images": registered_images,
+                    "sparse_points": sparse_points,
+                    "engine_type": self.engine_type,
+                    "textured": final_tex.exists(),
+                    "selected_sparse_model": best_model["path"].name
+                }
+
+            except Exception as e:
+                log_file.write(f"\nOpenMVS Pipeline Error: {str(e)}\n")
+                if settings.openmvs_fail_hard:
+                    raise
+                else:
+                    log_file.write("openmvs_fail_hard is False, bubbling up for COLMAP fallback.\n")
+                    raise RuntimeReconstructionError(f"OpenMVS failed: {e}")
 
 
 class SimulatedAdapter(ReconstructionAdapter):
