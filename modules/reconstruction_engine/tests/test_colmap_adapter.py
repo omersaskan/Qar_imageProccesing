@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 import trimesh
 from modules.reconstruction_engine.adapter import COLMAPAdapter
+from modules.reconstruction_engine.failures import InsufficientInputError
 
 
 def write_frame_and_mask(frame_path: Path):
@@ -47,14 +48,34 @@ def test_colmap_adapter_run(mock_copy, mock_popen, tmp_path):
 
     mock_process = MagicMock()
     mock_process.returncode = 0
-    mock_process.stdout = iter(["loading...", "done."])
+    # COLMAP 4.0.3 style output for the parser check
+    mock_process.communicate.return_value = (
+        "I20260413 ...] Registered images: 10\nI20260413 ...] Points: 1000", 
+        ""
+    )
     mock_popen.return_value = mock_process
 
     trimesh.creation.box().export(mesh_file)
 
+    # Added match_mode_counts to the mocked prep result
+    prep_mock = {
+        "images_dir": tmp_path,
+        "masks_dir": tmp_path,
+        "accepted_frames": 10,
+        "rejected_unreadable_frame": 0,
+        "rejected_missing_mask": 0,
+        "rejected_bad_mask": 0,
+        "match_mode_counts": {"stem": 10, "legacy": 0, "none": 0}
+    }
+
     with patch.object(adapter, "_mask_is_usable", return_value=True):
         with patch.object(adapter, "_frame_is_usable", return_value=True):
-            results = adapter.run_reconstruction(input_frames, output_dir)
+            # We need to mock _select_best_sparse_model because the test doesn't set up a real sparse dir
+            with patch.object(adapter, "_select_best_sparse_model", return_value={"registered_images": 10, "points_3d": 1000, "path": tmp_path}):
+                results = adapter.run_reconstruction(input_frames, output_dir)
+
+
+
 
     assert results["mesh_path"] == str(mesh_file)
     assert results["log_path"] == str(output_dir / "reconstruction.log")
@@ -84,10 +105,11 @@ def test_colmap_artifact_discovery_requires_real_mesh(tmp_path):
     prep = {
         "images_dir": output_dir / "images",
         "masks_dir": output_dir / "masks",
-        "accepted_frames": 3,
+        "accepted_frames": 10,
         "rejected_missing_mask": 0,
         "rejected_bad_mask": 0,
         "rejected_unreadable_frame": 0,
+        "match_mode_counts": {"stem": 10, "legacy": 0, "none": 0}
     }
     prep["images_dir"].mkdir()
     prep["masks_dir"].mkdir()
@@ -99,8 +121,10 @@ def test_colmap_artifact_discovery_requires_real_mesh(tmp_path):
             mock_process.stdout = iter([])
             mock_popen.return_value = mock_process
 
-            with pytest.raises(RuntimeError, match="no usable mesh artifacts"):
-                adapter.run_reconstruction([], output_dir)
+            with patch.object(adapter, "_select_best_sparse_model", return_value={"registered_images": 10, "points_3d": 1000, "path": tmp_path}):
+                with pytest.raises(RuntimeError, match="no usable mesh artifacts"):
+                    adapter.run_reconstruction([], output_dir)
+
 
 def test_colmap_adapter_rejects_unreadable_frames(tmp_path):
     adapter = COLMAPAdapter(engine_path="fake")
@@ -115,5 +139,5 @@ def test_colmap_adapter_rejects_unreadable_frames(tmp_path):
 
     with patch.object(adapter, "_frame_is_usable", return_value=False):
         with patch.object(adapter, "_mask_is_usable", return_value=True):
-            with pytest.raises(RuntimeError, match="unreadable=3"):
+            with pytest.raises(InsufficientInputError, match="unreadable=3"):
                 adapter.run_reconstruction(input_frames, output_dir)

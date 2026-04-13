@@ -1,3 +1,4 @@
+import re
 from abc import ABC, abstractmethod
 from typing import List, Optional, Dict, Any
 from pathlib import Path
@@ -383,6 +384,33 @@ class COLMAPAdapter(ReconstructionAdapter):
         except Exception:
             return 0
 
+    def _parse_analyzer_output(self, output: str) -> Dict[str, int]:
+        """
+        Parses the raw stdout/stderr from model_analyzer.
+        Supports both legacy 'Points3D' and COLMAP 4.0.3 'Points' formats.
+        Robust against log prefixes and varied whitespace.
+        """
+        stats = {"registered_images": 0, "points_3d": 0}
+        
+        # Regex patterns as requested
+        # r"Registered\s+images\s*:\s*(\d+)"
+        # r"Points(?:3D)?\s*:\s*(\d+)"
+        
+        for line in output.splitlines():
+            # 1. Registered Images
+            reg_match = re.search(r"Registered\s+images\s*:\s*(\d+)", line)
+            if reg_match:
+                stats["registered_images"] = int(reg_match.group(1))
+                continue
+            
+            # 2. Points (excluding observations)
+            if "observations" not in line:
+                points_match = re.search(r"Points(?:3D)?\s*:\s*(\d+)", line)
+                if points_match:
+                    stats["points_3d"] = int(points_match.group(1))
+                    
+        return stats
+
     def _parse_model_stats(self, sparse_dir: Path, log_file) -> Dict[str, int]:
         cmd = self.builder.model_analyzer(sparse_dir)
         try:
@@ -401,26 +429,12 @@ class COLMAPAdapter(ReconstructionAdapter):
             if not stdout.strip():
                 log_file.write(f"\nWarning: model_analyzer returned empty output for {sparse_dir.name}\n")
             
-            stats = {"registered_images": 0, "points_3d": 0}
-            for line in stdout.splitlines():
-                if "Registered images" in line:
-                    try:
-                        stats["registered_images"] = int(line.split()[-1])
-                    except (ValueError, IndexError):
-                        pass
-                if "Points3D" in line and "observations" not in line:
-                    try:
-                        # Line format: "Points3D : 1234"
-                        parts = line.split(":")
-                        if len(parts) > 1:
-                            stats["points_3d"] = int(parts[1].strip())
-                    except (ValueError, IndexError):
-                        pass
+            return self._parse_analyzer_output(stdout)
             
-            return stats
         except Exception as e:
             log_file.write(f"\nWarning: model_analyzer failed on {sparse_dir.name}: {e}\n")
             return {"registered_images": 0, "points_3d": 0}
+
     def _select_best_sparse_model(self, sparse_dir: Path, log_file) -> Optional[Dict[str, Any]]:
         """
         Iterates through all sub-models in the sparse directory and selects the best one.
