@@ -486,7 +486,7 @@ class IngestionWorker:
         try:
             from modules.reconstruction_engine.job_manager import JobManager
             from modules.reconstruction_engine.runner import ReconstructionRunner
-            from modules.reconstruction_engine.failures import InsufficientInputError
+            from modules.reconstruction_engine.failures import InsufficientInputError, InsufficientReconstructionError
             from modules.shared_contracts.models import ReconstructionJobDraft
 
             frames_dir = self.session_manager.captures_dir / session.session_id / "frames"
@@ -550,10 +550,11 @@ class IngestionWorker:
                 last_pipeline_stage=AssetStatus.RECONSTRUCTED.value,
                 failure_reason=None,
             )
-        except InsufficientInputError as e:
+        except (InsufficientInputError, InsufficientReconstructionError) as e:
+            # We treat both as RECAPTURE_REQUIRED
             return self._mark_session_needs_recapture(
                 session,
-                reason=f"Reconstruction failed due to insufficient masked input: {str(e)}",
+                reason=f"Reconstruction failed after multiple attempts: {str(e)}",
             )
         except IrrecoverableError:
             raise

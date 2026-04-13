@@ -43,6 +43,20 @@ class Settings(BaseSettings):
     # (in hours). Default: 2h.
     session_timeout_hours: int = Field(2, validation_alias="SESSION_TIMEOUT_HOURS")
 
+    # --- ADAPTIVE RECONSTRUCTION FALLBACK ---
+    # Order of attempts to try if reconstruction is weak.
+    # Options: "default", "denser_frames", "unmasked"
+    recon_fallback_steps: list[str] = Field(["default", "denser_frames"], validation_alias="RECON_FALLBACK_STEPS")
+    # Whether unmasked fallback is even allowed.
+    recon_unmasked_fallback_enabled: bool = Field(False, validation_alias="RECON_UNMASKED_FALLBACK_ENABLED")
+    
+    # Default effort will use whatever is on disk (usually from extraction rate=15).
+    # Fallback DENSER_FRAMES will re-extract with this rate.
+    recon_fallback_sample_rate: int = Field(5, validation_alias="RECON_FALLBACK_SAMPLE_RATE")
+
+    # For denser_frames: 1.0 means use all frames, lower means more sparse. 
+    recon_denser_sampling_ratio: float = Field(1.0, validation_alias="RECON_DENSER_SAMPLING_RATIO")
+
     # --- SPRINT 1: TICKET-004 — Disk Space Preflight ---
     # Minimum free disk space on the data_root partition before an upload is
     # accepted. Stricter environments should raise this. Default: 5 GB.

@@ -6,7 +6,11 @@ class ReconstructionError(AssetFactoryError):
     pass
 
 class InsufficientInputError(ReconstructionError):
-    """Raised when provided keyframes are not enough for reconstruction."""
+    """Raised when provided keyframes are not enough for reconstruction (pre-flight)."""
+    pass
+
+class InsufficientReconstructionError(ReconstructionError):
+    """Raised when reconstruction succeeds but result is too sparse/small for densification."""
     pass
 
 class PreprocessingError(ReconstructionError):

@@ -11,13 +11,108 @@ import numpy as np
 import trimesh
 
 from .mesh_selector import MeshSelector
-from .failures import InsufficientInputError, RuntimeReconstructionError
+from .failures import InsufficientInputError, RuntimeReconstructionError, InsufficientReconstructionError
 from modules.utils.mask_resolution import resolve_mask_path
+from modules.operations.settings import settings
+
+
+class ColmapCommandBuilder:
+    """
+    Centralized builder for COLMAP commands.
+    Targets COLMAP 4.0.3 flag semantics.
+    """
+
+    def __init__(self, binary_path: str, use_gpu: bool = True):
+        self.bin = binary_path
+        self.use_gpu = use_gpu
+
+    def feature_extractor(self, db_path: Path, images_dir: Path, masks_dir: Path, max_size: int) -> List[str]:
+        cmd = [
+            self.bin, "feature_extractor",
+            "--database_path", str(db_path),
+            "--image_path", str(images_dir),
+            "--ImageReader.mask_path", str(masks_dir),
+            "--FeatureExtraction.use_gpu", "1" if self.use_gpu else "0",
+            "--FeatureExtraction.max_image_size", str(max_size),
+        ]
+        return cmd
+
+    def matcher(self, mode: str, db_path: Path) -> List[str]:
+        matcher_type = "exhaustive_matcher" if mode == "exhaustive" else "sequential_matcher"
+        cmd = [
+            self.bin, matcher_type,
+            "--database_path", str(db_path),
+            # COLMAP 4.0.3 uses FeatureMatching instead of SiftMatching for GPU toggle
+            "--FeatureMatching.use_gpu", "1" if self.use_gpu else "0",
+        ]
+        return cmd
+
+    def mapper(self, db_path: Path, images_dir: Path, output_path: Path) -> List[str]:
+        cmd = [
+            self.bin, "mapper",
+            "--database_path", str(db_path),
+            "--image_path", str(images_dir),
+            "--output_path", str(output_path),
+            # Optional GPU BA for 4.x
+            "--Mapper.ba_use_gpu", "1" if self.use_gpu else "0",
+        ]
+        return cmd
+
+    def image_undistorter(self, images_dir: Path, input_path: Path, output_path: Path) -> List[str]:
+        return [
+            self.bin, "image_undistorter",
+            "--image_path", str(images_dir),
+            "--input_path", str(input_path),
+            "--output_path", str(output_path),
+            "--output_type", "COLMAP",
+        ]
+
+    def patch_match_stereo(self, workspace_path: Path) -> List[str]:
+        return [
+            self.bin, "patch_match_stereo",
+            "--workspace_path", str(workspace_path),
+            "--PatchMatchStereo.gpu_index", "0" if self.use_gpu else "-1",
+            "--PatchMatchStereo.geom_consistency", "1",
+            "--PatchMatchStereo.filter", "1",
+        ]
+
+    def stereo_fusion(self, workspace_path: Path, output_path: Path) -> List[str]:
+        return [
+            self.bin, "stereo_fusion",
+            "--workspace_path", str(workspace_path),
+            "--output_path", str(output_path),
+        ]
+
+    def poisson_mesher(self, input_path: Path, output_path: Path) -> List[str]:
+        return [
+            self.bin, "poisson_mesher",
+            "--input_path", str(input_path),
+            "--output_path", str(output_path),
+        ]
+
+    def delaunay_mesher(self, workspace_path: Path, output_path: Path) -> List[str]:
+        return [
+            self.bin, "delaunay_mesher",
+            "--input_path", str(workspace_path),
+            "--output_path", str(output_path),
+        ]
+
+    def model_analyzer(self, model_path: Path) -> List[str]:
+        return [
+            self.bin, "model_analyzer",
+            "--path", str(model_path),
+        ]
 
 
 class ReconstructionAdapter(ABC):
     @abstractmethod
-    def run_reconstruction(self, input_frames: List[str], output_dir: Path) -> dict:
+    def run_reconstruction(
+        self, 
+        input_frames: List[str], 
+        output_dir: Path,
+        density: float = 1.0,
+        enforce_masks: bool = True
+    ) -> dict:
         """
         Runs the reconstruction process and returns a dictionary with artifact info.
         """
@@ -65,6 +160,7 @@ class COLMAPAdapter(ReconstructionAdapter):
         self._max_image_size = int(os.getenv("RECON_MAX_IMAGE_SIZE", "2000"))
         self._matcher = os.getenv("RECON_MATCHER", "exhaustive").lower()  # exhaustive | sequential
         self.mesh_selector = MeshSelector()
+        self.builder = ColmapCommandBuilder(self._engine_path, self._use_gpu)
 
     @property
     def engine_type(self) -> str:
@@ -134,7 +230,13 @@ class COLMAPAdapter(ReconstructionAdapter):
         frame = self._read_image(frame_path, cv2.IMREAD_COLOR)
         return frame is not None and frame.size > 0
 
-    def _prepare_workspace(self, input_frames: List[str], output_dir: Path) -> Dict[str, Any]:
+    def _prepare_workspace(
+        self, 
+        input_frames: List[str], 
+        output_dir: Path,
+        sampling_step: int = 1,
+        enforce_masks: bool = True
+    ) -> Dict[str, Any]:
         images_dir = output_dir / "images"
         masks_dir = output_dir / "masks"
         images_dir.mkdir(parents=True, exist_ok=True)
@@ -144,10 +246,15 @@ class COLMAPAdapter(ReconstructionAdapter):
         rejected_missing_mask = 0
         rejected_bad_mask = 0
         rejected_unreadable_frame = 0
+        rejected_sampling = 0
         
         match_mode_counts = {"stem": 0, "legacy": 0, "none": 0}
 
-        for frame_path in input_frames:
+        for i, frame_path in enumerate(input_frames):
+            if i % sampling_step != 0:
+                rejected_sampling += 1
+                continue
+
             src = Path(frame_path)
             if not src.exists():
                 rejected_unreadable_frame += 1
@@ -160,16 +267,18 @@ class COLMAPAdapter(ReconstructionAdapter):
             mask_src, match_mode = resolve_mask_path(src)
             match_mode_counts[match_mode] += 1
             
-            if mask_src is None:
-                rejected_missing_mask += 1
-                continue
+            if enforce_masks:
+                if mask_src is None:
+                    rejected_missing_mask += 1
+                    continue
 
-            if not self._mask_is_usable(mask_src):
-                rejected_bad_mask += 1
-                continue
+                if not self._mask_is_usable(mask_src):
+                    rejected_bad_mask += 1
+                    continue
 
             shutil.copy2(src, images_dir / src.name)
-            shutil.copy2(mask_src, masks_dir / f"{src.name}.png")
+            if mask_src and mask_src.exists():
+                shutil.copy2(mask_src, masks_dir / f"{src.name}.png")
             accepted_frames += 1
 
         return {
@@ -179,10 +288,11 @@ class COLMAPAdapter(ReconstructionAdapter):
             "rejected_missing_mask": rejected_missing_mask,
             "rejected_bad_mask": rejected_bad_mask,
             "rejected_unreadable_frame": rejected_unreadable_frame,
+            "rejected_sampling": rejected_sampling,
             "match_mode_counts": match_mode_counts,
         }
 
-    def _validate_dense_workspace(self, workspace_path: Path) -> bool:
+    def _validate_dense_workspace(self, workspace_path: Path) -> int:
         dense_dir = workspace_path / "dense"
         fused_ply = dense_dir / "fused.ply"
 
@@ -190,10 +300,113 @@ class COLMAPAdapter(ReconstructionAdapter):
             raise RuntimeError(f"Dense workspace folder missing: {dense_dir}")
         if not fused_ply.exists():
             raise RuntimeError("Dense point cloud (fused.ply) missing.")
-        if fused_ply.stat().st_size < 1024:
-            raise RuntimeError(f"Fused point cloud too small ({fused_ply.stat().st_size} bytes).")
+        
+        file_size = fused_ply.stat().st_size
+        if file_size < 1024:
+            raise RuntimeError(f"Fused point cloud too small ({file_size} bytes).")
 
-        return True
+        return self._get_ply_point_count(fused_ply)
+
+    def _get_ply_point_count(self, ply_path: Path) -> int:
+        """Roughly estimate point count from PLY file size if parsing is too slow."""
+        try:
+            with open(ply_path, "rb") as f:
+                header = ""
+                for _ in range(30):
+                    line = f.readline().decode("ascii", errors="ignore")
+                    header += line
+                    if "end_header" in line:
+                        break
+                
+                if "element vertex" in header:
+                    for line in header.splitlines():
+                        if "element vertex" in line:
+                            return int(line.split()[-1])
+            return 0
+        except Exception:
+            return 0
+
+    def _parse_model_stats(self, sparse_dir: Path, log_file) -> Dict[str, int]:
+        cmd = self.builder.model_analyzer(sparse_dir)
+        try:
+            # Using Popen-style capture for maximum compatibility with .bat files on Windows
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                cwd=str(sparse_dir.parent.parent or "."),
+                shell=True if self._engine_path.lower().endswith(".bat") else False
+            )
+            stdout, _ = process.communicate(timeout=30)
+            
+            # Log for debugging if empty
+            if not stdout.strip():
+                log_file.write(f"\nWarning: model_analyzer returned empty output for {sparse_dir.name}\n")
+            
+            stats = {"registered_images": 0, "points_3d": 0}
+            for line in stdout.splitlines():
+                if "Registered images" in line:
+                    try:
+                        stats["registered_images"] = int(line.split()[-1])
+                    except (ValueError, IndexError):
+                        pass
+                if "Points3D" in line and "observations" not in line:
+                    try:
+                        # Line format: "Points3D : 1234"
+                        parts = line.split(":")
+                        if len(parts) > 1:
+                            stats["points_3d"] = int(parts[1].strip())
+                    except (ValueError, IndexError):
+                        pass
+            
+            return stats
+        except Exception as e:
+            log_file.write(f"\nWarning: model_analyzer failed on {sparse_dir.name}: {e}\n")
+            return {"registered_images": 0, "points_3d": 0}
+    def _select_best_sparse_model(self, sparse_dir: Path, log_file) -> Optional[Dict[str, Any]]:
+        """
+        Iterates through all sub-models in the sparse directory and selects the best one.
+        Criteria:
+        1. Highest registered_images
+        2. Tie-break: highest sparse_points
+        3. Tie-break: lowest index (stable)
+        """
+        if not sparse_dir.exists():
+            return None
+
+        candidates = []
+        # Sub-models are usually named '0', '1', '2', etc.
+        for item in sorted(sparse_dir.glob("*"), key=lambda x: x.name):
+            if not item.is_dir():
+                continue
+            
+            stats = self._parse_model_stats(item, log_file)
+            if stats["registered_images"] > 0:
+                candidates.append({
+                    "path": item,
+                    "registered_images": stats["registered_images"],
+                    "points_3d": stats["points_3d"]
+                })
+        
+        if not candidates:
+            return None
+
+        # Apply multi-level sorting
+        # Sort by images desc, points desc, then path name asc (for stability)
+        candidates.sort(
+            key=lambda x: (-x["registered_images"], -x["points_3d"], x["path"].name)
+        )
+        
+        best = candidates[0]
+        
+        log_file.write("\n--- Sparse Model Candidates ---\n")
+        for c in candidates:
+            mark = " (SELECTED)" if c == best else ""
+            log_file.write(f"Model {c['path'].name}: {c['registered_images']} images, {c['points_3d']} points{mark}\n")
+        log_file.write("-" * 31 + "\n")
+        
+        return best
 
     def _is_valid_mesh_candidate(self, mesh_path: Path) -> bool:
         if not mesh_path.exists() or mesh_path.stat().st_size <= 0:
@@ -267,11 +480,18 @@ class COLMAPAdapter(ReconstructionAdapter):
         except Exception:
             return {"vertex_count": 0, "face_count": 0}
 
-    def run_reconstruction(self, input_frames: List[str], output_dir: Path) -> dict:
+    def run_reconstruction(
+        self, 
+        input_frames: List[str], 
+        output_dir: Path,
+        density: float = 1.0,
+        enforce_masks: bool = True
+    ) -> dict:
         if not self._engine_path:
             raise RuntimeError("Reconstruction engine path (RECON_ENGINE_PATH) not configured.")
 
-        prep = self._prepare_workspace(input_frames, output_dir)
+        sampling_step = max(1, int(1.0 / density)) if density < 1.0 else 1
+        prep = self._prepare_workspace(input_frames, output_dir, sampling_step=sampling_step, enforce_masks=enforce_masks)
         images_dir: Path = prep["images_dir"]
         masks_dir: Path = prep["masks_dir"]
 
@@ -301,102 +521,78 @@ class COLMAPAdapter(ReconstructionAdapter):
                 db_path = output_dir / "database.db"
 
                 # Feature extraction
-                cmd_extract = [
-                    self._engine_path,
-                    "feature_extractor",
-                    "--database_path", str(db_path),
-                    "--image_path", str(images_dir),
-                    "--ImageReader.mask_path", str(masks_dir),
-                    "--FeatureExtraction.use_gpu", "1" if self._use_gpu else "0",
-                    "--FeatureExtraction.max_image_size", str(self._max_image_size),
-                ]
+                cmd_extract = self.builder.feature_extractor(
+                    db_path, images_dir, masks_dir, self._max_image_size
+                )
                 self._run_command(cmd_extract, output_dir, log_file)
 
                 # Matching
-                if self._matcher == "sequential":
-                    cmd_match = [
-                        self._engine_path,
-                        "sequential_matcher",
-                        "--database_path", str(db_path),
-                        "--SiftMatching.use_gpu", "1" if self._use_gpu else "0",
-                    ]
-                else:
-                    cmd_match = [
-                        self._engine_path,
-                        "exhaustive_matcher",
-                        "--database_path", str(db_path),
-                        "--SiftMatching.use_gpu", "1" if self._use_gpu else "0",
-                    ]
+                cmd_match = self.builder.matcher(self._matcher, db_path)
                 self._run_command(cmd_match, output_dir, log_file)
 
                 # Sparse map
                 sparse_dir = output_dir / "sparse"
                 sparse_dir.mkdir(exist_ok=True)
-                cmd_map = [
-                    self._engine_path,
-                    "mapper",
-                    "--database_path", str(db_path),
-                    "--image_path", str(images_dir),
-                    "--output_path", str(sparse_dir),
-                ]
+                cmd_map = self.builder.mapper(db_path, images_dir, sparse_dir)
                 self._run_command(cmd_map, output_dir, log_file)
+
+                # Stage gating
+                best_model = self._select_best_sparse_model(sparse_dir, log_file)
+                if not best_model:
+                    raise RuntimeReconstructionError("Sparse reconstruction finished but no valid sub-model found.")
+                
+                model_path = best_model["path"]
+                registered_images = best_model["registered_images"]
+                sparse_points = best_model["points_3d"]
+                selected_model_name = model_path.name
+                
+                if registered_images < 5 or sparse_points < 100:
+                    raise InsufficientReconstructionError(
+                        f"Best sparse model too small for densification. model={selected_model_name}, images={registered_images}, points={sparse_points}"
+                    )
 
                 # Dense prep
                 dense_dir = output_dir / "dense"
                 dense_dir.mkdir(exist_ok=True)
-                cmd_undistort = [
-                    self._engine_path,
-                    "image_undistorter",
-                    "--image_path", str(images_dir),
-                    "--input_path", str(sparse_dir / "0"),
-                    "--output_path", str(dense_dir),
-                    "--output_type", "COLMAP",
-                ]
+                cmd_undistort = self.builder.image_undistorter(
+                    images_dir, model_path, dense_dir
+                )
                 self._run_command(cmd_undistort, output_dir, log_file)
 
                 # Dense depth
-                cmd_stereo = [
-                    self._engine_path,
-                    "patch_match_stereo",
-                    "--workspace_path", str(dense_dir),
-                    "--PatchMatchStereo.gpu_index", "0" if self._use_gpu else "-1",
-                ]
+                cmd_stereo = self.builder.patch_match_stereo(dense_dir)
                 self._run_command(cmd_stereo, output_dir, log_file)
 
                 # Fusion
-                cmd_fuse = [
-                    self._engine_path,
-                    "stereo_fusion",
-                    "--workspace_path", str(dense_dir),
-                    "--output_path", str(dense_dir / "fused.ply"),
-                ]
+                cmd_fuse = self.builder.stereo_fusion(dense_dir, dense_dir / "fused.ply")
                 self._run_command(cmd_fuse, output_dir, log_file)
+                
+                fused_points = self._validate_dense_workspace(output_dir)
+                log_file.write(f"Dense fusion successful. Fused points: {fused_points}\n")
 
                 # Meshing: try poisson, then delaunay
                 poisson_ok = False
                 try:
-                    cmd_mesh = [
-                        self._engine_path,
-                        "poisson_mesher",
-                        "--input_path", str(dense_dir / "fused.ply"),
-                        "--output_path", str(dense_dir / "meshed-poisson.ply"),
-                    ]
+                    cmd_mesh = self.builder.poisson_mesher(
+                        dense_dir / "fused.ply", dense_dir / "meshed-poisson.ply"
+                    )
                     self._run_command(cmd_mesh, output_dir, log_file)
                     poisson_ok = True
+                    mesher_used = "poisson"
                 except Exception as poisson_err:
                     log_file.write(f"\nPoisson mesher failed: {poisson_err}\n")
 
                 if not poisson_ok:
                     try:
-                        cmd_mesh = [
-                            self._engine_path,
-                            "delaunay_mesher",
-                            "--input_path", str(dense_dir / "fused.ply"),
-                            "--output_path", str(dense_dir / "meshed-delaunay.ply"),
-                        ]
+                        # FIX: delaunay_mesher expects dense root, not fused.ply
+                        cmd_mesh = self.builder.delaunay_mesher(
+                            dense_dir, dense_dir / "meshed-delaunay.ply"
+                        )
                         self._run_command(cmd_mesh, output_dir, log_file)
+                        mesher_used = "delaunay"
                     except Exception as delaunay_err:
                         log_file.write(f"\nDelaunay mesher failed: {delaunay_err}\n")
+                        mesher_used = "failed"
 
             except Exception as e:
                 log_file.write(f"\nCRITICAL FAILURE: {str(e)}\n")
@@ -419,6 +615,11 @@ class COLMAPAdapter(ReconstructionAdapter):
             "log_path": str(log_path),
             "vertex_count": selected_stats["vertex_count"],
             "face_count": selected_stats["face_count"],
+            "registered_images": registered_images,
+            "sparse_points": sparse_points,
+            "dense_points_fused": fused_points,
+            "mesher_used": mesher_used if 'mesher_used' in locals() else "unknown",
+            "selected_sparse_model": selected_model_name if 'selected_model_name' in locals() else "none"
         }
 
 
@@ -431,7 +632,13 @@ class SimulatedAdapter(ReconstructionAdapter):
     def is_stub(self) -> bool:
         return True
 
-    def run_reconstruction(self, input_frames: List[str], output_dir: Path) -> dict:
+    def run_reconstruction(
+        self, 
+        input_frames: List[str], 
+        output_dir: Path,
+        density: float = 1.0,
+        enforce_masks: bool = True
+    ) -> dict:
         time.sleep(0.5)
 
         mesh_path = output_dir / "raw_mesh.obj"

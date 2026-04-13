@@ -75,6 +75,7 @@ class ReconstructionJobDraft(BaseModel):
     quality_report: Dict[str, Any] = Field(default_factory=dict)
     coverage_report: Dict[str, Any] = Field(default_factory=dict)
     product_id: str
+    source_video_path: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class ReconstructionJob(BaseModel):
@@ -85,6 +86,7 @@ class ReconstructionJob(BaseModel):
     input_frames: List[str]
     job_dir: str # Local path to job directory
     manifest_path: Optional[str] = None
+    source_video_path: Optional[str] = None
     failure_reason: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     started_at: Optional[datetime] = None
@@ -162,3 +164,37 @@ class CaptureGuidance(BaseModel):
     coverage_summary: Optional[Dict[str, Any]] = None
     validation_summary: Optional[Dict[str, Any]] = None
     last_updated: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+# --- ADAPTIVE RECONSTRUCTION FALLBACK MODELS ---
+
+class ReconstructionAttemptType(str, Enum):
+    DEFAULT = "default"
+    DENSER_FRAMES = "denser_frames"
+    UNMASKED = "unmasked"
+
+class ReconstructionAttemptResult(BaseModel):
+    attempt_type: ReconstructionAttemptType
+    status: str # "success", "weak", "failed"
+    frames_used: int
+    registered_images: int = 0
+    sparse_points: int = 0
+    dense_points_fused: int = 0
+    mesher_used: str = "none"
+    mesh_path: Optional[str] = None
+    log_path: Optional[str] = None
+    error_message: Optional[str] = None
+    
+    # Re-extraction evidence
+    sampling_rate_used: Optional[int] = None
+    source_video_path: Optional[str] = None
+    reextracted_frames_dir: Optional[str] = None
+    
+    metrics_rank_score: float = 0.0 # internal score used for selection
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class ReconstructionAudit(BaseModel):
+    capture_session_id: str
+    attempts: List[ReconstructionAttemptResult] = Field(default_factory=list)
+    selected_best_index: Optional[int] = None
+    final_status: str = "pending"
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

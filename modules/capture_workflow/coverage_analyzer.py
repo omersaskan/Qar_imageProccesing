@@ -6,6 +6,7 @@ import json
 import numpy as np
 
 from .config import CoverageConfig, default_coverage_config
+from .geometric_analyzer import GeometricAnalyzer
 from modules.utils.mask_resolution import resolve_mask_path, resolve_meta_path
 
 
@@ -116,6 +117,7 @@ class CoverageAnalyzer:
 
     def analyze_coverage(self, extracted_frames: List[str]) -> Dict[str, Any]:
         signatures: List[Dict[str, Any]] = []
+        geom_analyzer = GeometricAnalyzer()
         unreadable_frames = 0
         fallback_frames = 0
         low_confidence_frames = 0
@@ -226,6 +228,11 @@ class CoverageAnalyzer:
             or aspect_variation >= self.config.elevated_view_aspect_variation
             or center_y_span >= self.config.elevated_view_center_y_span
         )
+        
+        # New Geometric Analysis
+        geom_report = geom_analyzer.analyze_orbit(signatures)
+        reasons.extend(geom_report.get("codes", []))
+        
         overall_status = "sufficient" if not reasons else "insufficient"
 
         return {
@@ -241,6 +248,7 @@ class CoverageAnalyzer:
             "coverage_score": float(np.clip(coverage_score, 0.0, 1.0)),
             "fallback_frames": fallback_frames,
             "low_confidence_frames": low_confidence_frames,
+            "geometric_info": geom_report,
             "overall_status": overall_status,
             "recommended_action": "reconstruct" if overall_status == "sufficient" else "needs_recapture",
             "reasons": reasons,

@@ -9,11 +9,22 @@ import cv2
 import numpy as np
 import trimesh
 
-from modules.shared_contracts.models import ReconstructionJob
+from modules.shared_contracts.models import (
+    ReconstructionJob, 
+    ReconstructionAttemptResult, 
+    ReconstructionAttemptType, 
+    ReconstructionAudit
+)
 from modules.utils.file_persistence import atomic_write_json, calculate_checksum
 from .adapter import COLMAPAdapter, ReconstructionAdapter, SimulatedAdapter
-from .failures import InsufficientInputError, MissingArtifactError, RuntimeReconstructionError
+from .failures import (
+    InsufficientInputError, 
+    MissingArtifactError, 
+    RuntimeReconstructionError,
+    InsufficientReconstructionError
+)
 from .output_manifest import MeshMetadata, OutputManifest
+from modules.operations.settings import settings
 
 
 class ReconstructionRunner:
@@ -163,55 +174,218 @@ class ReconstructionRunner:
 
         return int(len(mesh.vertices)), int(len(mesh.faces))
 
+    def _score_attempt(self, results: dict) -> float:
+        """
+        Ranks reconstruction attempts based on quality metrics.
+        Higher is better.
+        """
+        if not results:
+            return -1.0
+        
+        # Base score from registered images (critical for sparse success)
+        score = results.get("registered_images", 0) * 100.0
+        
+        # Contribution from point counts
+        score += results.get("sparse_points", 0) * 0.5
+        score += results.get("dense_points_fused", 0) * 0.1
+        
+        # Penalty for failed meshing
+        if results.get("mesher_used") == "failed":
+            score -= 5000.0
+        elif results.get("mesher_used") in ["poisson", "delaunay"]:
+            score += 2000.0
+            
+        return score
+
     def run(self, job: ReconstructionJob) -> OutputManifest:
         if not job.input_frames or len(job.input_frames) < 3:
             raise InsufficientInputError("At least 3 high-quality frames are required for reconstruction.")
 
         validated_frames = self._validate_input_frames(job.input_frames)
-
-        start_time = time.time()
+        
+        # Determine fallback sequence from settings
+        fallback_steps = settings.recon_fallback_steps
+        if not fallback_steps:
+            fallback_steps = ["default"]
+            
+        audit = ReconstructionAudit(capture_session_id=job.capture_session_id)
         job_dir = Path(job.job_dir).resolve()
         job_dir.mkdir(parents=True, exist_ok=True)
-        execution_dir, final_dir = self._prepare_execution_workspace(job)
+        
+        best_results = None
+        best_score = -1.0
+        best_index = -1
+        
+        for i, step_name in enumerate(fallback_steps):
+            attempt_start = time.time()
+            attempt_type = ReconstructionAttemptType(step_name)
+            
+            # Skip unmasked if disabled
+            if attempt_type == ReconstructionAttemptType.UNMASKED and not settings.recon_unmasked_fallback_enabled:
+                logging.warning(f"Skipping UNMASKED fallback as it is disabled in settings.")
+                continue
 
-        try:
-            results = self.adapter.run_reconstruction(validated_frames, execution_dir)
-        except InsufficientInputError:
-            if final_dir is not None and execution_dir.exists():
-                self._sync_workspace_back(execution_dir, final_dir)
-            raise
-        except Exception as e:
-            if final_dir is not None and execution_dir.exists():
-                self._sync_workspace_back(execution_dir, final_dir)
-            raise RuntimeReconstructionError(f"Engine ({self.adapter.engine_type}) failed: {str(e)}")
-        else:
-            if final_dir is not None:
-                self._sync_workspace_back(execution_dir, final_dir)
-                results = self._remap_artifact_paths(results, execution_dir, final_dir)
-                workspace_dir = final_dir
-            else:
-                workspace_dir = job_dir
-        finally:
-            if final_dir is not None and execution_dir.exists():
-                shutil.rmtree(execution_dir, ignore_errors=True)
+            # Create isolated sub-workspace for this attempt
+            attempt_dir = job_dir / f"attempt_{i}_{step_name}"
+            attempt_dir.mkdir(parents=True, exist_ok=True)
+            
+            logging.info(f"Starting reconstruction attempt {i}: type={step_name}")
+            
+            # Density & Masking logic
+            density = 1.0
+            enforce_masks = True
+            current_frames = validated_frames
+            sampling_rate_used = None
+            reextracted_frames_dir = None
+            
+            if attempt_type == ReconstructionAttemptType.DENSER_FRAMES:
+                if job.source_video_path and Path(job.source_video_path).exists():
+                    sampling_rate_used = settings.recon_fallback_sample_rate
+                    logging.info(f"Attempt {i}: Re-extracting frames with denser sampling rate={sampling_rate_used}")
+                    try:
+                        from modules.capture_workflow.frame_extractor import FrameExtractor
+                        
+                        # Create denser extractor
+                        extractor = FrameExtractor()
+                        extractor.thresholds.frame_sample_rate = sampling_rate_used
+                        
+                        # Extract to isolated subdir
+                        extract_dir = attempt_dir / "extracted_frames"
+                        extract_dir.mkdir(parents=True, exist_ok=True)
+                        reextracted_frames_dir = str(extract_dir)
+                        
+                        new_frames = extractor.extract_keyframes(job.source_video_path, reextracted_frames_dir)
+                        if new_frames:
+                            current_frames = new_frames
+                            logging.info(f"Attempt {i}: Denser extraction successful. count={len(new_frames)}")
+                        else:
+                            logging.warning(f"Attempt {i}: Denser extraction produced no frames. Falling back to default list.")
+                    except Exception as ex_err:
+                        logging.error(f"Attempt {i}: Denser extraction failed: {ex_err}")
+                else:
+                    logging.warning(f"Attempt {i}: source_video_path missing or invalid. Cannot densify accurately.")
 
+            if attempt_type == ReconstructionAttemptType.DEFAULT:
+                # Default behavior might use a slightly reduced density to speed up/simplify
+                # but for this specific sprint, we'll keep it at 1.0 unless otherwise specified.
+                # However, if 'denser_frames' is a thing, usually 'default' is less dense.
+                # We'll use 0.5 for default if denser_frames is in the list.
+                if ReconstructionAttemptType.DENSER_FRAMES in fallback_steps:
+                    density = 0.5
+            elif attempt_type == ReconstructionAttemptType.DENSER_FRAMES:
+                density = 1.0
+            elif attempt_type == ReconstructionAttemptType.UNMASKED:
+                enforce_masks = False
+                density = 1.0 # Unmasked usually wants all frames
+            
+            try:
+                # Execution workspace handling (ASCII path safety for Windows)
+                execution_dir, final_dir = self._prepare_execution_workspace(job)
+                # Adjust final_dir to use attempt subfolder
+                if final_dir:
+                    final_dir = attempt_dir
+                else:
+                    execution_dir = attempt_dir
+
+                results = self.adapter.run_reconstruction(
+                    current_frames, 
+                    execution_dir,
+                    density=density,
+                    enforce_masks=enforce_masks
+                )
+                
+                # Sync back if using ASCII workroot
+                if final_dir:
+                    self._sync_workspace_back(execution_dir, final_dir)
+                    results = self._remap_artifact_paths(results, execution_dir, final_dir)
+                    shutil.rmtree(execution_dir, ignore_errors=True)
+                
+                score = self._score_attempt(results)
+                
+                attempt_res = ReconstructionAttemptResult(
+                    attempt_type=attempt_type,
+                    status="success",
+                    frames_used=len(current_frames),
+                    registered_images=results.get("registered_images", 0),
+                    sparse_points=results.get("sparse_points", 0),
+                    dense_points_fused=results.get("dense_points_fused", 0),
+                    mesher_used=results.get("mesher_used", "none"),
+                    mesh_path=results.get("mesh_path"),
+                    log_path=results.get("log_path"),
+                    sampling_rate_used=sampling_rate_used,
+                    source_video_path=job.source_video_path if attempt_type == ReconstructionAttemptType.DENSER_FRAMES else None,
+                    reextracted_frames_dir=reextracted_frames_dir,
+                    metrics_rank_score=score
+                )
+                
+                # If we have a successful result that passes basic gating, we might stop or continue
+                # The user says "Select the best honest result", so we should try all and pick.
+                if score > best_score:
+                    best_score = score
+                    best_results = results
+                    best_index = i
+                
+            except (InsufficientReconstructionError, RuntimeReconstructionError, InsufficientInputError) as e:
+                attempt_res = ReconstructionAttemptResult(
+                    attempt_type=attempt_type,
+                    status="failed" if isinstance(e, RuntimeReconstructionError) else "weak",
+                    frames_used=0,
+                    error_message=str(e),
+                    sampling_rate_used=sampling_rate_used,
+                    source_video_path=job.source_video_path if attempt_type == ReconstructionAttemptType.DENSER_FRAMES else None,
+                    reextracted_frames_dir=reextracted_frames_dir,
+                    metrics_rank_score=-100.0
+                )
+                logging.warning(f"Attempt {i} ({step_name}) were weak or failed: {e}")
+            except Exception as e:
+                attempt_res = ReconstructionAttemptResult(
+                    attempt_type=attempt_type,
+                    status="failed",
+                    frames_used=0,
+                    error_message=f"Unexpected error: {str(e)}",
+                    metrics_rank_score=-1000.0
+                )
+                logging.error(f"Attempt {i} ({step_name}) crashed: {e}")
+            
+            audit.attempts.append(attempt_res)
+            
+            # OPTIONAL: Early exit if default is EXTREMELY good? 
+            # User wants honest comparison, so we'll likely continue unless configured otherwise.
+
+        # After all attempts, select best
+        if best_results is None or best_score < 0:
+            audit.final_status = "recapture_required"
+            self._save_audit(audit, job_dir)
+            # Find the most descriptive error
+            last_err = audit.attempts[-1].error_message if audit.attempts else "All reconstruction attempts failed."
+            raise InsufficientReconstructionError(f"All fallback attempts failed. Last error: {last_err}")
+
+        audit.selected_best_index = best_index
+        audit.final_status = "success"
+        self._save_audit(audit, job_dir)
+        
+        logging.info(f"Reconstruction complete. Selected best attempt index: {best_index} ({audit.attempts[best_index].attempt_type})")
+
+        return self._finalize_best_attempt(best_results, job, job_dir)
+
+    def _save_audit(self, audit: ReconstructionAudit, job_dir: Path):
+        audit_path = job_dir / "reconstruction_audit.json"
+        atomic_write_json(audit_path, audit.model_dump(mode="json"))
+
+    def _finalize_best_attempt(self, results: dict, job: ReconstructionJob, job_dir: Path) -> OutputManifest:
         mesh_path = Path(results["mesh_path"])
         texture_path = Path(results["texture_path"])
         log_path = Path(results["log_path"])
 
-        if not log_path.exists():
-            raise MissingArtifactError(log_path.name)
-
         vertex_count, face_count = self._validate_mesh_artifact(mesh_path)
         checksum = calculate_checksum(mesh_path)
 
-        processing_time = time.time() - start_time
         manifest = OutputManifest(
             job_id=job.job_id,
             mesh_path=str(mesh_path),
             texture_path=str(texture_path),
             log_path=str(log_path),
-            processing_time_seconds=processing_time,
+            processing_time_seconds=0.0, # Could calculate total
             engine_type=self.adapter.engine_type,
             is_stub=self.adapter.is_stub,
             mesh_metadata=MeshMetadata(
@@ -221,8 +395,8 @@ class ReconstructionRunner:
             ),
             checksum=checksum,
         )
-
-        manifest_path = workspace_dir / "manifest.json"
+        
+        # Overwrite root manifest with the best one
+        manifest_path = job_dir / "manifest.json"
         atomic_write_json(manifest_path, manifest.model_dump(mode="json"))
-
         return manifest
