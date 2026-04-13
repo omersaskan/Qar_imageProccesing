@@ -1,8 +1,11 @@
+# modules/capture_workflow/frame_extractor.py
+from __future__ import annotations
 import cv2
 import json
 import numpy as np
+from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Dict, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from .config import (
     QualityThresholds,

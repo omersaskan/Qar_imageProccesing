@@ -211,7 +211,6 @@ class ReconstructionRunner:
         best_index = -1
         
         for i, step_name in enumerate(fallback_steps):
-            attempt_start = time.time()
             attempt_type = ReconstructionAttemptType(step_name)
             
             # Skip unmasked if disabled
@@ -235,43 +234,65 @@ class ReconstructionRunner:
             if attempt_type == ReconstructionAttemptType.DENSER_FRAMES:
                 if job.source_video_path and Path(job.source_video_path).exists():
                     sampling_rate_used = settings.recon_fallback_sample_rate
-                    logging.info(f"Attempt {i}: Re-extracting frames with denser sampling rate={sampling_rate_used}")
+                    logging.info(
+                        f"Attempt {i}: Re-extracting frames with denser sampling rate={sampling_rate_used}"
+                    )
                     try:
                         from modules.capture_workflow.frame_extractor import FrameExtractor
-                        
-                        # Create denser extractor
+
                         extractor = FrameExtractor()
                         extractor.thresholds.frame_sample_rate = sampling_rate_used
-                        
-                        # Extract to isolated subdir
+
                         extract_dir = attempt_dir / "extracted_frames"
                         extract_dir.mkdir(parents=True, exist_ok=True)
                         reextracted_frames_dir = str(extract_dir)
-                        
-                        new_frames = extractor.extract_keyframes(job.source_video_path, reextracted_frames_dir)
-                        if new_frames:
-                            current_frames = new_frames
-                            logging.info(f"Attempt {i}: Denser extraction successful. count={len(new_frames)}")
+
+                        extracted = extractor.extract_keyframes(
+                            job.source_video_path,
+                            reextracted_frames_dir,
+                        )
+
+                        if isinstance(extracted, tuple):
+                            new_frames, extraction_report = extracted
                         else:
-                            logging.warning(f"Attempt {i}: Denser extraction produced no frames. Falling back to default list.")
+                            new_frames = extracted
+                            extraction_report = None
+
+                        if extraction_report is not None:
+                            atomic_write_json(
+                                attempt_dir / "denser_extraction_report.json",
+                                extraction_report,
+                            )
+
+                        if new_frames:
+                            current_frames = [str(p) for p in new_frames]
+                            logging.info(
+                                f"Attempt {i}: Denser extraction successful. count={len(current_frames)}"
+                            )
+                        else:
+                            logging.warning(
+                                f"Attempt {i}: Denser extraction produced no frames. Falling back to default list."
+                            )
+
                     except Exception as ex_err:
                         logging.error(f"Attempt {i}: Denser extraction failed: {ex_err}")
                 else:
-                    logging.warning(f"Attempt {i}: source_video_path missing or invalid. Cannot densify accurately.")
-
-            if attempt_type == ReconstructionAttemptType.DEFAULT:
-                # Default behavior might use a slightly reduced density to speed up/simplify
+                    logging.warning(
+                        f"Attempt {i}: source_video_path missing or invalid. Cannot densify accurately."
+                    ) # Default behavior might use a slightly reduced density to speed up/simplify
                 # but for this specific sprint, we'll keep it at 1.0 unless otherwise specified.
                 # However, if 'denser_frames' is a thing, usually 'default' is less dense.
                 # We'll use 0.5 for default if denser_frames is in the list.
-                if ReconstructionAttemptType.DENSER_FRAMES in fallback_steps:
+            if attempt_type == ReconstructionAttemptType.DEFAULT:
+                if ReconstructionAttemptType.DENSER_FRAMES.value in fallback_steps:
                     density = 0.5
             elif attempt_type == ReconstructionAttemptType.DENSER_FRAMES:
                 density = 1.0
             elif attempt_type == ReconstructionAttemptType.UNMASKED:
                 enforce_masks = False
-                density = 1.0 # Unmasked usually wants all frames
-            
+                density = 1.0
+            current_frames = [str(p) for p in current_frames]
+            current_frames = self._validate_input_frames(current_frames)
             try:
                 # 1. Primary Attempt (usually OpenMVS if configured)
                 current_adapter = self.adapter
