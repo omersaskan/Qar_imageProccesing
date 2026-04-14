@@ -122,6 +122,8 @@ class ColmapCommandBuilder:
             str(workspace_path),
             "--output_path",
             str(output_path),
+            "--StereoFusion.min_num_pixels",
+            "2",
         ]
 
     def poisson_mesher(self, input_path: Path, output_path: Path) -> List[str]:
@@ -725,8 +727,13 @@ class COLMAPAdapter(ReconstructionAdapter):
                         dense_dir / "meshed-poisson.ply",
                     )
                     self._run_command(cmd_mesh, output_dir, log_file)
-                    poisson_ok = True
-                    mesher_used = "poisson"
+                    
+                    if self._is_valid_mesh_candidate(dense_dir / "meshed-poisson.ply"):
+                        poisson_ok = True
+                        mesher_used = "poisson"
+                    else:
+                        log_file.write("\nPoisson mesher finished but produced an invalid or empty mesh.\n")
+
                 except Exception as poisson_err:
                     log_file.write(f"\nPoisson mesher failed: {poisson_err}\n")
 
