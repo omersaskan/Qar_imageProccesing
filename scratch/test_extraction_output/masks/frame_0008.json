@@ -1,0 +1,31 @@
+{
+  "backend_name": "rembg",
+  "inference_ms": 1239.3179000064265,
+  "fallback_used": false,
+  "fallback_reason": null,
+  "mask_confidence": 1.0,
+  "purity_score": 0.9996115712411845,
+  "support_suspected": false,
+  "confidence": 1.0,
+  "occupancy": 0.2571934076003086,
+  "is_clipped": false,
+  "support_removed": false,
+  "support_area_ratio": 0.0,
+  "border_touch_ratio": 0.0,
+  "bottom_band_ratio": 0.03532472524510551,
+  "bottom_span_ratio": 0.22630208333333332,
+  "bottom_contact_ratio": 0.0,
+  "bbox": {
+    "x": 1409,
+    "y": 237,
+    "w": 1634,
+    "h": 1663
+  },
+  "centroid": {
+    "x": 2224.761253121788,
+    "y": 1068.0998221350194
+  },
+  "fragment_count": 1,
+  "largest_contour_ratio": 1.0,
+  "solidity": 0.998446284964738
+}

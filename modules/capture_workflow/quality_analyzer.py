@@ -96,7 +96,7 @@ class QualityAnalyzer:
                     + np.sum(mask[:, 0] > 0)
                     + np.sum(mask[:, -1] > 0)
                 )
-                is_clipped = bool(edge_pixels > 0)
+                is_clipped = bool(edge_pixels > (w + h) * 0.05)
 
             if centroid is not None:
                 dx = (float(centroid["x"]) - w / 2) / max(w / 2, 1.0)
@@ -179,7 +179,6 @@ class QualityAnalyzer:
                 )
             )
             and (mask is None or is_framed)
-            and not is_clipped
             and (mask is None or mask_confidence >= self.thresholds.min_mask_confidence)
             and (mask is None or purity_score >= self.thresholds.min_mask_purity)
             and fragment_count <= self.thresholds.max_mask_fragments

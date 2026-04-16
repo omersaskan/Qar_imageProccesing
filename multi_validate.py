@@ -23,6 +23,7 @@ BUCKET_NUMERICAL = "5. Seam-Leveling/Numerical"
 BUCKET_INTEGRATION = "6. Manifest/Export Integration"
 BUCKET_RENDERING = "7. Dashboard/Rendering"
 BUCKET_UNKNOWN = "8. Unknown"
+BUCKET_MISSING_ARTIFACT = "9. Missing Artifact"
 
 class ValidationResult:
     def __init__(self, job_id: str, sample_type: str):
@@ -204,7 +205,7 @@ def print_report(results: List[ValidationResult]):
     print(f"{'Job ID':<20} | {'Type':<10} | {'Outcome':<10} | {'Failure Bucket':<25}")
     print("-"*80)
     for r in results:
-        outcome = "✅ PASS" if r.success else "❌ FAIL"
+        outcome = "[PASS]" if r.success else "[FAIL]"
         bucket = r.failure_bucket if not r.success else "-"
         print(f"{r.job_id:<20} | {r.sample_type:<10} | {outcome:<10} | {bucket:<25}")
         if not r.success:

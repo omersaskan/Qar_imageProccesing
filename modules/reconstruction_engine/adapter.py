@@ -114,8 +114,8 @@ class ColmapCommandBuilder:
             "1",
         ]
 
-    def stereo_fusion(self, workspace_path: Path, output_path: Path) -> List[str]:
-        return [
+    def stereo_fusion(self, workspace_path: Path, output_path: Path, mask_path: Optional[Path] = None) -> List[str]:
+        cmd = [
             self.bin,
             "stereo_fusion",
             "--workspace_path",
@@ -125,6 +125,9 @@ class ColmapCommandBuilder:
             "--StereoFusion.min_num_pixels",
             "2",
         ]
+        if mask_path is not None:
+            cmd += ["--StereoFusion.mask_path", str(mask_path)]
+        return cmd
 
     def poisson_mesher(self, input_path: Path, output_path: Path) -> List[str]:
         return [
@@ -711,10 +714,21 @@ class COLMAPAdapter(ReconstructionAdapter):
                 cmd_undistort = self.builder.image_undistorter(images_dir, model_path, dense_dir)
                 self._run_command(cmd_undistort, output_dir, log_file)
 
+                # FORCING COLMAP 4.0.3 DENSE MASKING
+                # image_undistorter in this version often drops masks. We manually inject
+                # the masks into dense/stereo/masks so PatchMatchStereo natively uses them,
+                # avoiding the 1-hour pure-black pixel evaluation hang.
+                stereo_masks_dir = dense_dir / "stereo" / "masks"
+                if effective_masks_dir and effective_masks_dir.exists():
+                    stereo_masks_dir.mkdir(parents=True, exist_ok=True)
+                    for mf in effective_masks_dir.glob("*.png"):
+                        import shutil
+                        shutil.copy2(mf, stereo_masks_dir / mf.name)
+
                 cmd_stereo = self.builder.patch_match_stereo(dense_dir)
                 self._run_command(cmd_stereo, output_dir, log_file)
 
-                cmd_fuse = self.builder.stereo_fusion(dense_dir, dense_dir / "fused.ply")
+                cmd_fuse = self.builder.stereo_fusion(dense_dir, dense_dir / "fused.ply", mask_path=stereo_masks_dir if stereo_masks_dir.exists() else None)
                 self._run_command(cmd_fuse, output_dir, log_file)
 
                 fused_points = self._validate_dense_workspace(output_dir)
