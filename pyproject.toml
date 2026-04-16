@@ -16,6 +16,8 @@ dependencies = [
     "fast-simplification",
     "rembg",
     "onnxruntime",
+    "pydantic-settings",
+    "python-multipart",
 ]
 
 [project.optional-dependencies]

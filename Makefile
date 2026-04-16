@@ -12,7 +12,7 @@ help:
 	@echo "  make cleanup   - Remove temporary data and cache"
 
 install:
-	pip install -r requirements.txt
+	pip install .
 	pip install -e .[dev]
 
 test:
