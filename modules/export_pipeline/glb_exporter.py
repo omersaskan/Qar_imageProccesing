@@ -159,6 +159,22 @@ class GLBExporter:
                                 texture_applied_successfully = True
                                 continue
                             
+                            existing_mat = getattr(m.visual, "material", None)
+                            if existing_mat is not None:
+                                try:
+                                    # Inject into existing material without nuking other maps/properties
+                                    if hasattr(existing_mat, "baseColorTexture"):
+                                        existing_mat.baseColorTexture = tex_image
+                                        texture_applied_successfully = True
+                                        continue
+                                    elif hasattr(existing_mat, "image"):
+                                        existing_mat.image = tex_image
+                                        texture_applied_successfully = True
+                                        continue
+                                except Exception:
+                                    pass
+
+                            # If no material exists at all, assign a new TextureVisuals
                             m.visual = trimesh.visual.TextureVisuals(
                                 uv=m.visual.uv,
                                 material=material,

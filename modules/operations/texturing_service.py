@@ -169,9 +169,26 @@ class TexturingService:
         
         for mtl_file in source_dir.glob("*.mtl"):
             try:
-                shutil.copy2(mtl_file, target_dir / mtl_file.name)
-            except Exception:
-                pass
+                dest_mtl = target_dir / mtl_file.name
+                with open(mtl_file, "r", encoding="utf-8") as fm_in:
+                    lines = fm_in.readlines()
+                with open(dest_mtl, "w", encoding="utf-8") as fm_out:
+                    for line in lines:
+                        if line.strip().startswith(("map_Kd", "map_bump", "bump", "map_Ks", "map_Ns", "map_d", "norm", "map_Ka")):
+                            parts = line.strip().split()
+                            if len(parts) >= 2:
+                                path_str = line.strip().split(maxsplit=1)[1]
+                                if " -" not in path_str:
+                                    tex_basename = Path(path_str).name
+                                    new_line = f"{parts[0]} {tex_basename}\n"
+                                else:
+                                    tex_basename = Path(parts[-1]).name
+                                    new_line = " ".join(parts[:-1] + [tex_basename]) + "\n"
+                                fm_out.write(new_line)
+                                continue
+                        fm_out.write(line)
+            except Exception as e:
+                logger.warning(f"Failed to copy or rewrite MTL file {mtl_file}: {e}")
                 
         new_atlas_paths = []
         for atlas in texture_results.get("texture_atlas_paths", []):
