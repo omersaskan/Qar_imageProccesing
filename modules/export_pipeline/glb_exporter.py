@@ -175,11 +175,12 @@ class GLBExporter:
                                     pass
 
                             # If no material exists at all, assign a new TextureVisuals
-                            m.visual = trimesh.visual.TextureVisuals(
-                                uv=m.visual.uv,
-                                material=material,
-                            )
-                            texture_applied_successfully = True
+                            if existing_mat is None:
+                                m.visual = trimesh.visual.TextureVisuals(
+                                    uv=m.visual.uv,
+                                    material=material,
+                                )
+                                texture_applied_successfully = True
 
                     visual_info["has_uv"] = True
                     visual_info["has_material"] = True
@@ -203,8 +204,14 @@ class GLBExporter:
                 for m in meshes:
                     # Apply fallback only if it currently lacks a material entirely
                     if getattr(m.visual, "material", None) is None:
-                        if hasattr(m.visual, "vertex_colors"):
+                        try:
                             m.visual.material = fallback_mat
+                        except Exception:
+                            # If assigning material directly fails (e.g., ColorVisuals strictness), force PBR
+                            m.visual = trimesh.visual.TextureVisuals(
+                                uv=getattr(m.visual, "uv", None),
+                                material=fallback_mat
+                            )
             except Exception:
                 pass
 
