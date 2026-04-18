@@ -175,15 +175,14 @@ class TexturingService:
                 with open(dest_mtl, "w", encoding="utf-8") as fm_out:
                     for line in lines:
                         if line.strip().startswith(("map_Kd", "map_bump", "bump", "map_Ks", "map_Ns", "map_d", "norm", "map_Ka")):
-                            parts = line.strip().split()
-                            if len(parts) >= 2:
-                                path_str = line.strip().split(maxsplit=1)[1]
-                                if " -" not in path_str:
-                                    tex_basename = Path(path_str).name
-                                    new_line = f"{parts[0]} {tex_basename}\n"
+                            last_slash_idx = max(line.rfind('/'), line.rfind('\\'))
+                            if last_slash_idx != -1:
+                                basename = line[last_slash_idx + 1:]
+                                space_idx = line.rfind(' ', 0, last_slash_idx)
+                                if space_idx != -1:
+                                    new_line = line[:space_idx + 1] + basename
                                 else:
-                                    tex_basename = Path(parts[-1]).name
-                                    new_line = " ".join(parts[:-1] + [tex_basename]) + "\n"
+                                    new_line = line
                                 fm_out.write(new_line)
                                 continue
                         fm_out.write(line)
@@ -221,11 +220,15 @@ class TexturingService:
 
         # Refresh vertex/face counts from the textured geometry.
         try:
-            reloaded = trimesh.load(aligned_textured_obj, force="mesh")
-            if isinstance(reloaded, trimesh.Scene):
-                reloaded = reloaded.dump(concatenate=True)
-            manifest.mesh_metadata.vertex_count = int(len(reloaded.vertices))
-            manifest.mesh_metadata.face_count = int(len(reloaded.faces))
+            reloaded = trimesh.load(aligned_textured_obj, force="scene")
+            if hasattr(reloaded, "geometry"):
+                # It's a Scene
+                manifest.mesh_metadata.vertex_count = sum(len(g.vertices) for g in reloaded.geometry.values() if hasattr(g, 'vertices'))
+                manifest.mesh_metadata.face_count = sum(len(g.faces) for g in reloaded.geometry.values() if hasattr(g, 'faces'))
+            else:
+                # It's a single Trimesh
+                manifest.mesh_metadata.vertex_count = int(len(reloaded.vertices))
+                manifest.mesh_metadata.face_count = int(len(reloaded.faces))
         except Exception:
             pass
 
@@ -240,15 +243,23 @@ class TexturingService:
     def _check_uv(mesh_path: str, trimesh_module: Any) -> bool:
         """Load a mesh and return True if it has UV coordinates."""
         try:
-            m = trimesh_module.load(mesh_path, force="mesh")
-            if isinstance(m, trimesh_module.Scene):
-                m = m.dump(concatenate=True)
-            return bool(
-                hasattr(m, "visual")
-                and hasattr(m.visual, "uv")
-                and m.visual.uv is not None
-                and len(m.visual.uv) > 0
-            )
+            m = trimesh_module.load(mesh_path, force="scene")
+            if hasattr(m, "geometry"):
+                # Iterate through scene geometry
+                return any(
+                    hasattr(g, "visual")
+                    and hasattr(g.visual, "uv")
+                    and g.visual.uv is not None
+                    and len(g.visual.uv) > 0
+                    for g in m.geometry.values()
+                )
+            else:
+                return bool(
+                    hasattr(m, "visual")
+                    and hasattr(m.visual, "uv")
+                    and m.visual.uv is not None
+                    and len(m.visual.uv) > 0
+                )
         except Exception:
             return False
 
