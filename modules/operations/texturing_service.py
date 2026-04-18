@@ -271,6 +271,12 @@ class TexturingService:
                             continue
                         except ValueError:
                             pass  # Malformed vertex line — write as-is.
+                elif line.startswith("mtllib "):
+                    parts = line.strip().split(maxsplit=1)
+                    if len(parts) == 2:
+                        mtl_basename = Path(parts[1]).name
+                        f_out.write(f"mtllib {mtl_basename}\n")
+                        continue
                 f_out.write(line)
 
         return out_path

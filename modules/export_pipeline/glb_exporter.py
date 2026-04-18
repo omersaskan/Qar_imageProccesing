@@ -145,6 +145,7 @@ class GLBExporter:
 
                     with Image.open(texture_path) as texture_image:
                         tex_image = texture_image.convert("RGBA").copy()
+                    
                     material = trimesh.visual.material.PBRMaterial(
                         baseColorTexture=tex_image,
                         metallicFactor=0.0,
@@ -153,15 +154,19 @@ class GLBExporter:
 
                     for m in meshes:
                         if hasattr(m.visual, "uv") and m.visual.uv is not None:
+                            # Do not overwrite if it already has a valid texture mapping
+                            if self._material_has_texture(m, "baseColorTexture"):
+                                texture_applied_successfully = True
+                                continue
+                            
                             m.visual = trimesh.visual.TextureVisuals(
                                 uv=m.visual.uv,
                                 material=material,
                             )
+                            texture_applied_successfully = True
 
-                    texture_applied_successfully = True
                     visual_info["has_uv"] = True
                     visual_info["has_material"] = True
-
                 except Exception as e:
                     texture_applied_successfully = False
                     texture_warning = f"Texture apply failed: {e}"
@@ -180,8 +185,10 @@ class GLBExporter:
                     roughnessFactor=1.0,
                 )
                 for m in meshes:
-                    if hasattr(m.visual, "vertex_colors"):
-                        m.visual.material = fallback_mat
+                    # Apply fallback only if it currently lacks a material entirely
+                    if getattr(m.visual, "material", None) is None:
+                        if hasattr(m.visual, "vertex_colors"):
+                            m.visual.material = fallback_mat
             except Exception:
                 pass
 
