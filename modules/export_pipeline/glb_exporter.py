@@ -9,10 +9,8 @@ class GLBExporter:
     def __init__(self):
         pass
 
-    def _load_mesh(self, mesh_path: str) -> trimesh.Trimesh:
+    def _load_mesh(self, mesh_path: str) -> trimesh.Trimesh | trimesh.Scene:
         mesh = trimesh.load(mesh_path)
-        if isinstance(mesh, trimesh.Scene):
-            mesh = mesh.dump(concatenate=True)
         return mesh
 
     def _inspect_visuals(self, mesh: trimesh.Trimesh) -> Dict[str, bool]:
@@ -69,7 +67,7 @@ class GLBExporter:
             return False
         return False
 
-    def _flatten_loaded_asset(self, loaded) -> tuple[trimesh.Trimesh, list[trimesh.Trimesh]]:
+    def _flatten_loaded_asset(self, loaded) -> tuple[Any, list[trimesh.Trimesh]]:
         if isinstance(loaded, trimesh.Scene):
             meshes = [
                 geom
@@ -78,8 +76,7 @@ class GLBExporter:
             ]
             if not meshes:
                 raise ValueError("Exported GLB contains no renderable mesh geometry.")
-            combined = trimesh.util.concatenate([mesh.copy() for mesh in meshes])
-            return combined, meshes
+            return loaded, meshes
 
         if isinstance(loaded, trimesh.Trimesh):
             return loaded, [loaded]
@@ -114,12 +111,26 @@ class GLBExporter:
         if not os.path.exists(mesh_path):
             raise FileNotFoundError(f"Source mesh not found for GLB export: {mesh_path}")
 
-        mesh = self._load_mesh(mesh_path)
-        if not hasattr(mesh, "vertices") or not hasattr(mesh, "faces"):
+        loaded = self._load_mesh(mesh_path)
+        
+        if isinstance(loaded, trimesh.Scene):
+            meshes = [geom for geom in loaded.geometry.values() if isinstance(geom, trimesh.Trimesh)]
+        elif isinstance(loaded, trimesh.Trimesh):
+            meshes = [loaded]
+        else:
             raise ValueError(f"Source asset is not a polygon mesh: {mesh_path}")
-        if len(mesh.vertices) == 0 or len(mesh.faces) == 0:
+
+        total_verts = sum(len(m.vertices) for m in meshes if hasattr(m, 'vertices'))
+        total_faces = sum(len(m.faces) for m in meshes if hasattr(m, 'faces'))
+        
+        if total_verts == 0 or total_faces == 0:
             raise ValueError(f"Source mesh has no renderable geometry: {mesh_path}")
-        visual_info = self._inspect_visuals(mesh)
+            
+        visual_info = {"has_uv": False, "has_material": False}
+        for m in meshes:
+            vis = self._inspect_visuals(m)
+            if vis["has_uv"]: visual_info["has_uv"] = True
+            if vis["has_material"]: visual_info["has_material"] = True
 
         used_texture_path = None
         texture_applied_successfully = False
@@ -140,14 +151,16 @@ class GLBExporter:
                         roughnessFactor=1.0,
                     )
 
-                    # apply texture only if UV exists
-                    mesh.visual = trimesh.visual.TextureVisuals(
-                        uv=mesh.visual.uv,
-                        material=material,
-                    )
+                    for m in meshes:
+                        if hasattr(m.visual, "uv") and m.visual.uv is not None:
+                            m.visual = trimesh.visual.TextureVisuals(
+                                uv=m.visual.uv,
+                                material=material,
+                            )
 
                     texture_applied_successfully = True
-                    visual_info = self._inspect_visuals(mesh)
+                    visual_info["has_uv"] = True
+                    visual_info["has_material"] = True
 
                 except Exception as e:
                     texture_applied_successfully = False
@@ -159,28 +172,32 @@ class GLBExporter:
             if texture_path:
                 texture_warning = f"Texture path missing on disk: {texture_path}"
 
-        # fallback material if no texture successfully applied
         if not texture_applied_successfully:
             try:
-                if hasattr(mesh.visual, "vertex_colors"):
-                    mesh.visual.material = trimesh.visual.material.PBRMaterial(
-                        baseColorFactor=(255, 255, 255, 255),
-                        metallicFactor=0.0,
-                        roughnessFactor=1.0,
-                    )
+                fallback_mat = trimesh.visual.material.PBRMaterial(
+                    baseColorFactor=(255, 255, 255, 255),
+                    metallicFactor=0.0,
+                    roughnessFactor=1.0,
+                )
+                for m in meshes:
+                    if hasattr(m.visual, "vertex_colors"):
+                        m.visual.material = fallback_mat
             except Exception:
                 pass
 
-        # metadata transform is expected to be already baked by cleaner/alignment
-        glb_bytes = mesh.export(file_type="glb")
+        if isinstance(loaded, trimesh.Scene):
+            glb_bytes = loaded.export(file_type="glb")
+        else:
+            glb_bytes = meshes[0].export(file_type="glb")
+            
         with open(output_path, "wb") as glb_file:
             glb_file.write(glb_bytes)
 
         result = {
             "format": "GLB",
             "filesize": os.path.getsize(output_path),
-            "vertex_count": int(len(mesh.vertices)) if hasattr(mesh, "vertices") else 0,
-            "face_count": int(len(mesh.faces)) if hasattr(mesh, "faces") else 0,
+            "vertex_count": total_verts,
+            "face_count": total_faces,
             "has_uv": visual_info["has_uv"],
             "has_material": visual_info["has_material"],
             "used_texture_path": used_texture_path,
@@ -205,9 +222,12 @@ class GLBExporter:
             raise ValueError(f"Exported GLB is empty: {glb_path}")
 
         loaded = trimesh.load(glb_path, force="scene")
-        combined, meshes = self._flatten_loaded_asset(loaded)
+        combined_or_scene, meshes = self._flatten_loaded_asset(loaded)
 
-        if len(combined.vertices) == 0 or len(combined.faces) == 0:
+        total_verts = sum(len(m.vertices) for m in meshes)
+        total_faces = sum(len(m.faces) for m in meshes)
+
+        if total_verts == 0 or total_faces == 0:
             raise ValueError(f"Exported GLB has no renderable geometry: {glb_path}")
 
         has_uv = False
@@ -250,8 +270,8 @@ class GLBExporter:
                     emissive_present = True
                     texture_count += 1
                     
-        component_count = len(combined.split(only_watertight=False))
-        bounds = combined.bounds
+        component_count = sum(len(m.split(only_watertight=False)) for m in meshes)
+        bounds = combined_or_scene.bounds
         
         # Honest Integrity status (preservation)
         if has_embedded_texture and has_uv and has_material:
@@ -276,8 +296,8 @@ class GLBExporter:
             semantic_status = "material_incomplete"
 
         return {
-            "vertex_count": int(len(combined.vertices)),
-            "face_count": int(len(combined.faces)),
+            "vertex_count": total_verts,
+            "face_count": total_faces,
             "geometry_count": int(len(meshes)),
             "component_count": int(component_count),
             "has_uv": bool(has_uv),

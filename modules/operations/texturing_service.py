@@ -162,6 +162,28 @@ class TexturingService:
         # Re-apply alignment shift directly on the OBJ (preserves UVs/MTL).
         aligned_textured_obj = self._apply_pivot_to_obj(textured_path, pivot_offset, cleaned_mesh_path)
 
+        # Relocate MTL and textures from texturing scratch dir to the final parent output dir
+        import shutil
+        target_dir = Path(cleaned_mesh_path).parent
+        source_dir = Path(textured_path).parent
+        
+        for mtl_file in source_dir.glob("*.mtl"):
+            try:
+                shutil.copy2(mtl_file, target_dir / mtl_file.name)
+            except Exception:
+                pass
+                
+        new_atlas_paths = []
+        for atlas in texture_results.get("texture_atlas_paths", []):
+            try:
+                dest = target_dir / Path(atlas).name
+                shutil.copy2(atlas, dest)
+                new_atlas_paths.append(str(dest))
+            except Exception as e:
+                new_atlas_paths.append(atlas)
+                
+        texture_results["texture_atlas_paths"] = new_atlas_paths
+
         # Update texture_results to reflect the aligned path.
         texture_results["textured_mesh_path"] = aligned_textured_obj
 
