@@ -88,7 +88,7 @@ class CoverageConfig(BaseModel):
     # Geometric Analysis Thresholds
     geom_gap_threshold: float = Field(0.25, ge=0.0)
     geom_continuity_threshold: float = Field(0.15, ge=0.0)
-    geom_min_viewpoint_spread: float = Field(0.6, ge=0.0)
+    geom_min_viewpoint_spread: float = Field(0.25, ge=0.0)
 
 
 default_quality_thresholds = QualityThresholds()

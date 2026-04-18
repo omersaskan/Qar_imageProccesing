@@ -10,7 +10,7 @@ class GeometricAnalyzer:
     def __init__(self, 
                  gap_threshold: float = 0.25, 
                  continuity_threshold: float = 0.15,
-                 min_viewpoint_spread: float = 0.6):
+                 min_viewpoint_spread: float = 0.25):
         self.gap_threshold = gap_threshold
         self.continuity_threshold = continuity_threshold
         self.min_viewpoint_spread = min_viewpoint_spread

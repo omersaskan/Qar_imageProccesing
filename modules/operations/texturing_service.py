@@ -78,22 +78,14 @@ class TexturingService:
         Returns a TexturingResult with the resolved mesh path, atlas paths,
         status string, and an updated (but not yet persisted) manifest.
         """
-        if manifest.engine_type != "colmap":
-            logger.info("Texturing skipped: engine_type is not 'colmap'.")
-            return TexturingResult(
-                texturing_status="absent",
-                cleaned_mesh_path=cleaned_mesh_path,
-                texture_atlas_paths=[],
-                manifest=manifest,
-            )
-
         # Locate the COLMAP dense workspace relative to the raw mesh path.
         mesh_parent = Path(manifest.mesh_path).parent
         colmap_dir = mesh_parent.parent if mesh_parent.name == "dense" else mesh_parent
 
         if not colmap_dir.joinpath("dense").exists():
             logger.info(
-                f"Texturing skipped: dense/ workspace not found under {colmap_dir}."
+                f"Texturing skipped: dense/ workspace not found under {colmap_dir} "
+                f"(declared engine: {manifest.engine_type})."
             )
             return TexturingResult(
                 texturing_status="absent",

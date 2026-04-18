@@ -25,4 +25,4 @@ jobs:
         pip install -e .[dev]
     - name: Run full test suite
       run: |
-        python -m pytest modules/shared_contracts/tests modules/capture_workflow/tests modules/reconstruction_engine/tests modules/asset_cleanup_pipeline/tests modules/export_pipeline/tests modules/qa_validation/tests modules/asset_registry/tests modules/tests/test_phase6_integration.py modules/tests/test_smoke_flow.py modules/tests/test_phase7_edge_cases.py
+        python -m pytest modules/shared_contracts/tests modules/capture_workflow/tests modules/reconstruction_engine/tests modules/asset_cleanup_pipeline/tests modules/export_pipeline/tests modules/qa_validation/tests modules/asset_registry/tests modules/operations/tests tests/test_worker_failure_flow.py modules/tests/test_phase6_integration.py modules/tests/test_smoke_flow.py modules/tests/test_phase7_edge_cases.py

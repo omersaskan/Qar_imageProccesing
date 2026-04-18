@@ -108,3 +108,29 @@ def test_coverage_supports_stem_based_paths(tmp_path):
     # We expect readable_frames to be 5, proving stem-based resolution worked
     assert report["num_frames"] == 5
     assert report["readable_frames"] == 5
+
+def test_coverage_good_centered_orbit_is_sufficient(tmp_path):
+    """
+    Test that a well-distributed orbit (good number of frames, many unique views) 
+    that happens to stay relatively centered within the frame span is not rejected as false-positive recapture.
+    """
+    analyzer = CoverageAnalyzer()
+    frames = []
+
+    # Generates many frames but with smaller relative x span (centered orbit)
+    # The default min_viewpoint_spread is now 0.25
+    centers = [150, 155, 160, 165, 170, 175, 180, 185, 190, 195, 200, 205, 210, 215, 220]
+    radii = [60] * len(centers)
+    for index, (center, radius) in enumerate(zip(centers, radii)):
+        frame_path = tmp_path / f"frame_{index:04d}.jpg"
+        _write_frame_with_mask(frame_path, center_x=center, radius=radius, color_shift=index * 4)
+        frames.append(str(frame_path))
+
+    report = analyzer.analyze_coverage(frames)
+
+    assert report["num_frames"] == len(centers)
+    assert report["overall_status"] == "sufficient"
+    assert report["recommended_action"] == "reconstruct"
+    
+    # Check that hard reasons does not include low coverage
+    assert not any("LOW_HORIZONTAL_COVERAGE" in reason for reason in report.get("hard_reasons", []))

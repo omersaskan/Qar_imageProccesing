@@ -8,6 +8,8 @@ env/
 venv/
 build/
 dist/
+*.egg-info/
+*.egg-info
 
 # Project Data (Large assets and session-specific files)
 data/captures/
