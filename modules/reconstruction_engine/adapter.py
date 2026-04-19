@@ -16,6 +16,7 @@ from .failures import (
     InsufficientInputError,
     RuntimeReconstructionError,
     InsufficientReconstructionError,
+    DenseMaskAlignmentError,
 )
 from modules.utils.mask_resolution import resolve_mask_path
 from modules.operations.settings import settings
@@ -721,33 +722,76 @@ class COLMAPAdapter(ReconstructionAdapter):
                 stereo_masks_dir = dense_dir / "stereo" / "masks"
                 if effective_masks_dir and effective_masks_dir.exists():
                     stereo_masks_dir.mkdir(parents=True, exist_ok=True)
-                    import cv2
-                    import numpy as np
                     
                     undistorted_images_dir = dense_dir / "images"
                     if undistorted_images_dir.exists():
-                        for img_file in undistorted_images_dir.glob("*.jpg"):
-                            img = cv2.imread(str(img_file))
+                        img_files = list(undistorted_images_dir.glob("*.jpg"))
+                        total_frames = len(img_files)
+                        fallback_count = 0
+                        
+                        # Production Guards: Area-based occupancy sanity checks
+                        MIN_OCCUPANCY = 0.005 # 0.5% area - subject must exist
+                        MAX_OCCUPANCY = 0.98  # 98% area  - background must be removed
+                        
+                        for img_file in img_files:
+                            # Unicode-safe image read for Windows
+                            img_array = np.fromfile(str(img_file), np.uint8)
+                            img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+                            
                             if img is None:
+                                log_file.write(f"WARNING: Could not read undistorted image for masking: {img_file}\n")
                                 continue
                                 
-                            # Rembg masks the background to pure black (0,0,0) in our preprocessing pipeline.
-                            # So we extract non-black pixels from the undistorted image.
-                            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                            _, thresh = cv2.threshold(gray, 5, 255, cv2.THRESH_BINARY)
+                            # Extractor produces pure black (0,0,0) background.
+                            # We detect subject by keeping any pixel where at least one channel > 0.
+                            # This is safer for dark objects than grayscale averaging.
+                            thresh = (np.any(img > 0, axis=-1).astype(np.uint8) * 255)
                             
                             # Dilate slightly to relax the mask and avoid subject edge clipping 
-                            # due to radial distortion interpolation artifacts
                             kernel = np.ones((7, 7), np.uint8)
-                            relaxed_mask = cv2.dilate(thresh, kernel, iterations=1)
+                            gen_mask = cv2.dilate(thresh, kernel, iterations=1)
                             
-                            # Safety Assertion: Strict shape matching
-                            assert relaxed_mask.shape == img.shape[:2], (
-                                f"Mask shape mismatch! Expected {img.shape[:2]}, got {relaxed_mask.shape}"
-                            )
+                            if gen_mask.shape != img.shape[:2]:
+                                raise DenseMaskAlignmentError(
+                                    f"Shape mismatch: img={img.shape[:2]}, mask={gen_mask.shape}",
+                                    image_path=str(img_file)
+                                )
+
+                            # Occupancy Sanity Check
+                            pixels = gen_mask.shape[0] * gen_mask.shape[1]
+                            occupancy = np.count_nonzero(gen_mask) / pixels
+                            
+                            final_mask = gen_mask
+                            if occupancy < MIN_OCCUPANCY or occupancy > MAX_OCCUPANCY:
+                                fallback_count += 1
+                                log_file.write(
+                                    f"WARNING: Mask for {img_file.name} failed occupancy sanity check ({occupancy:.4f}). "
+                                    f"Falling back to relaxed (full-white) mask.\n"
+                                )
+                                final_mask = np.full(gen_mask.shape, 255, dtype=np.uint8)
                             
                             mask_filename = img_file.name + ".png"
-                            cv2.imwrite(str(stereo_masks_dir / mask_filename), relaxed_mask)
+                            mask_out_path = stereo_masks_dir / mask_filename
+                            # Unicode-safe image write for Windows
+                            _, mask_buff = cv2.imencode(".png", final_mask)
+                            mask_buff.tofile(str(mask_out_path))
+                            
+                        # Global fallback assessment
+                        if total_frames > 0:
+                            fallback_ratio = fallback_count / total_frames
+                            log_file.write("\n--- Dense Masking Summary ---\n")
+                            log_file.write(f"Strategy: Non-black pixel detection (Any channel > 0)\n")
+                            log_file.write(f"Total Frames Processed: {total_frames}\n")
+                            log_file.write(f"Fallback (Relaxed) Counter: {fallback_count}\n")
+                            log_file.write(f"Fallback Ratio: {fallback_ratio:.2%}\n")
+                            log_file.write(f"Min/Max Occupancy Thresholds: {MIN_OCCUPANCY}/{MAX_OCCUPANCY}\n")
+                            
+                            if fallback_ratio > 0.3:
+                                log_file.write(
+                                    "CRITICAL WARNING: High mask fallback ratio detected (>30%). "
+                                    "Dense reconstruction quality may be degraded by background noise.\n"
+                                )
+                            log_file.write("-----------------------------\n\n")
 
                 cmd_stereo = self.builder.patch_match_stereo(dense_dir)
                 self._run_command(cmd_stereo, output_dir, log_file)

@@ -31,3 +31,12 @@ class MissingArtifactError(ReconstructionError):
     def __init__(self, artifact_name: str):
         self.artifact_name = artifact_name
         super().__init__(f"Expected artifact '{artifact_name}' is missing from job directory.")
+
+class DenseMaskAlignmentError(ReconstructionError):
+    """Raised when dynamically generated dense masks fail alignment or sanity checks."""
+    def __init__(self, message: str, image_path: Optional[str] = None):
+        if image_path:
+            full_msg = f"Mask alignment failure at {image_path}: {message}"
+        else:
+            full_msg = message
+        super().__init__(full_msg)
