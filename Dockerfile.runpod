@@ -1,0 +1,71 @@
+# Production-grade CUDA Image for Reconstruction Engine
+# Targets: RunPod (NVIDIA GPU required)
+
+# Stage 1: Build COLMAP & OpenMVS
+FROM nvidia/cuda:11.8.0-devel-ubuntu22.04 AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y \
+    cmake ninja-build git wget \
+    libgoogle-glog-dev libgflags-dev \
+    libboost-all-dev \
+    libfreeimage-dev \
+    libsuitesparse-dev \
+    libceres-dev \
+    libcgal-dev \
+    libopengl-dev \
+    libopencv-dev \
+    libglfw3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Build COLMAP 3.10
+WORKDIR /src
+RUN git clone --branch 3.10 https://github.com/colmap/colmap.git && \
+    cd colmap && mkdir build && cd build && \
+    cmake .. -GNinja -DCMAKE_BUILD_TYPE=Release -DCUDA_ENABLED=ON && \
+    ninja install
+
+# Build OpenMVS
+RUN git clone https://github.com/cdcseacave/openMVS.git && \
+    cd openMVS && mkdir build && cd build && \
+    cmake .. -GNinja -DCMAKE_BUILD_TYPE=Release -DVCG_ROOT=/src/vcglib && \
+    ninja install
+
+# Stage 2: Production Runtime
+FROM nvidia/cuda:11.8.0-runtime-ubuntu22.04
+
+# Copy binaries from builder
+COPY --from=builder /usr/local/bin/colmap /usr/local/bin/colmap
+COPY --from=builder /usr/local/bin/DensifyPointCloud /usr/local/bin/DensifyPointCloud
+COPY --from=builder /usr/local/bin/ReconstructMesh /usr/local/bin/ReconstructMesh
+COPY --from=builder /usr/local/bin/RefineMesh /usr/local/bin/RefineMesh
+COPY --from=builder /usr/local/bin/TextureMesh /usr/local/bin/TextureMesh
+COPY --from=builder /usr/local/bin/InterfaceCOLMAP /usr/local/bin/InterfaceCOLMAP
+
+# Runtime Dependencies
+RUN apt-get update && apt-get install -y \
+    python3 python3-pip \
+    libgoogle-glog0v5 libgflags2.2 \
+    libboost-all-dev \
+    libfreeimage3 \
+    libsuitesparse-dev \
+    libopencv-core4.5d \
+    libgl1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Environment setup
+ENV RECON_ENGINE_PATH=/usr/local/bin/colmap
+ENV OPENMVS_BIN_PATH=/usr/local/bin
+ENV RECON_PIPELINE=colmap_dense
+ENV RECON_USE_GPU=true
+
+WORKDIR /app
+COPY requirements.txt .
+RUN pip3 install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+# Smoke check integration
+RUN chmod +x smoke_check.sh
+CMD ["./smoke_check.sh"]

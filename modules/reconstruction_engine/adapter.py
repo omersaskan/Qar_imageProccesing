@@ -23,15 +23,89 @@ from modules.utils.mask_resolution import resolve_mask_path
 from modules.operations.settings import settings
 
 
+class ColmapCapabilityManager:
+    """
+    Handles runtime discovery and caching of COLMAP capabilities.
+    Prevents "unrecognised option" errors by probing -h output.
+    """
+
+    _cache: Dict[str, Dict[str, Any]] = {}
+
+    @classmethod
+    def get_capabilities(cls, binary_path: str) -> Dict[str, Any]:
+        if binary_path in cls._cache:
+            return cls._cache[binary_path]
+
+        caps = {
+            "extraction_prefix": "FeatureExtraction",
+            "matching_prefix": "FeatureMatching",
+            "has_ba_gpu": True,
+            "has_cuda": False,
+        }
+
+        if not binary_path or not os.path.exists(binary_path):
+            return caps
+
+        try:
+            # Probe feature_extractor
+            res = subprocess.run(
+                [binary_path, "feature_extractor", "-h"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            output = res.stdout + res.stderr
+            # Specifically check if the "Sift" variant of the GPU flag exists
+            if "--SiftExtraction.use_gpu" in output:
+                caps["extraction_prefix"] = "SiftExtraction"
+            
+            # CUDA detection: check if use_gpu exists in help
+            if "use_gpu" in output.lower():
+                caps["has_cuda"] = True
+
+            # Probe exhaustive_matcher
+            res = subprocess.run(
+                [binary_path, "exhaustive_matcher", "-h"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            output = res.stdout + res.stderr
+            if "--SiftMatching.use_gpu" in output:
+                caps["matching_prefix"] = "SiftMatching"
+
+            # Probe mapper
+            res = subprocess.run(
+                [binary_path, "mapper", "-h"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            output = res.stdout + res.stderr
+            if "ba_use_gpu" not in output:
+                caps["has_ba_gpu"] = False
+
+        except Exception:
+            # Fallback to defaults if probing fails
+            pass
+
+        cls._cache[binary_path] = caps
+        return caps
+
+
 class ColmapCommandBuilder:
     """
     Centralized builder for COLMAP commands.
-    Targets COLMAP 4.0.3 flag semantics.
+    Now capability-aware to support versions from 3.6 to 4.0+.
     """
 
     def __init__(self, binary_path: str, use_gpu: bool = True):
         self.bin = binary_path
-        self.use_gpu = use_gpu
+        self._requested_gpu = use_gpu
+        self.caps = ColmapCapabilityManager.get_capabilities(binary_path)
+        
+        # Override GPU request if the build doesn't support it
+        self.use_gpu = use_gpu and self.caps["has_cuda"]
 
     def feature_extractor(
         self,
@@ -40,6 +114,7 @@ class ColmapCommandBuilder:
         masks_dir: Optional[Path],
         max_size: int,
     ) -> List[str]:
+        prefix = self.caps["extraction_prefix"]
         cmd = [
             self.bin,
             "feature_extractor",
@@ -47,15 +122,12 @@ class ColmapCommandBuilder:
             str(db_path),
             "--image_path",
             str(images_dir),
-            "--FeatureExtraction.use_gpu",
+            f"--{prefix}.use_gpu",
             "1" if self.use_gpu else "0",
-            "--FeatureExtraction.max_image_size",
+            f"--{prefix}.max_image_size",
             str(max_size),
         ]
 
-        # IMPORTANT:
-        # Only pass mask_path if we intentionally want COLMAP to read masks
-        # and we have a complete copied mask set for the accepted images.
         if masks_dir is not None:
             cmd += ["--ImageReader.mask_path", str(masks_dir)]
 
@@ -63,12 +135,13 @@ class ColmapCommandBuilder:
 
     def matcher(self, mode: str, db_path: Path) -> List[str]:
         matcher_type = "exhaustive_matcher" if mode == "exhaustive" else "sequential_matcher"
+        prefix = self.caps["matching_prefix"]
         cmd = [
             self.bin,
             matcher_type,
             "--database_path",
             str(db_path),
-            "--FeatureMatching.use_gpu",
+            f"--{prefix}.use_gpu",
             "1" if self.use_gpu else "0",
         ]
         return cmd
@@ -83,9 +156,11 @@ class ColmapCommandBuilder:
             str(images_dir),
             "--output_path",
             str(output_path),
-            "--Mapper.ba_use_gpu",
-            "1" if self.use_gpu else "0",
         ]
+        
+        if self.caps["has_ba_gpu"]:
+            cmd += ["--Mapper.ba_use_gpu", "1" if self.use_gpu else "0"]
+            
         return cmd
 
     def image_undistorter(self, images_dir: Path, input_path: Path, output_path: Path) -> List[str]:
@@ -103,18 +178,24 @@ class ColmapCommandBuilder:
         ]
 
     def patch_match_stereo(self, workspace_path: Path) -> List[str]:
-        return [
+        cmd = [
             self.bin,
             "patch_match_stereo",
             "--workspace_path",
             str(workspace_path),
-            "--PatchMatchStereo.gpu_index",
-            "0" if self.use_gpu else "-1",
             "--PatchMatchStereo.geom_consistency",
             "1",
             "--PatchMatchStereo.filter",
             "1",
         ]
+        
+        # GPU index -1 means CPU mode in COLMAP
+        if self.use_gpu:
+            cmd += ["--PatchMatchStereo.gpu_index", "0"]
+        else:
+            cmd += ["--PatchMatchStereo.gpu_index", "-1"]
+            
+        return cmd
 
     def stereo_fusion(self, workspace_path: Path, output_path: Path, mask_path: Optional[Path] = None) -> List[str]:
         cmd = [
