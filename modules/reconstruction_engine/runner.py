@@ -29,8 +29,16 @@ from modules.operations.settings import settings
 
 class ReconstructionRunner:
     def __init__(self, adapter: Optional[ReconstructionAdapter] = None):
-        self.is_production = os.getenv("ENV", "development").lower() == "production"
+        self.is_production = settings.env in ["production", "pilot"]
         self.allow_simulated = os.getenv("ALLOW_SIMULATED_RECONSTRUCTION", "false").lower() == "true"
+
+        # Ensure environment is valid for the selected engine
+        try:
+            settings.validate_setup()
+        except (ValueError, FileNotFoundError) as e:
+            if self.is_production:
+                raise RuntimeError(f"Production environment must be configured: {e}")
+            logging.warning(f"Configuration warning: {e}")
 
         # TICKET-009: Multiple adapter orchestration
         self.adapters = {}
@@ -51,7 +59,9 @@ class ReconstructionRunner:
                 self.adapter = self.colmap_adapter
             elif engine_choice == "simulated":
                 if self.is_production:
-                    raise RuntimeError("Stub engine prohibited in production.")
+                    raise RuntimeError("Stub engine strictly prohibited in production.")
+                if not self.allow_simulated:
+                    raise RuntimeError("Simulated reconstruction is disabled by default locally.")
                 self.adapter = SimulatedAdapter()
             else:
                 self.adapter = self.colmap_adapter # Fallback default
