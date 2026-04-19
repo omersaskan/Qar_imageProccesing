@@ -196,3 +196,59 @@ def test_colmap_adapter_dense_masking_flow(tmp_path):
     mask = cv2.imdecode(mask_array, cv2.IMREAD_GRAYSCALE)
     assert mask.shape == (100, 100)
     assert np.any(mask > 0)
+
+def test_colmap_adapter_high_fallback_triggers_unmasked_fusion(tmp_path):
+    """Verifies that if >30% of frames fallback to white masks, stereo fusion is unmasked."""
+    import cv2
+    import numpy as np
+    
+    adapter = COLMAPAdapter(engine_path="fake")
+    output_dir = tmp_path / "workspace"
+    output_dir.mkdir()
+    
+    dense_dir = output_dir / "dense"
+    dense_images_dir = dense_dir / "images"
+    dense_images_dir.mkdir(parents=True)
+    
+    # Create 10 images: 4 empty (40% fallback ratio)
+    for i in range(10):
+        img = np.zeros((100, 100, 3), dtype=np.uint8)
+        if i < 4:
+            # Leave black -> occupancy 0 -> fallback
+            pass
+        else:
+            # Subject -> occupancy > MIN -> normal
+            img[20:80, 20:80] = [255, 255, 255]
+            
+        img_path = dense_images_dir / f"frame_{i:03d}.jpg"
+        _, buff = cv2.imencode(".jpg", img)
+        buff.tofile(str(img_path))
+    
+    prep = {
+        "images_dir": output_dir / "images",
+        "masks_dir": output_dir / "masks",
+        "accepted_frames": 10,
+        "rejected_unreadable_frame": 0,
+        "rejected_missing_mask": 0,
+        "rejected_bad_mask": 0,
+        "copied_mask_count": 10,
+        "match_mode_counts": {"stem": 10, "legacy": 0, "none": 0}
+    }
+    prep["masks_dir"].mkdir()
+    
+    best_model = {"path": tmp_path, "registered_images": 10, "points_3d": 1000}
+    
+    with patch.object(adapter, "_prepare_workspace", return_value=prep):
+        with patch.object(adapter, "_run_command") as mock_run:
+            with patch.object(adapter, "_select_best_sparse_model", return_value=best_model):
+                with patch.object(adapter, "_validate_dense_workspace", return_value=1000):
+                    with patch.object(adapter, "_discover_mesh_candidates", return_value=["mesh.ply"]):
+                        # Spy on stereo_fusion call
+                        with patch.object(adapter.builder, "stereo_fusion", wraps=adapter.builder.stereo_fusion) as mock_fuse:
+                            adapter.run_reconstruction([], output_dir)
+                            
+                            # check if mask_path was None due to force_unmasked_fusion
+                            # find stereo_fusion call in mock_fuse
+                            # check kwargs
+                            _, kwargs = mock_fuse.call_args
+                            assert kwargs["mask_path"] is None, "Should have reverted to unmasked fusion for >30% fallback"
