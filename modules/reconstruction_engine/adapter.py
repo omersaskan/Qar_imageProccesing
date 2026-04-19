@@ -13,6 +13,7 @@ import trimesh
 
 from .mesh_selector import MeshSelector
 from .failures import (
+    ReconstructionError,
     InsufficientInputError,
     RuntimeReconstructionError,
     InsufficientReconstructionError,
@@ -715,10 +716,8 @@ class COLMAPAdapter(ReconstructionAdapter):
                 cmd_undistort = self.builder.image_undistorter(images_dir, model_path, dense_dir)
                 self._run_command(cmd_undistort, output_dir, log_file)
 
-                # FORCING COLMAP 4.0.3 DENSE MASKING
-                # image_undistorter drops masks and applies geometric distortion correction.
-                # To prevent geometry mismatch with stereo fusion, we dynamically generate
-                # the new matching masks from the black backgrounds of undistorted images.
+                # Initialize dense masking control variables
+                force_unmasked_fusion = False
                 stereo_masks_dir = dense_dir / "stereo" / "masks"
                 if effective_masks_dir and effective_masks_dir.exists():
                     stereo_masks_dir.mkdir(parents=True, exist_ok=True)
@@ -744,7 +743,6 @@ class COLMAPAdapter(ReconstructionAdapter):
                                 
                             # Extractor produces pure black (0,0,0) background.
                             # We detect subject by keeping any pixel where at least one channel > 0.
-                            # This is safer for dark objects than grayscale averaging.
                             thresh = (np.any(img > 0, axis=-1).astype(np.uint8) * 255)
                             
                             # Dilate slightly to relax the mask and avoid subject edge clipping 
@@ -789,14 +787,24 @@ class COLMAPAdapter(ReconstructionAdapter):
                             if fallback_ratio > 0.3:
                                 log_file.write(
                                     "CRITICAL WARNING: High mask fallback ratio detected (>30%). "
-                                    "Dense reconstruction quality may be degraded by background noise.\n"
+                                    "Reverting to UNMASKED dense fusion to prevent geometric bias from low-quality masks.\n"
                                 )
+                                force_unmasked_fusion = True
+                            else:
+                                force_unmasked_fusion = False
                             log_file.write("-----------------------------\n\n")
 
                 cmd_stereo = self.builder.patch_match_stereo(dense_dir)
                 self._run_command(cmd_stereo, output_dir, log_file)
 
-                cmd_fuse = self.builder.stereo_fusion(dense_dir, dense_dir / "fused.ply", mask_path=stereo_masks_dir if stereo_masks_dir.exists() else None)
+                # Final guard for stereo fusion: Use masks ONLY if they are reliable
+                effective_mask_path = stereo_masks_dir if (stereo_masks_dir.exists() and not force_unmasked_fusion) else None
+                
+                cmd_fuse = self.builder.stereo_fusion(
+                    dense_dir, 
+                    dense_dir / "fused.ply", 
+                    mask_path=effective_mask_path
+                )
                 self._run_command(cmd_fuse, output_dir, log_file)
 
                 fused_points = self._validate_dense_workspace(output_dir)
@@ -831,9 +839,13 @@ class COLMAPAdapter(ReconstructionAdapter):
                         log_file.write(f"\nDelaunay mesher failed: {delaunay_err}\n")
                         mesher_used = "failed"
 
+            except ReconstructionError:
+                # Propagate typed reconstruction errors directly to the runner
+                raise
             except Exception as e:
+                # Wrap unknown runtime errors
                 log_file.write(f"\nCRITICAL FAILURE: {str(e)}\n")
-                raise RuntimeError(f"COLMAP chain failed: {str(e)}")
+                raise RuntimeReconstructionError(f"COLMAP chain failed: {str(e)}")
 
         self._validate_dense_workspace(output_dir)
 
