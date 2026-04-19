@@ -158,12 +158,12 @@ class TestTextureIntegrityFlow(unittest.TestCase):
             "has_uv": True,
             "has_material": True,
             "texture_applied_successfully": True,
+            "texture_integrity_status": "complete",
+            "material_semantic_status": "diffuse_textured",
         }
 
         report = self.validator.validate("asset_texture_ok", asset_data)
 
-        # Could still become review if other thresholds change later,
-        # but texture integrity itself should not be the reason.
         self.assertEqual(report.contamination_report.get("texture_uv_integrity"), "pass")
         self.assertEqual(report.contamination_report.get("texture_application"), "pass")
         self.assertEqual(report.contamination_report.get("material_integrity"), "pass")

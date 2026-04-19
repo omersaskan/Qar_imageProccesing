@@ -193,6 +193,7 @@ class ReconstructionAttemptResult(BaseModel):
     reextracted_frames_dir: Optional[str] = None
     
     metrics_rank_score: float = 0.0 # internal score used for selection
+    metadata: Dict[str, Any] = Field(default_factory=dict)
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class ReconstructionAudit(BaseModel):

@@ -252,3 +252,7 @@ def test_colmap_adapter_high_fallback_triggers_unmasked_fusion(tmp_path):
                             # check kwargs
                             _, kwargs = mock_fuse.call_args
                             assert kwargs["mask_path"] is None, "Should have reverted to unmasked fusion for >30% fallback"
+
+                            # Verify log message
+                            log_content = (output_dir / "reconstruction.log").read_text(encoding="utf-8")
+                            assert "Reverting to UNMASKED dense fusion" in log_content

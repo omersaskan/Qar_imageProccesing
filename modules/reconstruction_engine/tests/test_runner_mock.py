@@ -13,7 +13,18 @@ from modules.shared_contracts.models import ReconstructionJobDraft
 
 def _write_frame(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", (24, 24), (255, 200, 100)).save(path)
+    img = Image.new("RGB", (100, 100), (255, 200, 100))
+    img.save(path)
+    
+    masks_dir = path.parent / "masks"
+    masks_dir.mkdir(parents=True, exist_ok=True)
+    mask_path = masks_dir / f"{path.stem}.png"
+    # Create a mask with ~25% occupancy (50x50 white square in 100x100)
+    mask = Image.new("L", (100, 100), 0)
+    from PIL import ImageDraw
+    draw = ImageDraw.Draw(mask)
+    draw.rectangle([25, 25, 75, 75], fill=255)
+    mask.save(mask_path)
 
 
 class MeshWritingAdapter:
@@ -23,7 +34,7 @@ class MeshWritingAdapter:
     def __init__(self):
         self.last_output_dir = None
 
-    def run_reconstruction(self, input_frames, output_dir: Path) -> dict:
+    def run_reconstruction(self, input_frames, output_dir: Path, **kwargs) -> dict:
         self.last_output_dir = Path(output_dir)
         mesh_path = output_dir / "raw_mesh.obj"
         log_path = output_dir / "reconstruction.log"
@@ -46,7 +57,7 @@ class PointCloudLikeAdapter:
     engine_type = "colmap"
     is_stub = False
 
-    def run_reconstruction(self, input_frames, output_dir: Path) -> dict:
+    def run_reconstruction(self, input_frames, output_dir: Path, **kwargs) -> dict:
         mesh_path = output_dir / "raw_mesh.obj"
         log_path = output_dir / "reconstruction.log"
         mesh_path.write_text(
@@ -64,16 +75,18 @@ class PointCloudLikeAdapter:
 
 
 def test_runner_production_guard(monkeypatch):
-    monkeypatch.setenv("ENV", "production")
-    monkeypatch.setenv("RECON_ENGINE", "simulated")
+    from modules.operations.settings import settings
+    monkeypatch.setattr(settings, "env", "production")
+    monkeypatch.setattr(settings, "recon_pipeline", "simulated")
 
     with pytest.raises(RuntimeError, match="strictly prohibited"):
         ReconstructionRunner()
 
 
 def test_runner_production_missing_path(monkeypatch):
-    monkeypatch.setenv("ENV", "production")
-    monkeypatch.setenv("RECON_ENGINE", "colmap")
+    from modules.operations.settings import settings
+    monkeypatch.setattr(settings, "env", "production")
+    monkeypatch.setattr(settings, "recon_pipeline", "colmap_dense")
     monkeypatch.delenv("RECON_ENGINE_PATH", raising=False)
 
     with patch("modules.reconstruction_engine.adapter.os.path.exists", return_value=False):
@@ -83,7 +96,7 @@ def test_runner_production_missing_path(monkeypatch):
 
 def test_runner_rejects_simulated_without_explicit_opt_in(monkeypatch):
     monkeypatch.setenv("ENV", "development")
-    monkeypatch.setenv("RECON_ENGINE", "simulated")
+    monkeypatch.setenv("RECON_PIPELINE", "simulated")
     monkeypatch.delenv("ALLOW_SIMULATED_RECONSTRUCTION", raising=False)
 
     with pytest.raises(RuntimeError, match="disabled by default"):
@@ -91,8 +104,10 @@ def test_runner_rejects_simulated_without_explicit_opt_in(monkeypatch):
 
 
 def test_runner_success(tmp_path, monkeypatch):
-    monkeypatch.setenv("ENV", "development")
-    monkeypatch.setenv("RECON_ENGINE", "simulated")
+    from modules.operations.settings import settings
+    monkeypatch.setattr(settings, "env", "development")
+    monkeypatch.setattr(settings, "recon_pipeline", "simulated")
+    monkeypatch.setattr(settings, "recon_fallback_steps", ["default"])
     monkeypatch.setenv("ALLOW_SIMULATED_RECONSTRUCTION", "true")
 
     input_frames = []
