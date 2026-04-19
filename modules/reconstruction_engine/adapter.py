@@ -715,15 +715,39 @@ class COLMAPAdapter(ReconstructionAdapter):
                 self._run_command(cmd_undistort, output_dir, log_file)
 
                 # FORCING COLMAP 4.0.3 DENSE MASKING
-                # image_undistorter in this version often drops masks. We manually inject
-                # the masks into dense/stereo/masks so PatchMatchStereo natively uses them,
-                # avoiding the 1-hour pure-black pixel evaluation hang.
+                # image_undistorter drops masks and applies geometric distortion correction.
+                # To prevent geometry mismatch with stereo fusion, we dynamically generate
+                # the new matching masks from the black backgrounds of undistorted images.
                 stereo_masks_dir = dense_dir / "stereo" / "masks"
                 if effective_masks_dir and effective_masks_dir.exists():
                     stereo_masks_dir.mkdir(parents=True, exist_ok=True)
-                    for mf in effective_masks_dir.glob("*.png"):
-                        import shutil
-                        shutil.copy2(mf, stereo_masks_dir / mf.name)
+                    import cv2
+                    import numpy as np
+                    
+                    undistorted_images_dir = dense_dir / "images"
+                    if undistorted_images_dir.exists():
+                        for img_file in undistorted_images_dir.glob("*.jpg"):
+                            img = cv2.imread(str(img_file))
+                            if img is None:
+                                continue
+                                
+                            # Rembg masks the background to pure black (0,0,0) in our preprocessing pipeline.
+                            # So we extract non-black pixels from the undistorted image.
+                            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                            _, thresh = cv2.threshold(gray, 5, 255, cv2.THRESH_BINARY)
+                            
+                            # Dilate slightly to relax the mask and avoid subject edge clipping 
+                            # due to radial distortion interpolation artifacts
+                            kernel = np.ones((7, 7), np.uint8)
+                            relaxed_mask = cv2.dilate(thresh, kernel, iterations=1)
+                            
+                            # Safety Assertion: Strict shape matching
+                            assert relaxed_mask.shape == img.shape[:2], (
+                                f"Mask shape mismatch! Expected {img.shape[:2]}, got {relaxed_mask.shape}"
+                            )
+                            
+                            mask_filename = img_file.name + ".png"
+                            cv2.imwrite(str(stereo_masks_dir / mask_filename), relaxed_mask)
 
                 cmd_stereo = self.builder.patch_match_stereo(dense_dir)
                 self._run_command(cmd_stereo, output_dir, log_file)
