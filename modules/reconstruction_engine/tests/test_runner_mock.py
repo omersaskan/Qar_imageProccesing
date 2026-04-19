@@ -76,30 +76,31 @@ class PointCloudLikeAdapter:
 
 def test_runner_production_guard(monkeypatch):
     from modules.operations.settings import settings, AppEnvironment
-    monkeypatch.setattr(settings, "env", AppEnvironment.PRODUCTION)
-    monkeypatch.setattr(settings, "recon_pipeline", "simulated")
+    monkeypatch.setenv("ENV", "production")
     monkeypatch.setattr(settings, "pilot_api_key", "sk_test_mock")
 
     with patch("pathlib.Path.exists", return_value=True):
-        with pytest.raises(RuntimeError, match="strictly prohibited"):
-            ReconstructionRunner()
+        with patch("os.path.exists", return_value=True):
+            with pytest.raises(RuntimeError, match="strictly prohibited"):
+                ReconstructionRunner()
 
 
 def test_runner_production_missing_path(monkeypatch):
     from modules.operations.settings import settings, AppEnvironment
-    monkeypatch.setattr(settings, "env", AppEnvironment.PRODUCTION)
+    monkeypatch.setenv("ENV", "production")
     monkeypatch.setattr(settings, "recon_pipeline", "colmap_dense")
     monkeypatch.setattr(settings, "pilot_api_key", "sk_test_mock")
     monkeypatch.delenv("RECON_ENGINE_PATH", raising=False)
 
     with patch("pathlib.Path.exists", return_value=False):
-        with pytest.raises(RuntimeError, match="must be configured"):
-            ReconstructionRunner()
+        with patch("os.path.exists", return_value=False):
+            with pytest.raises(RuntimeError, match="must be configured"):
+                ReconstructionRunner()
 
 
 def test_runner_rejects_simulated_without_explicit_opt_in(monkeypatch):
     from modules.operations.settings import settings, AppEnvironment
-    monkeypatch.setattr(settings, "env", AppEnvironment.LOCAL_DEV)
+    monkeypatch.setenv("ENV", "local_dev")
     monkeypatch.setattr(settings, "recon_pipeline", "simulated")
     monkeypatch.delenv("ALLOW_SIMULATED_RECONSTRUCTION", raising=False)
 

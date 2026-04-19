@@ -275,6 +275,8 @@ class COLMAPAdapter(ReconstructionAdapter):
                 r"C:\colmap\colmap\COLMAP.bat",
                 r"C:\colmap\COLMAP.bat",
                 r"C:\colmap\colmap.exe",
+                "/usr/local/bin/colmap",
+                "/usr/bin/colmap",
             ]
             for p in well_known:
                 if os.path.exists(p):
