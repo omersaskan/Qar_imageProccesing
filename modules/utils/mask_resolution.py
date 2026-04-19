@@ -7,7 +7,17 @@ def resolve_mask_path(frame_path: Path) -> Tuple[Optional[Path], str]:
     Returns (resolved_path, match_mode).
     match_mode standard values: 'stem', 'legacy', 'none'.
     """
+    # Standard Project Structure: parent/images/ and parent/masks/ are siblings
+    # If the frame is in parent/images/frame_0000.jpg, frame_path.parent is parent/images.
+    # We should also check parent/masks.
     masks_dir = frame_path.parent / "masks"
+    if not masks_dir.exists():
+        # Try sibling directory match
+        if frame_path.parent.name == "images":
+            sibling_masks = frame_path.parent.parent / "masks"
+            if sibling_masks.exists():
+                masks_dir = sibling_masks
+    
     if not masks_dir.exists():
         return None, "none"
 
