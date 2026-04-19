@@ -65,6 +65,7 @@ def test_colmap_adapter_run(mock_copy, mock_popen, tmp_path):
         "rejected_unreadable_frame": 0,
         "rejected_missing_mask": 0,
         "rejected_bad_mask": 0,
+        "copied_mask_count": 10,
         "match_mode_counts": {"stem": 10, "legacy": 0, "none": 0}
     }
 
@@ -109,6 +110,7 @@ def test_colmap_artifact_discovery_requires_real_mesh(tmp_path):
         "rejected_missing_mask": 0,
         "rejected_bad_mask": 0,
         "rejected_unreadable_frame": 0,
+        "copied_mask_count": 10,
         "match_mode_counts": {"stem": 10, "legacy": 0, "none": 0}
     }
     prep["images_dir"].mkdir()
@@ -141,3 +143,56 @@ def test_colmap_adapter_rejects_unreadable_frames(tmp_path):
         with patch.object(adapter, "_mask_is_usable", return_value=True):
             with pytest.raises(InsufficientInputError, match="unreadable=3"):
                 adapter.run_reconstruction(input_frames, output_dir)
+
+def test_colmap_adapter_dense_masking_flow(tmp_path):
+    """Verifies that the adapter correctly triggers dynamic masking when undistorted images exist."""
+    import cv2
+    import numpy as np
+    from modules.reconstruction_engine.failures import DenseMaskAlignmentError
+    
+    adapter = COLMAPAdapter(engine_path="fake")
+    output_dir = tmp_path / "workspace"
+    output_dir.mkdir()
+    
+    dense_dir = output_dir / "dense"
+    dense_images_dir = dense_dir / "images"
+    dense_images_dir.mkdir(parents=True)
+    
+    # Create a dummy undistorted image
+    dummy_img = np.zeros((100, 100, 3), dtype=np.uint8)
+    dummy_img[20:80, 20:80] = [255, 255, 255]
+    img_path = dense_images_dir / "frame_001.jpg"
+    _, buff = cv2.imencode(".jpg", dummy_img)
+    buff.tofile(str(img_path))
+    
+    # Mock dependencies to reach the dense masking stage
+    prep = {
+        "images_dir": output_dir / "images",
+        "masks_dir": output_dir / "masks", # effective_masks_dir must exist
+        "accepted_frames": 10,
+        "rejected_unreadable_frame": 0,
+        "rejected_missing_mask": 0,
+        "rejected_bad_mask": 0,
+        "copied_mask_count": 10,
+        "match_mode_counts": {"stem": 10, "legacy": 0, "none": 0}
+    }
+    prep["masks_dir"].mkdir()
+    
+    best_model = {"path": tmp_path, "registered_images": 10, "points_3d": 1000}
+    
+    with patch.object(adapter, "_prepare_workspace", return_value=prep):
+        with patch.object(adapter, "_run_command"):
+            with patch.object(adapter, "_select_best_sparse_model", return_value=best_model):
+                with patch.object(adapter, "_validate_dense_workspace", return_value=1000):
+                    with patch.object(adapter, "_discover_mesh_candidates", return_value=["mesh.ply"]):
+                        adapter.run_reconstruction([], output_dir)
+    
+    # Verify mask was generated
+    expected_mask = dense_dir / "stereo" / "masks" / "frame_001.jpg.png"
+    assert expected_mask.exists()
+    
+    # Verify it's a valid mask
+    mask_array = np.fromfile(str(expected_mask), np.uint8)
+    mask = cv2.imdecode(mask_array, cv2.IMREAD_GRAYSCALE)
+    assert mask.shape == (100, 100)
+    assert np.any(mask > 0)
