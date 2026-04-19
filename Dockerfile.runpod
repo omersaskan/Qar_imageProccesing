@@ -1,11 +1,12 @@
 # Production-grade CUDA Image for Reconstruction Engine
 # Targets: RunPod (NVIDIA GPU required)
 
-# Stage 1: Build COLMAP & OpenMVS
+# Stage 1: Build Environment
 FROM nvidia/cuda:11.8.0-devel-ubuntu22.04 AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Install Build Dependencies
 RUN apt-get update && apt-get install -y \
     cmake ninja-build git wget \
     libgoogle-glog-dev libgflags-dev \
@@ -17,55 +18,78 @@ RUN apt-get update && apt-get install -y \
     libopengl-dev \
     libopencv-dev \
     libglfw3-dev \
+    libsqlite3-dev \
+    libglew-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Build COLMAP 3.10
 WORKDIR /src
+
+# Build COLMAP 3.10
 RUN git clone --branch 3.10 https://github.com/colmap/colmap.git && \
     cd colmap && mkdir build && cd build && \
-    cmake .. -GNinja -DCMAKE_BUILD_TYPE=Release -DCUDA_ENABLED=ON && \
+    cmake .. -GNinja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCUDA_ENABLED=ON \
+        -DGUI_ENABLED=OFF && \
     ninja install
 
 # Build OpenMVS
+# Requires VCG library
+RUN git clone https://github.com/cnr-isti-vclab/vcglib.git /src/vcglib
 RUN git clone https://github.com/cdcseacave/openMVS.git && \
     cd openMVS && mkdir build && cd build && \
-    cmake .. -GNinja -DCMAKE_BUILD_TYPE=Release -DVCG_ROOT=/src/vcglib && \
+    cmake .. -GNinja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DVCG_ROOT=/src/vcglib && \
     ninja install
 
-# Stage 2: Production Runtime
+# Stage 2: Final Production Runtime
 FROM nvidia/cuda:11.8.0-runtime-ubuntu22.04
 
-# Copy binaries from builder
+# Runtime Environment Variables
+ENV DEBIAN_FRONTEND=noninteractive
+ENV RECON_ENGINE_PATH=/usr/local/bin/colmap
+ENV OPENMVS_BIN_PATH=/usr/local/bin
+ENV RECON_PIPELINE=colmap_dense
+ENV RECON_USE_GPU=true
+ENV PYTHONUNBUFFERED=1
+
+# Install Runtime Dependencies
+RUN apt-get update && apt-get install -y \
+    python3 python3-pip \
+    libgoogle-glog0v5 libgflags2.2 \
+    libboost-program-options1.74.0 \
+    libboost-serialization1.74.0 \
+    libboost-iostreams1.74.0 \
+    libfreeimage3 \
+    libsuitesparse-dev \
+    libopencv-core4.5d \
+    libopencv-imgproc4.5d \
+    libopencv-videoio4.5d \
+    libgl1 libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy binaries and libs from builder
 COPY --from=builder /usr/local/bin/colmap /usr/local/bin/colmap
 COPY --from=builder /usr/local/bin/DensifyPointCloud /usr/local/bin/DensifyPointCloud
 COPY --from=builder /usr/local/bin/ReconstructMesh /usr/local/bin/ReconstructMesh
 COPY --from=builder /usr/local/bin/RefineMesh /usr/local/bin/RefineMesh
 COPY --from=builder /usr/local/bin/TextureMesh /usr/local/bin/TextureMesh
 COPY --from=builder /usr/local/bin/InterfaceCOLMAP /usr/local/bin/InterfaceCOLMAP
-
-# Runtime Dependencies
-RUN apt-get update && apt-get install -y \
-    python3 python3-pip \
-    libgoogle-glog0v5 libgflags2.2 \
-    libboost-all-dev \
-    libfreeimage3 \
-    libsuitesparse-dev \
-    libopencv-core4.5d \
-    libgl1 \
-    && rm -rf /var/lib/apt/lists/*
-
-# Environment setup
-ENV RECON_ENGINE_PATH=/usr/local/bin/colmap
-ENV OPENMVS_BIN_PATH=/usr/local/bin
-ENV RECON_PIPELINE=colmap_dense
-ENV RECON_USE_GPU=true
+COPY --from=builder /usr/local/lib/ /usr/local/lib/
+RUN ldconfig
 
 WORKDIR /app
+
+# Install Python requirements
 COPY requirements.txt .
 RUN pip3 install --no-cache-dir -r requirements.txt
 
+# Copy application source
 COPY . .
 
-# Smoke check integration
+# Finalize permissions
 RUN chmod +x smoke_check.sh
+
+# Entry point is usually overridden by RunPod, but we default to smoke check
 CMD ["./smoke_check.sh"]
