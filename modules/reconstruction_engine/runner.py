@@ -29,37 +29,64 @@ from modules.operations.settings import settings
 
 class ReconstructionRunner:
     def __init__(self, adapter: Optional[ReconstructionAdapter] = None):
-        # Safety Guards
-        self.is_production = settings.env in ["production", "pilot"]
-        self.allow_simulated = os.getenv("ALLOW_SIMULATED_RECONSTRUCTION", "false").lower() == "true"
+        self._explicit_adapter = adapter
 
-        # Ensure environment is valid (can be engine-specific later if needed)
-        try:
-            settings.validate_setup()
-        except (ValueError, FileNotFoundError) as e:
-            if self.is_production:
-                raise RuntimeError(f"Production environment must be configured: {e}")
-            logging.warning(f"Configuration warning: {e}")
+    @property
+    def colmap_adapter(self) -> "COLMAPAdapter":
+        if not hasattr(self, "_colmap_cached"):
+            # TICKET-012: Validate only when using the engine
+            try:
+                settings.validate_setup()
+            except (ValueError, FileNotFoundError) as e:
+                if settings.env in ["production", "pilot"]:
+                    raise RuntimeError(f"Production environment must be configured: {e}")
+                logging.warning(f"Configuration warning: {e}")
 
-        # TICKET-012: Lazy adapter instantiation
-        from .adapter import COLMAPAdapter, OpenMVSAdapter, SimulatedAdapter
+            from .adapter import COLMAPAdapter
+            self._colmap_cached = COLMAPAdapter()
+        return self._colmap_cached
+
+    @property
+    def openmvs_adapter(self) -> "OpenMVSAdapter":
+        if not hasattr(self, "_openmvs_cached"):
+            # TICKET-012: Validate only when using the engine
+            try:
+                settings.validate_setup()
+            except (ValueError, FileNotFoundError) as e:
+                if settings.env in ["production", "pilot"]:
+                    raise RuntimeError(f"Production environment must be configured: {e}")
+                logging.warning(f"Configuration warning: {e}")
+
+            from .adapter import OpenMVSAdapter
+            self._openmvs_cached = OpenMVSAdapter()
+        return self._openmvs_cached
+
+    @property
+    def adapter(self) -> "ReconstructionAdapter":
+        if self._explicit_adapter:
+            return self._explicit_adapter
         
-        if adapter:
-            self.adapter = adapter
+        engine_choice = settings.recon_pipeline
+        is_production = settings.env in ["production", "pilot"]
+        
+        if engine_choice == "colmap_openmvs":
+            return self.openmvs_adapter
+        elif engine_choice == "colmap_dense":
+            return self.colmap_adapter
+        elif engine_choice == "simulated":
+            if is_production:
+                raise RuntimeError("Stub engine strictly prohibited in production.")
+            
+            allow_simulated = os.getenv("ALLOW_SIMULATED_RECONSTRUCTION", "false").lower() == "true"
+            if not allow_simulated:
+                 raise RuntimeError("Simulated reconstruction is disabled by default locally.")
+            
+            if not hasattr(self, "_simulated_cached"):
+                from .adapter import SimulatedAdapter
+                self._simulated_cached = SimulatedAdapter()
+            return self._simulated_cached
         else:
-            engine_choice = settings.recon_pipeline
-            if engine_choice == "colmap_openmvs":
-                self.adapter = OpenMVSAdapter()
-            elif engine_choice == "colmap_dense":
-                self.adapter = COLMAPAdapter()
-            elif engine_choice == "simulated":
-                if self.is_production:
-                    raise RuntimeError("Stub engine strictly prohibited in production.")
-                if not self.allow_simulated:
-                    raise RuntimeError("Simulated reconstruction is disabled by default locally.")
-                self.adapter = SimulatedAdapter()
-            else:
-                self.adapter = COLMAPAdapter() # Fallback default
+            return self.colmap_adapter
 
     def _read_image(self, image_path: Path):
         image = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
