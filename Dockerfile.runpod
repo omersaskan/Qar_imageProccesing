@@ -28,12 +28,15 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /src
 
 # Build COLMAP 3.10
+# CMAKE_CUDA_ARCHITECTURES must be explicit because GHA runners lack a GPU,
+# so "native" detection fails. Targets: Turing(75), Ampere(80,86), Ada(89).
 RUN git clone --branch 3.10 https://github.com/colmap/colmap.git && \
     cd colmap && mkdir build && cd build && \
     cmake .. -GNinja \
         -DCMAKE_BUILD_TYPE=Release \
         -DCUDA_ENABLED=ON \
-        -DGUI_ENABLED=OFF && \
+        -DGUI_ENABLED=OFF \
+        -DCMAKE_CUDA_ARCHITECTURES="75;80;86;89" && \
     ninja install
 
 # Build OpenMVS
