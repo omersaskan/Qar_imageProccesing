@@ -43,7 +43,7 @@ RUN git clone --branch 3.10 https://github.com/colmap/colmap.git && \
 # Requires VCG library
 RUN git clone https://github.com/cnr-isti-vclab/vcglib.git /src/vcglib
 RUN git clone --branch v2.3.0 --depth 1 https://github.com/cdcseacave/openMVS.git && \
-    cd openMVS && mkdir build && cd build && \
+    cd openMVS && mkdir -p build && cd build && \
     cmake .. -GNinja \
         -DCMAKE_BUILD_TYPE=Release \
         -DVCG_ROOT=/src/vcglib && \
