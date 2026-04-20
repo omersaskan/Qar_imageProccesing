@@ -33,10 +33,10 @@ WORKDIR /src
 RUN git clone --branch 3.10 https://github.com/colmap/colmap.git && \
     cd colmap && mkdir build && cd build && \
     cmake .. -GNinja \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DCUDA_ENABLED=ON \
-        -DGUI_ENABLED=OFF \
-        -DCMAKE_CUDA_ARCHITECTURES="75;80;86;89" && \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCUDA_ENABLED=ON \
+    -DGUI_ENABLED=OFF \
+    -DCMAKE_CUDA_ARCHITECTURES="75;80;86;89" && \
     ninja install
 
 # Build OpenMVS
@@ -45,9 +45,9 @@ RUN git clone https://github.com/cnr-isti-vclab/vcglib.git /src/vcglib
 RUN git clone --branch v2.3.0 --depth 1 https://github.com/cdcseacave/openMVS.git && \
     cd openMVS && mkdir -p build && cd build && \
     cmake .. -GNinja \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DVCG_ROOT=/src/vcglib \
-        -DCUDA_CUDA_LIBRARY=/usr/local/cuda/lib64/stubs/libcuda.so && \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DVCG_ROOT=/src/vcglib \
+    -DCUDA_CUDA_LIBRARY=/usr/local/cuda/lib64/stubs/libcuda.so && \
     ninja install
 
 # Stage 2: Final Production Runtime
@@ -82,11 +82,12 @@ RUN apt-get update && apt-get install -y \
 
 # Copy binaries and libs from builder
 COPY --from=builder /usr/local/bin/colmap /usr/local/bin/colmap
-COPY --from=builder /usr/local/bin/DensifyPointCloud /usr/local/bin/DensifyPointCloud
-COPY --from=builder /usr/local/bin/ReconstructMesh /usr/local/bin/ReconstructMesh
-COPY --from=builder /usr/local/bin/RefineMesh /usr/local/bin/RefineMesh
-COPY --from=builder /usr/local/bin/TextureMesh /usr/local/bin/TextureMesh
-COPY --from=builder /usr/local/bin/InterfaceCOLMAP /usr/local/bin/InterfaceCOLMAP
+# OpenMVS v2.3.0 installs to /usr/local/bin/OpenMVS/ by default
+COPY --from=builder /usr/local/bin/OpenMVS/DensifyPointCloud /usr/local/bin/DensifyPointCloud
+COPY --from=builder /usr/local/bin/OpenMVS/ReconstructMesh /usr/local/bin/ReconstructMesh
+COPY --from=builder /usr/local/bin/OpenMVS/RefineMesh /usr/local/bin/RefineMesh
+COPY --from=builder /usr/local/bin/OpenMVS/TextureMesh /usr/local/bin/TextureMesh
+COPY --from=builder /usr/local/bin/OpenMVS/InterfaceCOLMAP /usr/local/bin/InterfaceCOLMAP
 COPY --from=builder /usr/local/lib/ /usr/local/lib/
 RUN ldconfig
 
