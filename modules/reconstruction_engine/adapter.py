@@ -759,6 +759,9 @@ class COLMAPAdapter(ReconstructionAdapter):
             )
 
             try:
+                # Safe defaults for return dict (avoid locals() fragility)
+                mesher_used = "unknown"
+                selected_model_name = "none"
                 db_path = output_dir / "database.db"
 
                 cmd_extract = self.builder.feature_extractor(
@@ -950,8 +953,8 @@ class COLMAPAdapter(ReconstructionAdapter):
             "registered_images": registered_images,
             "sparse_points": sparse_points,
             "dense_points_fused": fused_points,
-            "mesher_used": mesher_used if "mesher_used" in locals() else "unknown",
-            "selected_sparse_model": selected_model_name if "selected_model_name" in locals() else "none",
+            "mesher_used": mesher_used,
+            "selected_sparse_model": selected_model_name,
         }
 
 
@@ -1092,6 +1095,8 @@ class OpenMVSAdapter(COLMAPAdapter):
                     "face_count": stats["face_count"],
                     "registered_images": registered_images,
                     "sparse_points": sparse_points,
+                    "dense_points_fused": stats.get("vertex_count", 0),  # OpenMVS fused point proxy
+                    "mesher_used": "openmvs_reconstruct_mesh",
                     "engine_type": self.engine_type,
                     "textured": final_tex.exists(),
                     "selected_sparse_model": best_model["path"].name,

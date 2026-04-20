@@ -300,7 +300,14 @@ class GLBExporter:
                     emissive_present = True
                     texture_count += 1
                     
-        component_count = sum(len(m.split(only_watertight=False)) for m in meshes)
+        # NOTE: mesh.split() runs connected-component analysis which is O(faces).
+        # For very high polycount meshes (>500k faces) this can be slow.
+        # We skip the expensive split for such meshes and report component_count=1.
+        _SPLIT_FACE_LIMIT = 500_000
+        if total_faces <= _SPLIT_FACE_LIMIT:
+            component_count = sum(len(m.split(only_watertight=False)) for m in meshes)
+        else:
+            component_count = len(meshes)  # treat each geometry as one component
         bounds = combined_or_scene.bounds
         
         # Honest Integrity status (preservation)

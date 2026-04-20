@@ -5,8 +5,18 @@ on:
     branches: [ "main", "production" ]
     paths:
       - 'Dockerfile.runpod'
+      - '.dockerignore'
       - 'requirements.txt'
+      - 'pyproject.toml'
       - 'modules/reconstruction_engine/**'
+      - 'modules/operations/**'
+      - 'modules/capture_workflow/**'
+      - 'modules/export_pipeline/**'
+      - 'modules/qa_validation/**'
+      - 'modules/asset_cleanup_pipeline/**'
+      - 'modules/asset_registry/**'
+      - 'modules/shared_contracts/**'
+      - 'modules/utils/**'
       - 'smoke_check.sh'
   workflow_dispatch:
 

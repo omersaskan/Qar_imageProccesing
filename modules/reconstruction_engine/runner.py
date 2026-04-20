@@ -241,6 +241,7 @@ class ReconstructionRunner:
         best_results = None
         best_score = -1.0
         best_index = -1
+        run_start = time.monotonic()
         
         for i, step_name in enumerate(fallback_steps):
             attempt_type = ReconstructionAttemptType(step_name)
@@ -452,13 +453,14 @@ class ReconstructionRunner:
         logging.info(f"Reconstruction complete. Selected best attempt index: {best_index} ({audit.attempts[best_index].attempt_type})")
 
         best_engine = audit.attempts[best_index].metadata.get("engine", self.adapter.engine_type)
-        return self._finalize_best_attempt(best_results, job, job_dir, best_engine)
+        elapsed_seconds = time.monotonic() - run_start
+        return self._finalize_best_attempt(best_results, job, job_dir, best_engine, elapsed_seconds)
 
     def _save_audit(self, audit: ReconstructionAudit, job_dir: Path):
         audit_path = job_dir / "reconstruction_audit.json"
         atomic_write_json(audit_path, audit.model_dump(mode="json"))
 
-    def _finalize_best_attempt(self, results: dict, job: ReconstructionJob, job_dir: Path, engine_used: str) -> OutputManifest:
+    def _finalize_best_attempt(self, results: dict, job: ReconstructionJob, job_dir: Path, engine_used: str, elapsed_seconds: float = 0.0) -> OutputManifest:
         mesh_path = Path(results["mesh_path"])
         texture_path = Path(results["texture_path"])
         log_path = Path(results["log_path"])
@@ -471,7 +473,7 @@ class ReconstructionRunner:
             mesh_path=str(mesh_path),
             texture_path=str(texture_path),
             log_path=str(log_path),
-            processing_time_seconds=0.0, # Could calculate total
+            processing_time_seconds=round(elapsed_seconds, 2),
             engine_type=engine_used,
             is_stub=self.adapter.is_stub,
             mesh_metadata=MeshMetadata(

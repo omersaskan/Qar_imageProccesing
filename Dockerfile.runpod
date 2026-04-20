@@ -36,7 +36,7 @@ RUN git clone --branch 3.10 https://github.com/colmap/colmap.git && \
 # Build OpenMVS
 # Requires VCG library
 RUN git clone https://github.com/cnr-isti-vclab/vcglib.git /src/vcglib
-RUN git clone https://github.com/cdcseacave/openMVS.git && \
+RUN git clone --branch v2.3.0 --depth 1 https://github.com/cdcseacave/openMVS.git && \
     cd openMVS && mkdir build && cd build && \
     cmake .. -GNinja \
         -DCMAKE_BUILD_TYPE=Release \
@@ -53,6 +53,9 @@ ENV OPENMVS_BIN_PATH=/usr/local/bin
 ENV RECON_PIPELINE=colmap_dense
 ENV RECON_USE_GPU=true
 ENV PYTHONUNBUFFERED=1
+# Production mode activates validate_setup() guards, API key enforcement,
+# and blocks SimulatedAdapter usage.
+ENV ENV=production
 
 # Install Runtime Dependencies
 RUN apt-get update && apt-get install -y \
