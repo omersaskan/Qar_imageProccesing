@@ -46,7 +46,8 @@ RUN git clone --branch v2.3.0 --depth 1 https://github.com/cdcseacave/openMVS.gi
     cd openMVS && mkdir -p build && cd build && \
     cmake .. -GNinja \
         -DCMAKE_BUILD_TYPE=Release \
-        -DVCG_ROOT=/src/vcglib && \
+        -DVCG_ROOT=/src/vcglib \
+        -DCUDA_CUDA_LIBRARY=/usr/local/cuda/lib64/stubs/libcuda.so && \
     ninja install
 
 # Stage 2: Final Production Runtime
