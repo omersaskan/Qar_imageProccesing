@@ -20,6 +20,7 @@ RUN apt-get update && apt-get install -y \
     libglfw3-dev \
     libsqlite3-dev \
     libglew-dev \
+    libflann-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
@@ -70,6 +71,7 @@ RUN apt-get update && apt-get install -y \
     libopencv-imgproc4.5d \
     libopencv-videoio4.5d \
     libgl1 libglib2.0-0 \
+    libflann1.9 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy binaries and libs from builder
