@@ -47,7 +47,7 @@ def test_worker_fails_on_zero_frames(clean_data, monkeypatch):
     
     # 3. Mock FrameExtractor to return 0 frames
     class MockExtractor:
-        def extract_keyframes(self, *args, **kwargs): return []
+        def extract_keyframes(self, *args, **kwargs): return ([], {})
         
     monkeypatch.setattr("modules.capture_workflow.frame_extractor.FrameExtractor", MockExtractor)
     

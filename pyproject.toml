@@ -23,6 +23,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0.0",
+    "httpx>=0.24.0",
 ]
 
 [tool.setuptools.packages.find]

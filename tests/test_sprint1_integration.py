@@ -512,7 +512,7 @@ class TestHappyPathIntegration:
 
         def make_extractor():
             m = MagicMock()
-            m.extract_keyframes.return_value = frames
+            m.extract_keyframes.return_value = (frames, {})
             m.config = MagicMock(min_frames=3)
             return m
 

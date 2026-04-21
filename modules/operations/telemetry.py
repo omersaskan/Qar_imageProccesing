@@ -1,8 +1,10 @@
-import logging
+import json
 from enum import Enum
-from typing import Dict, Any, Optional
+from typing import Any, Dict, List
 from datetime import datetime, timezone
-from modules.operations.logging_config import setup_logging, get_component_logger
+from pathlib import Path
+from modules.operations.logging_config import get_component_logger
+
 
 class FailureCodes(str, Enum):
     ERR_CAPTURE_QUALITY = "ERR_CAPTURE_QUALITY"
@@ -14,28 +16,61 @@ class FailureCodes(str, Enum):
     ERR_PUBLISH_BLOCKED_REVIEW = "ERR_PUBLISH_BLOCKED_REVIEW"
     ERR_PUBLISH_BLOCKED_FAIL = "ERR_PUBLISH_BLOCKED_FAIL"
 
+
 class OperationalTelemetry:
     """
-    Structured logging for operational visibility using standard logging.
+    Structured telemetry: writes JSON-line entries to a log file and reports
+    them via the standard logger.
     """
-    def __init__(self, log_path: str = "data/logs/operational.log"):
-        # Initialize logging global config if not already done
-        self.logger = get_component_logger("telemetry")
-        setup_logging(log_file=log_path)
 
-    def log_failure(self, component: str, job_id: str, failure_code: FailureCodes, reason: str):
-        extra = {
+    def __init__(self, log_path: str = "data/logs/operational.log"):
+        self.log_path = Path(log_path)
+        self.log_path.parent.mkdir(parents=True, exist_ok=True)
+        self.logger = get_component_logger("telemetry")
+        self._entries: List[Dict[str, Any]] = []
+        # Load existing entries if the file already exists
+        if self.log_path.exists():
+            try:
+                with open(self.log_path, "r", encoding="utf-8") as f:
+                    self._entries = json.load(f)
+            except Exception:
+                self._entries = []
+
+    def _write(self, entry: Dict[str, Any]) -> None:
+        self._entries.append(entry)
+        with open(self.log_path, "w", encoding="utf-8") as f:
+            json.dump(self._entries, f, indent=2, default=str)
+
+    def log_failure(
+        self,
+        component: str,
+        job_id: str,
+        failure_code: FailureCodes,
+        reason: str,
+    ) -> None:
+        entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "event": "failure",
             "component": component,
             "job_id": job_id,
-            "failure_code": failure_code.value
+            "failure_code": failure_code.value,
+            "reason": reason,
         }
-        # Log via adapter to inject extra fields
-        self.logger.error(f"Failure in {component}: {reason}", extra=extra)
+        self._write(entry)
+        self.logger.error(f"Failure in {component}: {reason}")
 
-    def log_action(self, asset_id: str, action_type: str, metadata: Dict[str, Any]):
-        extra = {
+    def log_action(
+        self,
+        asset_id: str,
+        action: str,
+        metadata: Dict[str, Any],
+    ) -> None:
+        entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "event": "action",
             "asset_id": asset_id,
-            "action_type": action_type,
-            "metadata": metadata
+            "action": action,
+            "metadata": metadata,
         }
-        self.logger.info(f"Action: {action_type} for asset {asset_id}", extra=extra)
+        self._write(entry)
+        self.logger.info(f"Action: {action} for asset {asset_id}")

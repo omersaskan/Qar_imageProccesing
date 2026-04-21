@@ -804,6 +804,20 @@ class IngestionWorker:
         self.registry.set_active_version(session.product_id, asset_id)
         return "published", AssetStatus.PUBLISHED
 
+    def _finalize_ingestion(self, session: CaptureSession) -> CaptureSession:
+        """
+        Compatibility shim used by tests.
+
+        Chains cleanup → export → validation → publish, mirroring the full
+        post-reconstruction pipeline.  Each stage updates the session on disk;
+        the final CaptureSession object is returned.
+        """
+        session = self._handle_cleanup(session)
+        session = self._handle_export(session)
+        session = self._handle_validation(session)
+        session = self._handle_publish(session)
+        return session
+
     # ──────────────────────────────────────────────────────────────────────────
     # Artifact loaders
     # ──────────────────────────────────────────────────────────────────────────
