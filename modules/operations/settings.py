@@ -157,9 +157,10 @@ class Settings(BaseSettings):
 
     def validate_setup(self):
         """Validates that the current environment has all necessary configuration."""
-        if self.env in [AppEnvironment.PILOT, AppEnvironment.PRODUCTION]:
+        if self.env == AppEnvironment.PILOT or self.env == AppEnvironment.PRODUCTION:
             if not self.pilot_api_key:
-                raise ValueError(f"PILOT_API_KEY is mandatory in {self.env.value} environment.")
+                raise ValueError(f"PILOT_API_KEY is mandatory in {getattr(self.env, 'value', self.env)} environment.")
+
 
             cp = Path(self.colmap_path)
             if not cp.exists():
@@ -173,8 +174,9 @@ class Settings(BaseSettings):
                     import logging
                     logger = logging.getLogger("settings")
                     logger.warning(
-                        f"CRITICAL: Missing ML dependencies in {self.env.value}: {missing_ml}"
+                        f"CRITICAL: Missing ML dependencies in {getattr(self.env, 'value', self.env)}: {missing_ml}"
                     )
+
 
 # Singleton instance
 settings = Settings()

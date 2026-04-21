@@ -29,11 +29,11 @@ def run_validation():
     # Configuration Priority: CLI Arg > Environment Variable > Settings Default
     effective_data_root = args.data_root or os.getenv("DATA_ROOT") or str(project_root / "data")
     
-    # Update settings singleton for this run
     settings.data_root = effective_data_root
+    if args.pipeline:
+        settings.recon_pipeline = args.pipeline
+        print(f"Applied CLI pipeline override: {args.pipeline}")
     
-    # SPRINT 3: Do NOT override recon_pipeline or fallback_steps here
-    # to ensure we test the actual system/env configuration.
     effective_pipeline = settings.recon_pipeline
     
     session_id = args.session_id
@@ -48,7 +48,7 @@ def run_validation():
     print(f"Data Root:        {effective_data_root}")
     print(f"Session ID:       {session_id}")
     print(f"Pipeline:         {effective_pipeline}")
-    print(f"Environment:      {settings.env.value}")
+    print(f"Environment:      {getattr(settings.env, 'value', settings.env)}")
     print("-" * 50)
 
     if not frames_dir.exists():
