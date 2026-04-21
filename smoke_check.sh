@@ -14,6 +14,30 @@ else
     exit 1
 fi
 
+# 1.5 Deep Dependency Verification (ldd)
+echo -e "\n[1.5/4] Deep Dependency Verification (ldd)..."
+# Add OpenMVS bin path to PATH if not already there for ldd check
+export PATH="/usr/local/bin:/usr/local/bin/OpenMVS:$PATH"
+
+LDD_BINARIES=("colmap" "InterfaceCOLMAP" "DensifyPointCloud" "ReconstructMesh" "TextureMesh")
+for bin in "${LDD_BINARIES[@]}"; do
+    BIN_PATH=$(command -v "$bin")
+    if [ -z "$BIN_PATH" ]; then
+        echo "  Checking $bin... MISSING BINARY"
+        exit 1
+    fi
+    echo -n "  Checking $bin... "
+    LDD_OUT=$(ldd "$BIN_PATH" 2>&1)
+    if echo "$LDD_OUT" | grep -q "not found"; then
+        echo "FAILED"
+        echo "ERROR: Missing shared libraries for $bin:"
+        echo "$LDD_OUT" | grep "not found"
+        exit 1
+    else
+        echo "OK"
+    fi
+done
+
 # 2. COLMAP Capability Depth Check
 echo -e "\n[2/4] Checking COLMAP Binaries & CUDA Linkage..."
 if command -v colmap &> /dev/null; then
