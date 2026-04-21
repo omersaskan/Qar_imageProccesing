@@ -62,9 +62,11 @@ def test_metadata_correctness(synthetic_frame):
 
 def test_quality_analyzer_semantic_handling():
     analyzer = QualityAnalyzer()
-    frame = np.full((100, 100, 3), 128, dtype=np.uint8)
+    # Use a noisy frame so blur_score passes (avoids 'blurry' failure masking the test intent)
+    rng = np.random.default_rng(42)
+    frame = rng.integers(0, 255, (100, 100, 3), dtype=np.uint8)
     mask = np.full((100, 100), 0, dtype=np.uint8)
-    mask[30:70, 30:70] = 255 # valid occupancy
+    mask[30:70, 30:70] = 255  # valid occupancy
 
     meta = {
         "bbox": {"x": 30, "y": 30, "w": 40, "h": 40},
@@ -72,7 +74,7 @@ def test_quality_analyzer_semantic_handling():
         "fragment_count": 1,
         "largest_contour_ratio": 1.0,
         "solidity": 1.0,
-        "mask_confidence": 0.4, # Too low! (default threshold is 0.55)
+        "mask_confidence": 0.35,  # Below default threshold of 0.40
         "purity_score": 0.9,
         "fallback_used": True,
         "backend_name": "heuristic",
@@ -80,5 +82,5 @@ def test_quality_analyzer_semantic_handling():
 
     result = analyzer.analyze_frame(frame, mask, meta)
     assert not result["overall_pass"]
-    assert "fallback_mask_used_with_low_confidence (0.40)" in result["failure_reasons"]
-    assert "low_mask_confidence (0.40)" in result["failure_reasons"]
+    assert "fallback_mask_used_with_low_confidence (0.35)" in result["failure_reasons"]
+    assert "low_mask_confidence (0.35)" in result["failure_reasons"]

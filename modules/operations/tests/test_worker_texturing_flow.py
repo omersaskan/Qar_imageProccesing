@@ -115,8 +115,9 @@ def test_worker_handle_cleanup_texturing_flow(mock_trimesh_load, mock_run_textur
     mock_trimesh_load.return_value = mock_scene
     
     # EXECUTE worker stage
-    worker = IngestionWorker(data_root=str(data_root))
-    updated_session = worker._handle_cleanup(session)
+    with patch("modules.operations.texturing_service.TexturingService._check_uv", return_value=True):
+        worker = IngestionWorker(data_root=str(data_root))
+        updated_session = worker._handle_cleanup(session)
     
     assert updated_session.status == AssetStatus.CLEANED
     

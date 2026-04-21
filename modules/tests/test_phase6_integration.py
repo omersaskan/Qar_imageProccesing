@@ -48,7 +48,13 @@ def test_review_policy_enforcement(setup_system):
     assert registry.has_approval(asset_id) is True
     
     # 3. Attempt publish with approval -> Should succeed
-    package = publisher.publish_package(product_id, asset_id, report, {}, ProductPhysicalProfile(real_width_cm=1, real_depth_cm=1, real_height_cm=1))
+    dummy_urls = {
+        "glb_url": "https://cdn.example.com/asset.glb",
+        "usdz_url": "https://cdn.example.com/asset.usdz",
+        "poster_url": "https://cdn.example.com/poster.jpg",
+        "thumb_url": "https://cdn.example.com/thumb.jpg",
+    }
+    package = publisher.publish_package(product_id, asset_id, report, dummy_urls, ProductPhysicalProfile(real_width_cm=1, real_depth_cm=1, real_height_cm=1))
     assert package.package_status == "ready_for_ar"
     assert registry.publish_states[asset_id] == "published"
 

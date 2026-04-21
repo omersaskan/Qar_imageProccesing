@@ -50,14 +50,14 @@ def test_extract_keyframes_mocked(mock_videocapture, tmp_path):
 
     output_dir = tmp_path / "frames"
     with patch.object(extractor, "_write_verified_image") as mock_write_verified_image:
-        keyframes = extractor.extract_keyframes("dummy.mp4", str(output_dir))
+        frames, _report = extractor.extract_keyframes("dummy.mp4", str(output_dir))
 
-    assert len(keyframes) == 1
+    assert len(frames) == 1
     assert mock_write_verified_image.call_count == 2
 
 @patch('cv2.VideoCapture')
-@patch('cv2.imwrite')
-def test_extract_keyframes_hard_fails_on_write_error(mock_imwrite, mock_videocapture, tmp_path):
+@patch('cv2.imencode')
+def test_extract_keyframes_hard_fails_on_write_error(mock_imencode, mock_videocapture, tmp_path):
     mock_cap = MagicMock()
     mock_videocapture.return_value = mock_cap
     mock_cap.isOpened.return_value = True
@@ -65,7 +65,8 @@ def test_extract_keyframes_hard_fails_on_write_error(mock_imwrite, mock_videocap
         (True, _make_test_frame()),
         (False, None),
     ]
-    mock_imwrite.return_value = False
+    # Simulate cv2.imencode failure: success=False
+    mock_imencode.return_value = (False, None)
 
     mask = np.zeros((100, 100), dtype=np.uint8)
     mask[20:80, 20:80] = 255
@@ -83,7 +84,7 @@ def test_extract_keyframes_hard_fails_on_write_error(mock_imwrite, mock_videocap
         thresholds=QualityThresholds(frame_sample_rate=1),
     )
 
-    with pytest.raises(ValueError, match="write failed"):
+    with pytest.raises(ValueError, match="write failed|internal encode failed"):
         extractor.extract_keyframes("dummy.mp4", str(tmp_path / "frames"))
 
 def test_histogram_generation():

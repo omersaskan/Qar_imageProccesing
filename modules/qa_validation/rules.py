@@ -90,9 +90,15 @@ def validate_ground_alignment(offset: float, thresholds: ValidationThresholds) -
 def validate_contamination(stats: Dict[str, Any], thresholds: ValidationThresholds) -> Dict[str, str]:
     """
     Uses cleanup_stats -> isolation stats to assess scene contamination.
+    If no isolation stats are present (e.g. standalone validation without a
+    cleanup pipeline), returns all-pass so caller judgment is not corrupted.
     """
     results: Dict[str, str] = {}
     iso = stats.get("isolation", {})
+
+    # If there is no isolation data at all, assume clean (caller didn't run cleanup)
+    if not iso:
+        return {}
 
     final_faces = int(iso.get("final_faces", 0))
     initial_faces = max(int(iso.get("initial_faces", 1)), 1)

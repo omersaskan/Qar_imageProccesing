@@ -33,7 +33,7 @@ def test_path_traversal_protection():
     
     # Subdir should be fine
     safe_path = validate_safe_path(base_dir, "jobs/job_1")
-    assert "/safe/data/jobs/job_1" in safe_path.replace("\\", "/")
+    assert "/safe/data/jobs/job_1" in str(safe_path).replace("\\", "/")
 
 def test_duplicate_asset_protection():
     registry = AssetRegistry()

@@ -21,6 +21,10 @@ class IntegrationFlow:
         return {
             "poly_count": metadata.final_polycount,
             "texture_status": texture_status,
+            # validator.validate() reads texture_integrity_status specifically
+            "texture_integrity_status": texture_status,
+            # Default to a photogrammetry-appropriate semantic status
+            "material_semantic_status": "diffuse_textured",
             "bbox": {
                 "width": width,
                 "height": height,

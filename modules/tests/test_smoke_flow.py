@@ -29,10 +29,12 @@ def test_full_factory_smoke_flow(smoke_env):
     Verifies the complete pipeline: Capture -> Recon -> Cleanup -> Validate -> Publish.
     """
     data_root = smoke_env
-    registry = AssetRegistry()
+    # 0. Prep Registry
+    registry_path = os.path.join(smoke_env, "registry")
+    registry = AssetRegistry(data_root=registry_path)
     publisher = PackagePublisher(registry)
-    cleaner = AssetCleaner(data_root=data_root)
-    job_mgr = JobManager(data_root=data_root)
+    cleaner = AssetCleaner(data_root=smoke_env)
+    job_mgr = JobManager(data_root=smoke_env)
     validator = AssetValidator()
     
     product_id = "smoke_prod_1"
@@ -57,10 +59,11 @@ def test_full_factory_smoke_flow(smoke_env):
     # 3. Simulate Reconstruction Output (Raw)
     raw_mesh_path = os.path.join(job.job_dir, "raw_mesh.obj")
     with open(raw_mesh_path, "w") as f:
-        f.write("v 0 0 0\nv 1 1 1\nf 1 2 3") # dummy mesh
+        # 4 vertices, 4 faces (tetrahedron) to ensure non-zero volume for bbox validation
+        f.write("v 0 0 0\nv 1 0 0\nv 0 1 0\nv 0 0 1\nf 1 2 3\nf 1 2 4\nf 2 3 4\nf 3 1 4")
         
     # 4. Cleanup Pipeline
-    metadata = cleaner.process_cleanup(job.job_id, raw_mesh_path)
+    metadata, stats, cleaned_path = cleaner.process_cleanup(job.job_id, raw_mesh_path)
     assert metadata.final_polycount > 0
     
     # 5. Validation
@@ -87,17 +90,19 @@ def test_full_factory_smoke_flow(smoke_env):
         asset_id=asset_id,
         validation_report=report,
         export_urls={
-            "glb": "http://cdn/asset.glb",
-            "usdz": "http://cdn/asset.usdz",
-            "poster": "http://cdn/poster.png",
-            "thumbnail": "http://cdn/thumb.png"
+            "glb_url": "https://cdn.example.com/asset.glb",
+            "usdz_url": "https://cdn.example.com/asset.usdz",
+            "poster_url": "https://cdn.example.com/poster.png",
+            "thumb_url": "https://cdn.example.com/thumb.png",
         },
         physical_profile=physical_profile
     )
     
     assert package.package_status == "ready_for_ar"
-    assert registry.publish_states[asset_id] == "published"
-    assert registry.active_versions[product_id] == asset_id
+    # Use public API to verify state
+    history = registry.get_history(product_id)
+    assert history[0]["status"] == "published"
+    assert history[0]["is_active"] is True
     
     # 7. Verify History Visibility
     history = registry.get_history(product_id)

@@ -118,8 +118,10 @@ def test_coverage_good_centered_orbit_is_sufficient(tmp_path):
     frames = []
 
     # Generates many frames but with smaller relative x span (centered orbit)
-    # The default min_viewpoint_spread is now 0.25
-    centers = [150, 155, 160, 165, 170, 175, 180, 185, 190, 195, 200, 205, 210, 215, 220]
+    # The default min_viewpoint_spread is now 0.25 (80 pixels on 320 width)
+    # To get 5 unique views with 28.8px dedupe distance, we need a larger span than 70.
+    # [100, 130, 160, 190, 220, 240] are spaced enough.
+    centers = [100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200, 210, 220, 230, 240]
     radii = [60] * len(centers)
     for index, (center, radius) in enumerate(zip(centers, radii)):
         frame_path = tmp_path / f"frame_{index:04d}.jpg"

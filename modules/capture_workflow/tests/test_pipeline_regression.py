@@ -74,9 +74,9 @@ def test_frame_extractor_integration(test_workspace, mock_session):
 
         # We expect 1 frame since the generator yields similar mock frames 
         # and deduplication drops the rest, except the first acceptable.
-        paths = extractor.extract_keyframes(str(video_path), str(frames_dir))
-        assert len(paths) == 1
-        assert Path(paths[0]).name == "frame_0000.jpg"
+        frames, _report = extractor.extract_keyframes(str(video_path), str(frames_dir))
+        assert len(frames) == 1
+        assert Path(frames[0]).name == "frame_0000.jpg"
         
         mask_path = frames_dir / "masks" / "frame_0000.png"
         meta_path = frames_dir / "masks" / "frame_0000.json"
@@ -97,17 +97,18 @@ def test_worker_recapture_path_regression(test_workspace, mock_session):
 
     # Mock extract_keyframes to return empty or low diversity to force recapture
     with patch("modules.capture_workflow.frame_extractor.FrameExtractor.extract_keyframes") as mock_ext:
-        mock_ext.return_value = []
+        mock_ext.return_value = ([], {})
         
         with pytest.raises(IrrecoverableError, match=r"produced 0 frames"):
             worker._handle_frame_extraction(mock_session)
             
-        mock_ext.return_value = ["frame1.jpg", "frame2.jpg", "frame3.jpg", "frame4.jpg", "frame5.jpg"]
+        mock_ext.return_value = (["frame1.jpg", "frame2.jpg", "frame3.jpg", "frame4.jpg", "frame5.jpg"], {})
         with patch("modules.capture_workflow.coverage_analyzer.CoverageAnalyzer.analyze_coverage") as mock_cov:
             mock_cov.return_value = {
                 "overall_status": "insufficient",
                 "coverage_score": 0.2,
-                "reasons": ["fallback used too much"]
+                "reasons": ["fallback used too much"],
+                "hard_reasons": ["fallback used too much"]
             }
             res = worker._handle_frame_extraction(mock_session)
             assert res.status == AssetStatus.RECAPTURE_REQUIRED

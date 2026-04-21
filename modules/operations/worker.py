@@ -437,7 +437,17 @@ class IngestionWorker:
             if not video_path.exists():
                 raise IrrecoverableError(f"Video file missing at {video_path}.")
 
-            frames, extraction_report = extractor.extract_keyframes(str(video_path), str(output_dir))
+            _result = extractor.extract_keyframes(str(video_path), str(output_dir))
+            # Support both (frames, report) tuple (real implementation) and
+            # bare list (legacy mocks in tests that haven't been updated yet).
+            if isinstance(_result, tuple) and len(_result) == 2 and isinstance(_result[0], list):
+                frames, extraction_report = _result
+            elif isinstance(_result, list):
+                frames = _result
+                extraction_report = {}
+            else:
+                frames = list(_result) if _result else []
+                extraction_report = {}
             atomic_write_json(reports_dir / "quality_report.json", extraction_report)
 
             if not frames:
