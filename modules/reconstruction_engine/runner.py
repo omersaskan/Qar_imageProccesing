@@ -24,7 +24,7 @@ from .failures import (
     InsufficientReconstructionError
 )
 from .output_manifest import MeshMetadata, OutputManifest
-from modules.operations.settings import settings, ReconstructionPipeline
+from modules.operations.settings import settings, ReconstructionPipeline, AppEnvironment
 
 
 class ReconstructionRunner:
@@ -68,7 +68,7 @@ class ReconstructionRunner:
         
         # Normalize and validate raw pipeline choice
         raw_choice = settings.recon_pipeline.lower()
-        is_production = settings.env in [settings.env.PILOT, settings.env.PRODUCTION]
+        is_production = settings.env in [AppEnvironment.PILOT, AppEnvironment.PRODUCTION]
         
         # Mapping alias/legacy names if needed (though user wants strict colmap_openmvs)
         if raw_choice in ["openmvs", "colmap_openmvs"]:

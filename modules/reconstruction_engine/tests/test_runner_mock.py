@@ -113,8 +113,8 @@ def test_runner_rejects_simulated_without_explicit_opt_in(monkeypatch):
 
 
 def test_runner_success(tmp_path, monkeypatch):
-    from modules.operations.settings import settings
-    monkeypatch.setattr(settings, "env", "development")
+    from modules.operations.settings import settings, AppEnvironment
+    monkeypatch.setattr(settings, "env", AppEnvironment.LOCAL_DEV)
     monkeypatch.setattr(settings, "recon_pipeline", "simulated")
     monkeypatch.setattr(settings, "recon_fallback_steps", ["default"])
     monkeypatch.setenv("ALLOW_SIMULATED_RECONSTRUCTION", "true")

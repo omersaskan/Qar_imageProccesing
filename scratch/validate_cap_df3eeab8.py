@@ -8,6 +8,7 @@ from typing import List
 
 # Dynamic project root discovery
 # Assumes script is in <root>/scratch/
+# Dynamic project root discovery
 project_root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(project_root))
 
@@ -26,12 +27,14 @@ def run_validation():
     args = parser.parse_args()
 
     # Configuration Priority: CLI Arg > Environment Variable > Settings Default
-    effective_pipeline = args.pipeline or os.getenv("RECON_PIPELINE") or settings.recon_pipeline
     effective_data_root = args.data_root or os.getenv("DATA_ROOT") or str(project_root / "data")
     
     # Update settings singleton for this run
-    settings.recon_pipeline = effective_pipeline
     settings.data_root = effective_data_root
+    
+    # SPRINT 3: Do NOT override recon_pipeline or fallback_steps here
+    # to ensure we test the actual system/env configuration.
+    effective_pipeline = settings.recon_pipeline
     
     session_id = args.session_id
     data_root_path = Path(effective_data_root)

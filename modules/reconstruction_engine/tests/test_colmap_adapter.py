@@ -117,12 +117,7 @@ def test_colmap_artifact_discovery_requires_real_mesh(tmp_path):
     prep["masks_dir"].mkdir()
 
     with patch.object(adapter, "_prepare_workspace", return_value=prep):
-        with patch("modules.reconstruction_engine.adapter.subprocess.Popen") as mock_popen:
-            mock_process = MagicMock()
-            mock_process.returncode = 0
-            mock_process.stdout = iter([])
-            mock_popen.return_value = mock_process
-
+        with patch.object(adapter, "_run_command"):
             with patch.object(adapter, "_select_best_sparse_model", return_value={"registered_images": 10, "points_3d": 1000, "path": tmp_path}):
                 with pytest.raises(RuntimeError, match="no usable mesh artifacts"):
                     adapter.run_reconstruction([], output_dir)
