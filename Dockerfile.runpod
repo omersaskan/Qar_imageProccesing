@@ -93,9 +93,12 @@ RUN ldconfig
 
 WORKDIR /app
 
+# Upgrade pip first — Ubuntu 22.04's bundled pip is too old to resolve
+# modern package versions from PyPI.
 # Install Python requirements
 COPY requirements.txt .
-RUN pip3 install --no-cache-dir -r requirements.txt
+RUN pip3 install --no-cache-dir --upgrade pip \
+    && pip3 install --no-cache-dir -r requirements.txt
 
 # Copy application source
 COPY . .
