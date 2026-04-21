@@ -24,6 +24,7 @@ def make_asset_data(**overrides):
         "has_uv": True,
         "has_material": True,
         "texture_applied_successfully": True,
+        "texture_integrity_status": "complete",
     }
     asset_data.update(overrides)
     return asset_data
