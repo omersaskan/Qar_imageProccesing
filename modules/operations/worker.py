@@ -741,6 +741,7 @@ class IngestionWorker:
             "material_semantic_status": export_metrics.get("material_semantic_status", "geometry_only"),
             "basecolor_present": bool(export_metrics.get("basecolor_present", False)),
             "normal_present": bool(export_metrics.get("normal_present", False)),
+            "texture_applied_successfully": bool(export_metrics.get("texture_applied_successfully", False)),
             "metallic_roughness_present": bool(export_metrics.get("metallic_roughness_present", False)),
             "occlusion_present": bool(export_metrics.get("occlusion_present", False)),
             "emissive_present": bool(export_metrics.get("emissive_present", False)),

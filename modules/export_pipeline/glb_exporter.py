@@ -350,6 +350,7 @@ class GLBExporter:
             "occlusion_present": occlusion_present,
             "emissive_present": emissive_present,
             "material_integrity_status": "present" if has_material else "missing",
+            "texture_applied_successfully": bool(has_embedded_texture),
             "bounds_min": {
                 "x": float(bounds[0][0]),
                 "y": float(bounds[0][1]),

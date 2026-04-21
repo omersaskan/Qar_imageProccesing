@@ -25,8 +25,18 @@ def make_asset_data(**overrides):
         "has_material": True,
         "texture_applied_successfully": True,
         "texture_integrity_status": "complete",
+        "material_integrity_status": "complete",
+        "material_semantic_status": "diffuse_textured",
+        "has_embedded_texture": True,
+        "texture_count": 1,
+        "material_count": 1,
+        "delivery_geometry_count": 1,
+        "delivery_component_count": 1,
     }
     asset_data.update(overrides)
+    # Synchronize legacy texture_status override with modern texture_integrity_status
+    if "texture_status" in overrides:
+        asset_data["texture_integrity_status"] = overrides["texture_status"]
     return asset_data
 
 

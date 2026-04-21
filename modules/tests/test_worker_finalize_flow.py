@@ -173,6 +173,7 @@ class TestWorkerFinalizeFlow(unittest.TestCase):
             "bounds_max": {"x": 0.5, "y": 0.5, "z": 1.0},
             "bbox": {"x": 1.0, "y": 1.0, "z": 1.0},
             "ground_offset": 0.0,
+            "texture_applied_successfully": True,
         }
 
         self.worker._finalize_ingestion(self.session)

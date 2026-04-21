@@ -11,8 +11,9 @@ from modules.shared_contracts.models import AssetMetadata, ValidationReport, Pro
 from modules.operations.telemetry import OperationalTelemetry, FailureCodes
 
 @pytest.fixture
-def setup_system():
-    registry = AssetRegistry()
+def setup_system(tmp_path):
+    registry_path = tmp_path / "registry"
+    registry = AssetRegistry(data_root=str(registry_path))
     publisher = PackagePublisher(registry)
     validator = AssetValidator()
     review_manager = ReviewManager(registry)
@@ -56,7 +57,12 @@ def test_review_policy_enforcement(setup_system):
     }
     package = publisher.publish_package(product_id, asset_id, report, dummy_urls, ProductPhysicalProfile(real_width_cm=1, real_depth_cm=1, real_height_cm=1))
     assert package.package_status == "ready_for_ar"
-    assert registry.publish_states[asset_id] == "published"
+    
+    # Use public API to verify publication status
+    history = registry.get_history(product_id)
+    asset_entry = next((h for h in history if h["asset_id"] == asset_id), None)
+    assert asset_entry is not None
+    assert asset_entry["status"] == "published"
 
 def test_fail_status_is_terminal(setup_system):
     registry, publisher, validator, review_manager, telemetry = setup_system
