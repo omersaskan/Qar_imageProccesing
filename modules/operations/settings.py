@@ -9,6 +9,11 @@ class AppEnvironment(str, Enum):
     PILOT = "pilot"
     PRODUCTION = "production"
 
+class ReconstructionPipeline(str, Enum):
+    COLMAP_DENSE = "colmap_dense"
+    COLMAP_OPENMVS = "colmap_openmvs"
+    SIMULATED = "simulated"
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
@@ -65,6 +70,9 @@ class Settings(BaseSettings):
     # --- RECONSTRUCTION ENGINES ---
     # Global switch for the default pipeline: "colmap_dense" or "colmap_openmvs"
     recon_pipeline: str = Field("colmap_dense", validation_alias="RECON_PIPELINE")
+    
+    # Poisson mesher timeout in seconds.
+    recon_poisson_timeout_sec: int = Field(300, validation_alias="RECON_POISSON_TIMEOUT_SEC")
     
     # OpenMVS specific flags
     openmvs_fail_hard: bool = Field(False, validation_alias="OPENMVS_FAIL_HARD")

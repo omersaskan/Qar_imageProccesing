@@ -378,8 +378,8 @@ class COLMAPAdapter(ReconstructionAdapter):
     def is_stub(self) -> bool:
         return False
 
-    def _run_command(self, cmd: List[str], cwd: Path, log_file) -> None:
-        log_file.write(f"\n--- Running: {' '.join(cmd)} ---\n")
+    def _run_command(self, cmd: List[str], cwd: Path, log_file, timeout: Optional[int] = None) -> None:
+        log_file.write(f"\n--- Running: {' '.join(cmd)} (timeout={timeout}s) ---\n")
         log_file.flush()
 
         process = subprocess.Popen(
@@ -387,21 +387,32 @@ class COLMAPAdapter(ReconstructionAdapter):
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            bufsize=1,
             cwd=str(cwd),
         )
 
         first_error_line = None
-        if process.stdout:
-            for line in process.stdout:
-                if not first_error_line and (
-                    "Failed" in line or "Error" in line or "unrecognised" in line
-                ):
-                    first_error_line = line.strip()
-                log_file.write(line)
+        try:
+            # communicate() handles the timeout correctly and avoids blocking issues
+            # though it buffers output, for these specific meshing steps it is acceptable.
+            stdout, _ = process.communicate(timeout=timeout)
+            if stdout:
+                for line in stdout.splitlines():
+                    if not first_error_line and (
+                        "Failed" in line or "Error" in line or "unrecognised" in line
+                    ):
+                        first_error_line = line.strip()
+                    log_file.write(line + "\n")
                 log_file.flush()
 
-        process.wait()
+        except subprocess.TimeoutExpired:
+            process.kill()
+            stdout, _ = process.communicate() # Drain any remaining output
+            if stdout:
+                log_file.write(stdout)
+            msg = f"Command timed out after {timeout}s: {' '.join(cmd)}"
+            log_file.write(f"\nERROR: {msg}\n")
+            raise RuntimeReconstructionError(msg, output_snippet="Timeout reached")
+
         if process.returncode != 0:
             msg = f"Command failed with exit code {process.returncode}: {' '.join(cmd)}"
             raise RuntimeReconstructionError(msg, output_snippet=first_error_line)
@@ -896,22 +907,33 @@ class COLMAPAdapter(ReconstructionAdapter):
                 fused_points = self._validate_dense_workspace(output_dir)
                 log_file.write(f"Dense fusion successful. Fused points: {fused_points}\n")
 
+                # Guard: If point count is extremely high/low, log it
+                if fused_points > 2_000_000:
+                    log_file.write(f"WARNING: Extremely high fused point count ({fused_points}). Poisson may take a long time.\n")
+                elif fused_points < 1000:
+                    log_file.write(f"WARNING: Very low fused point count ({fused_points}). Meshing might fail.\n")
+
                 poisson_ok = False
+                mesher_timeout = settings.recon_poisson_timeout_sec
+                
                 try:
                     cmd_mesh = self.builder.poisson_mesher(
                         dense_dir / "fused.ply",
                         dense_dir / "meshed-poisson.ply",
                     )
-                    self._run_command(cmd_mesh, output_dir, log_file)
+                    log_file.write(f"Starting Poisson mesher (timeout={mesher_timeout}s)...\n")
+                    self._run_command(cmd_mesh, output_dir, log_file, timeout=mesher_timeout)
                     
                     if self._is_valid_mesh_candidate(dense_dir / "meshed-poisson.ply"):
                         poisson_ok = True
                         mesher_used = "poisson"
+                        log_file.write("Poisson meshing successful.\n")
                     else:
                         log_file.write("\nPoisson mesher finished but produced an invalid or empty mesh.\n")
 
-                except Exception as poisson_err:
-                    log_file.write(f"\nPoisson mesher failed: {poisson_err}\n")
+                except (subprocess.TimeoutExpired, RuntimeReconstructionError) as poisson_err:
+                    log_file.write(f"\nPoisson mesher FAIL/TIMEOUT: {poisson_err}\n")
+                    log_file.write("Falling back to Delaunay mesher...\n")
 
                 if not poisson_ok:
                     try:
@@ -919,8 +941,10 @@ class COLMAPAdapter(ReconstructionAdapter):
                             dense_dir,
                             dense_dir / "meshed-delaunay.ply",
                         )
+                        log_file.write("Starting Delaunay mesher fallback...\n")
                         self._run_command(cmd_mesh, output_dir, log_file)
                         mesher_used = "delaunay"
+                        log_file.write("Delaunay meshing successful.\n")
                     except Exception as delaunay_err:
                         log_file.write(f"\nDelaunay mesher failed: {delaunay_err}\n")
                         mesher_used = "failed"

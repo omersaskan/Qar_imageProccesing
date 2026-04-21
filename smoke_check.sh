@@ -27,11 +27,13 @@ for bin in "${LDD_BINARIES[@]}"; do
         exit 1
     fi
     echo -n "  Checking $bin... "
+    # Run ldd and check for "not found"
     LDD_OUT=$(ldd "$BIN_PATH" 2>&1)
     if echo "$LDD_OUT" | grep -q "not found"; then
         echo "FAILED"
         echo "ERROR: Missing shared libraries for $bin:"
         echo "$LDD_OUT" | grep "not found"
+        echo "Check if libglew2.2, libboost-filesystem1.74.0, libboost-program-options1.74.0, libboost-system1.74.0, libboost-graph1.74.0, libceres2, libglu1-mesa, libopengl0, libgl1 dependecies are installed."
         exit 1
     else
         echo "OK"

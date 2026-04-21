@@ -24,7 +24,7 @@ from .failures import (
     InsufficientReconstructionError
 )
 from .output_manifest import MeshMetadata, OutputManifest
-from modules.operations.settings import settings
+from modules.operations.settings import settings, ReconstructionPipeline
 
 
 class ReconstructionRunner:
@@ -66,14 +66,28 @@ class ReconstructionRunner:
         if self._explicit_adapter:
             return self._explicit_adapter
         
-        engine_choice = settings.recon_pipeline
-        is_production = settings.env in ["production", "pilot"]
+        # Normalize and validate raw pipeline choice
+        raw_choice = settings.recon_pipeline.lower()
+        is_production = settings.env in [settings.env.PILOT, settings.env.PRODUCTION]
         
-        if engine_choice == "colmap_openmvs":
+        # Mapping alias/legacy names if needed (though user wants strict colmap_openmvs)
+        if raw_choice in ["openmvs", "colmap_openmvs"]:
+            choice = ReconstructionPipeline.COLMAP_OPENMVS
+        elif raw_choice in ["colmap", "colmap_dense"]:
+            choice = ReconstructionPipeline.COLMAP_DENSE
+        elif raw_choice == "simulated":
+            choice = ReconstructionPipeline.SIMULATED
+        else:
+            raise ValueError(f"Unsupported reconstruction pipeline: '{raw_choice}'. "
+                             f"Valid options: {[p.value for p in ReconstructionPipeline]}")
+
+        logging.info(f"Runner selected engine adapter: {choice.value} (from input: {raw_choice})")
+
+        if choice == ReconstructionPipeline.COLMAP_OPENMVS:
             return self.openmvs_adapter
-        elif engine_choice == "colmap_dense":
+        elif choice == ReconstructionPipeline.COLMAP_DENSE:
             return self.colmap_adapter
-        elif engine_choice == "simulated":
+        elif choice == ReconstructionPipeline.SIMULATED:
             if is_production:
                 raise RuntimeError("Stub engine strictly prohibited in production.")
             
@@ -85,8 +99,9 @@ class ReconstructionRunner:
                 from .adapter import SimulatedAdapter
                 self._simulated_cached = SimulatedAdapter()
             return self._simulated_cached
-        else:
-            return self.colmap_adapter
+        
+        # Should be unreachable due to the validation above
+        raise ValueError(f"Unhandled pipeline choice: {choice}")
 
     def _read_image(self, image_path: Path):
         image = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
