@@ -35,6 +35,7 @@ def run_validation():
         print(f"Applied CLI pipeline override: {args.pipeline}")
     
     effective_pipeline = settings.recon_pipeline
+
     
     session_id = args.session_id
     data_root_path = Path(effective_data_root)

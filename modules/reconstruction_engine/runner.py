@@ -39,7 +39,7 @@ class ReconstructionRunner:
                 settings.validate_setup()
             except (ValueError, FileNotFoundError) as e:
                 # Safe check: handles both AppEnvironment enum and raw string values
-                if settings.env == AppEnvironment.PRODUCTION or settings.env == AppEnvironment.PILOT:
+                if settings.env in [AppEnvironment.PRODUCTION, AppEnvironment.PILOT]:
                     raise RuntimeError(f"Production environment must be configured: {e}")
                 logging.warning(f"Configuration warning: {e}")
 
@@ -55,7 +55,7 @@ class ReconstructionRunner:
                 settings.validate_setup()
             except (ValueError, FileNotFoundError) as e:
                 # Safe check: handles both AppEnvironment enum and raw string values
-                if settings.env == AppEnvironment.PRODUCTION or settings.env == AppEnvironment.PILOT:
+                if settings.env in [AppEnvironment.PRODUCTION, AppEnvironment.PILOT]:
                     raise RuntimeError(f"Production environment must be configured: {e}")
                 logging.warning(f"Configuration warning: {e}")
 
@@ -71,7 +71,7 @@ class ReconstructionRunner:
         # Normalize and validate raw pipeline choice
         raw_choice = settings.recon_pipeline.lower()
         # Safe comparison: handles both AppEnvironment enum and raw string values
-        is_production = (settings.env == AppEnvironment.PILOT or settings.env == AppEnvironment.PRODUCTION)
+        is_production = settings.env in [AppEnvironment.PILOT, AppEnvironment.PRODUCTION]
         
         # Mapping alias/legacy names if needed (though user wants strict colmap_openmvs)
         if raw_choice in ["openmvs", "colmap_openmvs"]:
