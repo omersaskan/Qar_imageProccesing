@@ -1,7 +1,7 @@
 import hashlib
 import json
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
 import logging
 

@@ -40,6 +40,11 @@ def create_valid_dummy_video(path: Path):
 
 @patch("modules.operations.api.verify_api_key")
 def test_pilot_smoke_pipeline_shell(mock_auth, tmp_path):
+    """
+    Purpose: Workflow progression shell test.
+    upload -> session created -> worker progresses -> reports generated -> training manifest generated.
+    Uses mocks for heavy processing to ensure the shell state machine is correct.
+    """
     orig_data_root = settings.data_root
     settings.data_root = str(tmp_path / "data")
     Path(settings.data_root).mkdir(parents=True, exist_ok=True)
@@ -95,8 +100,9 @@ def test_pilot_smoke_pipeline_shell(mock_auth, tmp_path):
                 processing_time_seconds=10.0
             )
             
+            # The job object is usually the first arg to runner.run
             job = args[0] if args else None
-            if job:
+            if job and hasattr(job, 'job_dir'):
                 manifest_path = Path(job.job_dir) / "manifest.json"
                 with open(manifest_path, "w", encoding="utf-8") as f:
                     json.dump(manifest.model_dump(mode="json"), f)
@@ -118,18 +124,21 @@ def test_pilot_smoke_pipeline_shell(mock_auth, tmp_path):
                 manifest=manifest
             )
 
-        def mock_extract(*args, **kwargs):
-            frames_dir = Path(settings.data_root) / "captures" / session_id / "frames"
+        def mock_extract(video_path, output_dir, *args, **kwargs):
+            frames_dir = Path(output_dir)
             frames_dir.mkdir(parents=True, exist_ok=True)
             paths = []
             for i in range(16):
                 frame = np.zeros((720, 720, 3), dtype=np.uint8)
                 cv2.circle(frame, (360, 360), 120, (255, 255, 255), -1)
-                path_str = str(frames_dir / f"frame_{i:04d}.jpg")
-                cv2.imwrite(path_str, frame)
-                paths.append(path_str)
-            print(f"MOCK EXTRACT RETURNING {len(paths)} FRAMES")
-            return paths, {"fps": 30.0, "duration_sec": 8.5}
+                frame_path = frames_dir / f"frame_{i:04d}.jpg"
+                ok = cv2.imwrite(str(frame_path), frame)
+                assert ok, f"Failed to write frame at {frame_path}"
+                assert frame_path.exists()
+                paths.append(str(frame_path))
+            
+            print(f"MOCK EXTRACT RETURNING {len(paths)} FRAMES to {output_dir}")
+            return paths, {"fps": 30.0, "duration_sec": 8.5, "frame_count": len(paths)}
 
         def mock_coverage(*args, **kwargs):
             return {
@@ -165,7 +174,9 @@ def test_pilot_smoke_pipeline_shell(mock_auth, tmp_path):
                     with patch("modules.capture_workflow.coverage_analyzer.CoverageAnalyzer.analyze_coverage", side_effect=mock_coverage):
                         with patch("modules.qa_validation.validator.AssetValidator.validate", side_effect=mock_validate):
                             # 3. Worker progresses
-                            for _ in range(6):
+                            # Need enough cycles to reach PUBLISHED
+                            # (CREATED -> EXTRACTING -> RECONSTRUCTING -> TEXTURING -> CLEANING -> VALIDATING -> PUBLISHED)
+                            for _ in range(8):
                                 worker_instance._process_pending_sessions()
 
         sess = worker_instance.session_manager.get_session(session_id)
@@ -192,57 +203,83 @@ def test_pilot_smoke_pipeline_shell(mock_auth, tmp_path):
     finally:
         settings.data_root = orig_data_root
 
+
 def test_pilot_smoke_glb_quality(tmp_path):
+    """
+    Purpose: Real asset quality validation.
+    Textured fixture -> GLB export -> inspection -> validation pass.
+    No patching of internal GLB texture/UV logic.
+    """
     orig_data_root = settings.data_root
     settings.data_root = str(tmp_path / "data")
     Path(settings.data_root).mkdir(parents=True, exist_ok=True)
     
     try:
-        from modules.operations.glb_exporter import GLBExporter
+        from modules.export_pipeline.glb_exporter import GLBExporter
         from modules.qa_validation.validator import AssetValidator
         from modules.reconstruction_engine.output_manifest import OutputManifest
 
-        # Create a textured mesh manually
+        # 1. Create a real textured mesh manually as fixture
         mesh = trimesh.creation.box()
-        # Add dummy UVs
+        # Add real UVs and a red texture
+        uvs = np.array([
+            [0, 0], [1, 0], [1, 1], [0, 1],  # front
+            [0, 0], [1, 0], [1, 1], [0, 1],  # back
+            [0, 0], [1, 0], [1, 1], [0, 1],  # left
+            [0, 0], [1, 0], [1, 1], [0, 1],  # right
+            [0, 0], [1, 0], [1, 1], [0, 1],  # top
+            [0, 0], [1, 0], [1, 1], [0, 1],  # bottom
+        ])
+        # Box has 24 vertices usually in trimesh creation
+        if len(mesh.vertices) != 24:
+            mesh = mesh.subdivide() # ensure enough verts or just use a simpler mesh
+            uvs = np.random.rand(len(mesh.vertices), 2)
+
+        tex_img = Image.new("RGBA", (256, 256), color="red")
         mesh.visual = trimesh.visual.TextureVisuals(
-            uv=np.random.rand(len(mesh.vertices), 2),
-            image=Image.new("RGBA", (256, 256), color="red")
+            uv=uvs[:len(mesh.vertices)],
+            image=tex_img
         )
         
-        mesh_dir = tmp_path / "recon_input"
-        mesh_dir.mkdir(parents=True, exist_ok=True)
-        mesh_path = mesh_dir / "mesh.obj"
+        input_dir = tmp_path / "recon_input"
+        input_dir.mkdir(parents=True, exist_ok=True)
+        mesh_path = input_dir / "mesh.obj"
+        # Exporting as OBJ with texture
         mesh.export(str(mesh_path))
         
         manifest = OutputManifest(
             job_id="test_job",
             status="success",
             mesh_path=str(mesh_path),
-            texture_path="",
+            texture_path="", # Embedded in OBJ/Visuals for this test
             log_path="",
             is_stub=False,
             processing_time_seconds=1.0
         )
         
-        exporter = GLBExporter(str(tmp_path / "data"))
-        metrics, glb_path = exporter.export_final_asset("sess_123", str(mesh_path), manifest)
+        # 2. Export to GLB
+        exporter = GLBExporter()
+        glb_output = tmp_path / "data" / "test.glb"
+        glb_output.parent.mkdir(parents=True, exist_ok=True)
         
-        assert Path(glb_path).exists()
+        metrics = exporter.export_to_glb(
+            mesh_path=str(mesh_path),
+            texture_path=None,
+            output_path=str(glb_output)
+        )
         
-        # Inspect GLB
-        glb_scene = trimesh.load(glb_path)
+        assert glb_output.exists()
         
-        # Assuming exporter returns standard metrics
-        assert metrics.get("has_uv", False) == True
-        assert metrics.get("has_embedded_texture", False) == True
-        # Verify it's at least diffuse_textured
-        assert metrics.get("material_semantic_status") in ["diffuse_textured", "pbr_textured"]
+        # 3. Inspect Exported Asset
+        # Verify metrics match real quality requirements
+        assert metrics["has_uv"] is True
+        assert metrics["has_embedded_texture"] is True
+        assert metrics["material_semantic_status"] == "diffuse_textured"
         
-        # Validator passes
+        # 4. Real Validator Pass
         validator = AssetValidator()
-        report = validator.validate(glb_path)
-        assert report.status == "pass"
+        report = validator.validate(str(glb_output))
+        assert report.status == "pass", f"Validator failed: {report.issues}"
 
     finally:
         settings.data_root = orig_data_root
