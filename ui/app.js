@@ -1,4 +1,4 @@
-const API_BASE = "http://localhost:8001/api";
+const API_BASE = window.MESHYSIZ_API_BASE || (window.location.origin !== "null" && window.location.protocol.startsWith("http") && window.location.hostname !== "localhost" ? window.location.origin + "/api" : "http://localhost:8001/api");
 
 const state = {
     products: [],

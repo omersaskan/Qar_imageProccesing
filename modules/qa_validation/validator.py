@@ -71,6 +71,12 @@ class AssetValidator:
         else:
             final_decision = "pass"
 
+        # SPRINT: Customer-ready Guard
+        # Geometry-only or UV-only GLBs must never pass as customer-ready
+        if semantic_status in ["geometry_only", "uv_only", "material_incomplete"]:
+            final_decision = "fail"
+            combined_report = {"semantic_guard": "fail"} # Initialize dict here to be updated below
+
         comp_count = int(iso_stats.get("component_count", 1))
         final_faces = int(iso_stats.get("final_faces", 0))
         initial_faces = max(int(iso_stats.get("initial_faces", 1)), 1)
@@ -90,7 +96,8 @@ class AssetValidator:
         # New: Material Quality Grade
         material_grade = self._calculate_material_grade(asset_data)
 
-        combined_report = {}
+        if "combined_report" not in locals():
+            combined_report = {}
         combined_report.update(contamination_decisions)
         combined_report.update(texture_integrity_decisions)
         combined_report.update(delivery_decisions)

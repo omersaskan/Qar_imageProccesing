@@ -25,7 +25,18 @@ class Settings(BaseSettings):
 
     # Binaries
     colmap_path: str = Field(r"C:\colmap\colmap.exe", validation_alias="RECON_ENGINE_PATH")
-    openmvs_path: str = Field(r"C:\openmvs\bin", validation_alias="OPENMVS_BIN_PATH")
+    openmvs_path: str = Field(
+        r"C:\openmvs\bin", 
+        validation_alias="OPENMVS_BIN_PATH"
+    )
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # SPRINT: OpenMVS env harmonization
+        # OPENMVS_BIN_PATH wins, but we fallback to OPENMVS_BIN if set
+        import os
+        if not os.environ.get("OPENMVS_BIN_PATH") and os.environ.get("OPENMVS_BIN"):
+            self.openmvs_path = os.environ.get("OPENMVS_BIN")
     use_gpu: bool = Field(True, validation_alias="RECON_USE_GPU")
 
     # Retention
@@ -140,6 +151,54 @@ class Settings(BaseSettings):
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "version_line": None, "error": str(exc)}
 
+    def probe_openmvs_binaries(self) -> dict:
+        """
+        Probe OpenMVS binaries to verify they are executable.
+        Checks for InterfaceCOLMAP, TextureMesh, DensifyPointCloud, and ReconstructMesh.
+        """
+        import subprocess
+        bin_dir = Path(self.openmvs_path)
+        
+        if not bin_dir.exists() or not bin_dir.is_dir():
+            return {
+                "ok": False,
+                "error": f"OpenMVS binary directory not found at {self.openmvs_path}",
+                "missing_binaries": ["InterfaceCOLMAP", "TextureMesh", "DensifyPointCloud", "ReconstructMesh"]
+            }
+
+        binaries_to_check = ["InterfaceCOLMAP", "TextureMesh", "DensifyPointCloud", "ReconstructMesh"]
+        missing = []
+        
+        # On non-Windows, check without .exe
+        is_windows = __import__("os").name == "nt"
+        
+        for bin_name in binaries_to_check:
+            exe_name = bin_name + ".exe" if is_windows else bin_name
+            bin_path = bin_dir / exe_name
+            
+            if not bin_path.exists():
+                # Fallback check without extension on Windows just in case
+                if is_windows and (bin_dir / bin_name).exists():
+                    bin_path = bin_dir / bin_name
+                else:
+                    missing.append(bin_name)
+                    continue
+
+            try:
+                # Running with --help to see if it executes
+                subprocess.run([str(bin_path), "--help"], capture_output=True, text=True, timeout=5)
+            except Exception:
+                missing.append(bin_name)
+
+        if missing:
+            return {
+                "ok": False,
+                "error": f"Missing or unexecutable OpenMVS binaries: {', '.join(missing)}",
+                "missing_binaries": missing
+            }
+
+        return {"ok": True, "error": None, "missing_binaries": []}
+
     def check_free_disk_gb(self) -> float:
         """
         Returns the free disk space (in GB) on the partition that hosts data_root.
@@ -176,6 +235,10 @@ class Settings(BaseSettings):
                     logger.warning(
                         f"CRITICAL: Missing ML dependencies in {getattr(self.env, 'value', self.env)}: {missing_ml}"
                     )
+            
+            # Pilot/Production Guard for Simulated Pipeline
+            if self.recon_pipeline == ReconstructionPipeline.SIMULATED.value:
+                raise ValueError(f"Simulated reconstruction pipeline is strictly prohibited in {getattr(self.env, 'value', self.env)} environment.")
 
 
 # Singleton instance

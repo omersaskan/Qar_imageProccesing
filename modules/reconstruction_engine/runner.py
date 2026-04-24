@@ -239,6 +239,15 @@ class ReconstructionRunner:
         elif results.get("mesher_used") in ["poisson", "delaunay"]:
             score += 2000.0
             
+        # SPRINT: Early Quality Signal for Texturing
+        texture_path = results.get("texture_path")
+        has_texture = texture_path and Path(texture_path).exists()
+        
+        if has_texture:
+            score += 3000.0  # Prefer textured OpenMVS output
+        elif settings.require_textured_output:
+            score -= 4000.0  # Penalize geometry-only when texture is strictly required
+            
         return score
 
     def run(self, job: ReconstructionJob) -> OutputManifest:

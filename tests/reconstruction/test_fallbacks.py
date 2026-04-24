@@ -79,7 +79,7 @@ def test_fallback_to_denser_frames(session_dir, tmp_path):
         denser_frames = [f"frame_{i:04d}.jpg" for i in range(50)]
         
         # Mocking _validate_input_frames and _validate_mesh_artifact to avoid real trimesh/CV2 calls
-        with patch.object(ReconstructionRunner, "_validate_input_frames", return_value=job.input_frames), \
+        with patch.object(ReconstructionRunner, "_validate_input_frames", side_effect=lambda x: x), \
              patch.object(ReconstructionRunner, "_validate_mesh_artifact", return_value=(100, 200)), \
              patch("modules.reconstruction_engine.runner.calculate_checksum", return_value="fake_hash"), \
              patch("modules.capture_workflow.frame_extractor.FrameExtractor") as MockExtractor:
@@ -140,7 +140,7 @@ def test_unmasked_fallback_opt_in(session_dir, tmp_path):
         # Setup MockAdapter to fail on first call if density is not what we want
         adapter.run_reconstruction = MagicMock(side_effect=InsufficientReconstructionError("weak"))
         
-        with patch.object(ReconstructionRunner, "_validate_input_frames", return_value=job.input_frames), \
+        with patch.object(ReconstructionRunner, "_validate_input_frames", side_effect=lambda x: x), \
              pytest.raises(InsufficientReconstructionError):
             runner.run(job)
             
@@ -162,7 +162,7 @@ def test_unmasked_fallback_opt_in(session_dir, tmp_path):
         
         runner = ReconstructionRunner(adapter=adapter)
         
-        with patch.object(ReconstructionRunner, "_validate_input_frames", return_value=job.input_frames), \
+        with patch.object(ReconstructionRunner, "_validate_input_frames", side_effect=lambda x: x), \
              patch.object(ReconstructionRunner, "_validate_mesh_artifact", return_value=(10, 20)), \
              patch("modules.reconstruction_engine.runner.calculate_checksum", return_value="h"):
             runner.run(job)
@@ -188,7 +188,7 @@ def test_honest_failure_no_silent_success(session_dir, tmp_path):
             job_dir=str(tmp_path / "jobs" / "job_fail")
         )
         
-        with patch.object(ReconstructionRunner, "_validate_input_frames", return_value=job.input_frames), \
+        with patch.object(ReconstructionRunner, "_validate_input_frames", side_effect=lambda x: x), \
              pytest.raises(InsufficientReconstructionError) as excinfo:
             runner.run(job)
             

@@ -223,15 +223,26 @@ class GLBExporter:
         with open(output_path, "wb") as glb_file:
             glb_file.write(glb_bytes)
 
+        # SPRINT: Reload exported GLB to confirm embedded texture
+        inspection_result = self.inspect_exported_asset(output_path)
+        actual_texture_success = inspection_result["has_embedded_texture"]
+
+        if not actual_texture_success and texture_path and visual_info["has_uv"]:
+            texture_warning = "Texture file and UV existed, but embedded texture failed during export."
+        elif not actual_texture_success and texture_path and not visual_info["has_uv"]:
+            texture_warning = "Texture file exists but mesh has no UV coordinates (Geometry-only fallback)"
+
         result = {
             "format": "GLB",
             "filesize": os.path.getsize(output_path),
             "vertex_count": total_verts,
             "face_count": total_faces,
-            "has_uv": visual_info["has_uv"],
-            "has_material": visual_info["has_material"],
+            "has_uv": inspection_result["has_uv"],
+            "has_material": inspection_result["has_material"],
             "used_texture_path": used_texture_path,
-            "texture_applied_successfully": texture_applied_successfully,
+            "texture_applied_successfully": actual_texture_success,
+            "material_semantic_status": inspection_result["material_semantic_status"],
+            "texture_integrity_status": inspection_result["texture_integrity_status"]
         }
 
         if texture_warning:

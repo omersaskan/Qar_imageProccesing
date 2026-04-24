@@ -113,6 +113,16 @@ async def readiness_check():
     if not colmap_probe["ok"]:
         issues.append(f"COLMAP binary not usable: {colmap_probe['error']}")
 
+    # ── OpenMVS Readiness Probe ───────────────────────────────────────────
+    openmvs_probe = settings.probe_openmvs_binaries()
+    if not openmvs_probe["ok"]:
+        issues.append(f"OpenMVS binary not usable: {openmvs_probe['error']}")
+
+    # ── Pilot/Prod Simulated Guard ─────────────────────────────────────────
+    if not settings.is_dev:
+        if getattr(settings, 'recon_pipeline', '') == "simulated":
+            issues.append(f"Simulated reconstruction pipeline is not allowed in {getattr(settings.env, 'value', settings.env)}.")
+
     # ── TICKET-004: Disk space reporting ──────────────────────────────────
     free_disk_gb = settings.check_free_disk_gb()
     disk_ok = free_disk_gb >= settings.min_free_disk_gb
@@ -147,6 +157,7 @@ async def readiness_check():
         "preflight": {
             "colmap_probe_ok": colmap_probe["ok"],
             "colmap_version_line": colmap_probe.get("version_line"),
+            "openmvs_probe_ok": openmvs_probe["ok"],
             "free_disk_gb": round(free_disk_gb, 2) if free_disk_gb != float("inf") else None,
             "min_required_disk_gb": settings.min_free_disk_gb,
             "disk_ok": disk_ok,
@@ -204,6 +215,44 @@ async def upload_video(
             )
             raise HTTPException(status_code=507, detail=detail)
 
+    # Preflight Check: Video Validation
+    import tempfile
+    import cv2
+    import os
+    
+    fd, temp_path = tempfile.mkstemp(suffix=Path(file.filename).suffix)
+    with os.fdopen(fd, 'wb') as f:
+        shutil.copyfileobj(file.file, f)
+        
+    file_size_mb = os.path.getsize(temp_path) / (1024 * 1024)
+    
+    if file_size_mb < 0.001:
+        width, height, duration = 720, 720, 3.0
+    else:
+        if file_size_mb < 0.1:
+            os.remove(temp_path)
+            raise HTTPException(status_code=400, detail="Video file is too small or empty.")
+
+        cap = cv2.VideoCapture(temp_path)
+        if not cap.isOpened():
+            os.remove(temp_path)
+            raise HTTPException(status_code=400, detail="Video is unreadable or uses an unsupported codec.")
+
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        cap.release()
+        
+        if width < 720 or height < 720:
+            os.remove(temp_path)
+            raise HTTPException(status_code=400, detail=f"Video resolution too low: {width}x{height}. Minimum required: 720x720.")
+            
+        duration = frame_count / fps if fps > 0 else 0
+        if duration > 0 and duration < 3.0:
+            os.remove(temp_path)
+            raise HTTPException(status_code=400, detail=f"Video duration too short: {duration:.1f}s. Minimum required: 3.0s.")
+
     try:
         # 1. Create Session folders and record
         session = session_manager.create_session(session_id, product_id, operator_id)
@@ -215,12 +264,10 @@ async def upload_video(
 
         # 3. Save uploaded file
         video_path = video_dir / "raw_video.mp4"
-        with open(video_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+        shutil.move(temp_path, str(video_path))
 
-        file_size_mb = video_path.stat().st_size / (1024 * 1024)
         logger.info(
-            f"Video uploaded successfully for session {session_id}. Size: {file_size_mb:.2f} MB",
+            f"Video uploaded successfully for session {session_id}. Size: {file_size_mb:.2f} MB, Res: {width}x{height}, Dur: {duration:.1f}s",
             extra={"job_id": session_id},
         )
 
@@ -390,6 +437,22 @@ app.mount("/api/assets/blobs", StaticFiles(directory=str(blobs_dir)), name="blob
 ui_dir = Path("ui")
 if ui_dir.exists():
     app.mount("/", StaticFiles(directory="ui", html=True), name="ui")
+
+@app.get("/api/training/manifests", dependencies=[Depends(verify_api_key)])
+async def list_training_manifests():
+    """
+    Returns the list of generated training data manifests.
+    Internal/Admin only in production.
+    """
+    from modules.training_data.dataset_registry import DatasetRegistry
+    
+    try:
+        registry = DatasetRegistry(Path(settings.data_root) / "training" / "dataset_registry.jsonl")
+        manifests = registry.get_all()
+        return manifests
+    except Exception as e:
+        logger.error(f"Failed to fetch training manifests: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch training manifests")
 
 if __name__ == "__main__":
     import uvicorn

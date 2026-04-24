@@ -10,7 +10,8 @@ class OpenMVSTexturer:
 
     def __init__(self, bin_dir: str = None):
         if not bin_dir:
-            self.bin_dir = Path(os.getenv("OPENMVS_BIN", r"C:\openmvs\bin"))
+            from modules.operations.settings import settings
+            self.bin_dir = Path(settings.openmvs_path)
         else:
             self.bin_dir = Path(bin_dir)
 

@@ -386,6 +386,7 @@ class IngestionWorker:
             updated = self.session_manager.get_session(session_id)
             if updated:
                 self._update_guidance(updated)
+                self._generate_training_manifest(updated)
         except Exception as e:
             logger.error(f"Failed to mark session {session_id} as FAILED: {e}")
 
@@ -798,7 +799,26 @@ class IngestionWorker:
             "last_pipeline_stage": next_status.value if next_status else AssetStatus.VALIDATED.value,
             "failure_reason": None,
         }
-        return self._persist_session(session, new_status=next_status, **fields)
+        res = self._persist_session(session, new_status=next_status, **fields)
+        self._generate_training_manifest(res)
+        return res
+
+    def _generate_training_manifest(self, session: CaptureSession):
+        from modules.training_data.manifest_builder import TrainingManifestBuilder
+        from modules.training_data.dataset_registry import DatasetRegistry
+        
+        try:
+            builder = TrainingManifestBuilder(data_root=self.data_root)
+            manifest = builder.build(
+                session_id=session.session_id,
+                product_id=session.product_id,
+                eligible_for_training=getattr(session, "eligible_for_training", False)
+            )
+            
+            registry = DatasetRegistry(self.data_root / "training" / "dataset_registry.jsonl")
+            registry.register(manifest)
+        except Exception as e:
+            logger.warning(f"Best-effort training manifest generation failed for {session.session_id}: {e}")
 
     def _publish_asset(
         self,
