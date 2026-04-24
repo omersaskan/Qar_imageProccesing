@@ -243,10 +243,41 @@ class ReconstructionRunner:
         texture_path = results.get("texture_path")
         has_texture = texture_path and Path(texture_path).exists()
         
+        texture_penalty = 0.0
         if has_texture:
             score += 3000.0  # Prefer textured OpenMVS output
         elif settings.require_textured_output:
-            score -= 4000.0  # Penalize geometry-only when texture is strictly required
+            texture_penalty = -4000.0
+            score += texture_penalty  # Penalize geometry-only when texture is strictly required
+            
+        mesh_load_probe_ok = False
+        mesh_probe_vertex_count = 0
+        mesh_probe_face_count = 0
+        mesh_probe_has_uv = False
+        
+        mesh_path = results.get("mesh_path")
+        if mesh_path and Path(mesh_path).exists():
+            try:
+                mesh = trimesh.load(mesh_path, force="mesh")
+                if isinstance(mesh, trimesh.Scene):
+                    mesh = mesh.dump(concatenate=True)
+                if isinstance(mesh, trimesh.Trimesh):
+                    mesh_load_probe_ok = True
+                    mesh_probe_vertex_count = len(mesh.vertices)
+                    mesh_probe_face_count = len(mesh.faces)
+                    if hasattr(mesh.visual, "uv") and mesh.visual.uv is not None and len(mesh.visual.uv) > 0:
+                        mesh_probe_has_uv = True
+            except Exception:
+                pass
+                
+        # Inject explicit meta fields
+        results["has_texture_file"] = has_texture
+        results["require_textured_output"] = settings.require_textured_output
+        results["texture_required_penalty"] = texture_penalty
+        results["mesh_load_probe_ok"] = mesh_load_probe_ok
+        results["mesh_probe_vertex_count"] = mesh_probe_vertex_count
+        results["mesh_probe_face_count"] = mesh_probe_face_count
+        results["mesh_probe_has_uv"] = mesh_probe_has_uv
             
         return score
 

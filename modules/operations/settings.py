@@ -78,6 +78,14 @@ class Settings(BaseSettings):
     # accepted. Stricter environments should raise this. Default: 5 GB.
     min_free_disk_gb: float = Field(5.0, validation_alias="MIN_FREE_DISK_GB")
 
+    # Upload Preflight Strict Defaults
+    max_upload_mb: float = Field(500.0, validation_alias="MAX_UPLOAD_MB")
+    min_video_duration_sec: float = Field(8.0, validation_alias="MIN_VIDEO_DURATION_SEC")
+    max_video_duration_sec: float = Field(120.0, validation_alias="MAX_VIDEO_DURATION_SEC")
+    min_video_width: int = Field(720, validation_alias="MIN_VIDEO_WIDTH")
+    min_video_height: int = Field(720, validation_alias="MIN_VIDEO_HEIGHT")
+    min_video_fps: float = Field(20.0, validation_alias="MIN_VIDEO_FPS")
+
     # --- RECONSTRUCTION ENGINES ---
     # Global switch for the default pipeline: "colmap_dense" or "colmap_openmvs"
     recon_pipeline: str = Field("colmap_dense", validation_alias="RECON_PIPELINE")

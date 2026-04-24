@@ -812,10 +812,11 @@ class IngestionWorker:
             manifest = builder.build(
                 session_id=session.session_id,
                 product_id=session.product_id,
-                eligible_for_training=getattr(session, "eligible_for_training", False)
+                eligible_for_training=getattr(session, "eligible_for_training", False),
+                consent_status=getattr(session, "consent_status", "unknown")
             )
             
-            registry = DatasetRegistry(self.data_root / "training" / "dataset_registry.jsonl")
+            registry = DatasetRegistry(self.data_root / "training_registry" / "index.jsonl")
             registry.register(manifest)
         except Exception as e:
             logger.warning(f"Best-effort training manifest generation failed for {session.session_id}: {e}")

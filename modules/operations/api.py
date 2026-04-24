@@ -221,37 +221,49 @@ async def upload_video(
     import os
     
     fd, temp_path = tempfile.mkstemp(suffix=Path(file.filename).suffix)
-    with os.fdopen(fd, 'wb') as f:
-        shutil.copyfileobj(file.file, f)
+    try:
+        with os.fdopen(fd, 'wb') as f:
+            shutil.copyfileobj(file.file, f)
+            
+        file_size_mb = os.path.getsize(temp_path) / (1024 * 1024)
         
-    file_size_mb = os.path.getsize(temp_path) / (1024 * 1024)
-    
-    if file_size_mb < 0.001:
-        width, height, duration = 720, 720, 3.0
-    else:
-        if file_size_mb < 0.1:
-            os.remove(temp_path)
+        if file_size_mb == 0 or file_size_mb < 0.1:
             raise HTTPException(status_code=400, detail="Video file is too small or empty.")
+            
+        if file_size_mb > settings.max_upload_mb:
+            raise HTTPException(status_code=400, detail=f"File size exceeds maximum allowed ({settings.max_upload_mb} MB).")
 
         cap = cv2.VideoCapture(temp_path)
-        if not cap.isOpened():
-            os.remove(temp_path)
-            raise HTTPException(status_code=400, detail="Video is unreadable or uses an unsupported codec.")
+        try:
+            if not cap.isOpened():
+                raise HTTPException(status_code=400, detail="Video is unreadable or uses an unsupported codec.")
 
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        cap.release()
-        
-        if width < 720 or height < 720:
-            os.remove(temp_path)
-            raise HTTPException(status_code=400, detail=f"Video resolution too low: {width}x{height}. Minimum required: 720x720.")
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        finally:
+            cap.release()
+            
+        if width < settings.min_video_width or height < settings.min_video_height:
+            raise HTTPException(status_code=400, detail=f"Video resolution too low: {width}x{height}. Minimum required: {settings.min_video_width}x{settings.min_video_height}.")
+            
+        if fps < settings.min_video_fps:
+            raise HTTPException(status_code=400, detail=f"Video FPS too low: {fps:.1f}. Minimum required: {settings.min_video_fps}.")
             
         duration = frame_count / fps if fps > 0 else 0
-        if duration > 0 and duration < 3.0:
-            os.remove(temp_path)
-            raise HTTPException(status_code=400, detail=f"Video duration too short: {duration:.1f}s. Minimum required: 3.0s.")
+        if duration < settings.min_video_duration_sec:
+            raise HTTPException(status_code=400, detail=f"Video duration too short: {duration:.1f}s. Minimum required: {settings.min_video_duration_sec}s.")
+        if duration > settings.max_video_duration_sec:
+            raise HTTPException(status_code=400, detail=f"Video duration too long: {duration:.1f}s. Maximum allowed: {settings.max_video_duration_sec}s.")
+            
+        # If all checks pass, move the file safely later
+    except HTTPException:
+        os.remove(temp_path)
+        raise
+    except Exception as e:
+        os.remove(temp_path)
+        raise HTTPException(status_code=500, detail=f"Error validating video: {e}")
 
     try:
         # 1. Create Session folders and record

@@ -174,13 +174,15 @@ class GLBExporter:
                                 except Exception:
                                     pass
 
-                            # If no material exists at all, assign a new TextureVisuals
-                            if existing_mat is None:
-                                m.visual = trimesh.visual.TextureVisuals(
-                                    uv=m.visual.uv,
-                                    material=material,
-                                )
-                                texture_applied_successfully = True
+                            # If existing_mat does not support textures, or no material exists, assign a new TextureVisuals
+                            import logging
+                            logger = logging.getLogger("glb_exporter")
+                            logger.warning("Forcing TextureVisuals fallback for unsupported material.")
+                            m.visual = trimesh.visual.TextureVisuals(
+                                uv=m.visual.uv,
+                                material=material,
+                            )
+                            texture_applied_successfully = True
 
                     visual_info["has_uv"] = True
                     visual_info["has_material"] = True
