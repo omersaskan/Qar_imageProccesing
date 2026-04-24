@@ -1,0 +1,23 @@
+# === Production-Critical (pinned for reproducibility) ===
+# Pinned to versions validated against the current pipeline.
+# COLMAP+OpenMVS adapter, GLB exporter, and QA validation
+# all depend on stable trimesh Scene/Trimesh API.
+trimesh>=4.11,<4.12
+numpy>=2.2,<2.5
+opencv-python>=4.10,<4.14
+
+# === Core Framework ===
+pydantic>=2.0.0,<3.0.0
+pydantic-settings>=2.0.0,<3.0.0
+Pillow>=10.0.0
+fastapi>=0.100.0
+uvicorn>=0.23.0
+python-multipart>=0.0.6
+
+# === Mesh Processing ===
+xatlas
+fast-simplification
+
+# === ML / Segmentation ===
+rembg
+onnxruntime

@@ -1,0 +1,117 @@
+# Production-grade CUDA Image for Reconstruction Engine
+# Targets: RunPod (NVIDIA GPU required)
+
+# Stage 1: Build Environment
+FROM nvidia/cuda:11.8.0-devel-ubuntu22.04 AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install Build Dependencies
+RUN apt-get update && apt-get install -y \
+    cmake ninja-build git wget \
+    libgoogle-glog-dev libgflags-dev \
+    libboost-all-dev \
+    libfreeimage-dev \
+    libsuitesparse-dev \
+    libceres-dev \
+    libcgal-dev \
+    libopengl-dev \
+    libopencv-dev \
+    libglfw3-dev \
+    libsqlite3-dev \
+    libglew-dev \
+    libflann-dev \
+    libeigen3-dev \
+    libmetis-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+
+# Build COLMAP 3.10
+# CMAKE_CUDA_ARCHITECTURES must be explicit because GHA runners lack a GPU,
+# so "native" detection fails. Targets: Turing(75), Ampere(80,86), Ada(89).
+RUN git clone --branch 3.10 https://github.com/colmap/colmap.git && \
+    cd colmap && mkdir build && cd build && \
+    cmake .. -GNinja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCUDA_ENABLED=ON \
+    -DGUI_ENABLED=OFF \
+    -DCMAKE_CUDA_ARCHITECTURES="75;80;86;89" && \
+    ninja install
+
+# Build OpenMVS
+# Requires VCG library
+RUN git clone https://github.com/cnr-isti-vclab/vcglib.git /src/vcglib
+RUN git clone --branch v2.3.0 --depth 1 https://github.com/cdcseacave/openMVS.git && \
+    cd openMVS && mkdir -p build && cd build && \
+    cmake .. -GNinja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DVCG_ROOT=/src/vcglib \
+    -DCUDA_CUDA_LIBRARY=/usr/local/cuda/lib64/stubs/libcuda.so && \
+    ninja install
+
+# Stage 2: Final Production Runtime
+FROM nvidia/cuda:11.8.0-runtime-ubuntu22.04
+
+# Runtime Environment Variables
+ENV DEBIAN_FRONTEND=noninteractive
+ENV RECON_ENGINE_PATH=/usr/local/bin/colmap
+ENV OPENMVS_BIN_PATH=/usr/local/bin
+ENV RECON_PIPELINE=colmap_dense
+ENV RECON_USE_GPU=true
+ENV PYTHONUNBUFFERED=1
+# Production mode activates validate_setup() guards, API key enforcement,
+# and blocks SimulatedAdapter usage.
+ENV ENV=production
+
+# Install Runtime Dependencies
+RUN apt-get update && apt-get install -y \
+    python3 python3-pip \
+    libgoogle-glog0v5 libgflags2.2 \
+    libboost-filesystem1.74.0 \
+    libboost-program-options1.74.0 \
+    libboost-serialization1.74.0 \
+    libboost-system1.74.0 \
+    libboost-iostreams1.74.0 \
+    libboost-graph1.74.0 \
+    libfreeimage3 \
+    libsuitesparse-dev \
+    libceres2 \
+    libsqlite3-0 \
+    libopencv-core4.5d \
+    libopencv-imgproc4.5d \
+    libopencv-videoio4.5d \
+    libopengl0 libgl1 libglu1-mesa libglib2.0-0 \
+    libglew2.2 \
+    libflann1.9 \
+    libatlas-base-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy binaries and libs from builder
+COPY --from=builder /usr/local/bin/colmap /usr/local/bin/colmap
+# OpenMVS v2.3.0 installs to /usr/local/bin/OpenMVS/ by default
+COPY --from=builder /usr/local/bin/OpenMVS/DensifyPointCloud /usr/local/bin/DensifyPointCloud
+COPY --from=builder /usr/local/bin/OpenMVS/ReconstructMesh /usr/local/bin/ReconstructMesh
+COPY --from=builder /usr/local/bin/OpenMVS/RefineMesh /usr/local/bin/RefineMesh
+COPY --from=builder /usr/local/bin/OpenMVS/TextureMesh /usr/local/bin/TextureMesh
+COPY --from=builder /usr/local/bin/OpenMVS/InterfaceCOLMAP /usr/local/bin/InterfaceCOLMAP
+COPY --from=builder /usr/local/lib/ /usr/local/lib/
+RUN ldconfig
+
+WORKDIR /app
+
+# Upgrade pip first — Ubuntu 22.04's bundled pip is too old to resolve
+# modern package versions from PyPI.
+# Install Python requirements
+COPY requirements.txt .
+RUN pip3 install --no-cache-dir --upgrade pip \
+    && pip3 install --no-cache-dir -r requirements.txt
+
+# Copy application source
+COPY . .
+
+# Finalize permissions
+RUN chmod +x smoke_check.sh
+
+# Entry point is usually overridden by RunPod, but we default to smoke check
+CMD ["./smoke_check.sh"]
