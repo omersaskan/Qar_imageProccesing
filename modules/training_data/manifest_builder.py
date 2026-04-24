@@ -31,6 +31,34 @@ class TrainingManifestBuilder:
             logger.warning(f"Failed to read or parse {path}: {e}")
             return {}
 
+    def _coerce_bbox(self, bbox_data: Any) -> Optional[List[float]]:
+        """
+        Coerces various bbox formats into a list of 3 floats [x, y, z].
+        Supports:
+        - [x, y, z]
+        - {"x": 1, "y": 2, "z": 3}
+        - {"width": 1, "height": 2, "depth": 3}
+        - {"size": [1, 2, 3]}
+        """
+        if not bbox_data:
+            return None
+            
+        if isinstance(bbox_data, list) and len(bbox_data) == 3:
+            return [float(v) for v in bbox_data]
+            
+        if isinstance(bbox_data, dict):
+            # Check for {"x", "y", "z"}
+            if all(k in bbox_data for k in ("x", "y", "z")):
+                return [float(bbox_data["x"]), float(bbox_data["y"]), float(bbox_data["z"])]
+            # Check for {"width", "height", "depth"}
+            if all(k in bbox_data for k in ("width", "height", "depth")):
+                return [float(bbox_data["width"]), float(bbox_data["height"]), float(bbox_data["depth"])]
+            # Check for {"size": [...]}
+            if "size" in bbox_data and isinstance(bbox_data["size"], list) and len(bbox_data["size"]) == 3:
+                return [float(v) for v in bbox_data["size"]]
+                
+        return None
+
     def build(self, session_id: str, product_id: str, eligible_for_training: bool = False, consent_status: str = "unknown") -> TrainingDataManifest:
         # Enforce eligible_for_training=False if consent is unknown
         if consent_status == "unknown":
@@ -79,7 +107,7 @@ class TrainingManifestBuilder:
             resolution=quality_report.get("resolution"),
             fps=float(quality_report.get("fps", 0.0)),
             frame_count=int(quality_report.get("frame_count", len(session_data.get("extracted_frames", [])))),
-            bounding_box=export_metrics.get("bbox")  # we can use export_metrics bbox as it represents the captured item bounds
+            bounding_box=self._coerce_bbox(export_metrics.get("bbox"))
         )
         
         # Populate Reconstruction
@@ -94,14 +122,15 @@ class TrainingManifestBuilder:
                 
         if best_attempt:
             metrics = best_attempt.get("metrics", {})
-            registered_images = best_attempt.get("registered_images", metrics.get("registered_images", 0))
+            # Vertex/Face counts should come from explicit fields if available, otherwise 0
+            # Density metrics are kept separate
             sparse_points = best_attempt.get("sparse_points", metrics.get("sparse_points", 0))
             dense_points_fused = best_attempt.get("dense_points_fused", metrics.get("dense_points_fused", 0))
             mesher_used = best_attempt.get("mesher_used", metrics.get("mesher_used"))
 
             manifest.reconstruction = ReconstructionTrainingMetrics(
-                vertex_count=int(sparse_points), # Sparse or dense? Using available
-                face_count=0, # not usually in audit
+                vertex_count=int(best_attempt.get("vertex_count", 0)),
+                face_count=int(best_attempt.get("face_count", 0)),
                 density_metrics={"sparse_points": sparse_points, "dense_points_fused": dense_points_fused},
                 mesher_used=mesher_used
             )
@@ -142,11 +171,27 @@ class TrainingManifestBuilder:
             frames_dir=_rel(frames)
         )
         
-        # We can try to populate some labels if validation_report exists
-        # In a real system, a dedicated labeling pass would happen. We'll do a best-effort.
+        # Populate Labels
+        # 1. Labels from export_metrics
+        status = export_metrics.get("material_semantic_status", "geometry_only")
+        if status == "geometry_only":
+            manifest.labels.asset_labels.append("geometry_only")
+        elif status == "diffuse_textured":
+            manifest.labels.asset_labels.append("draft_asset")
+        elif status == "pbr_textured":
+            manifest.labels.asset_labels.append("customer_ready")
+            
+        if export_metrics.get("texture_integrity_status") == "missing":
+            manifest.labels.asset_labels.append("texture_missing")
+            
+        if not export_metrics.get("has_uv", True):
+            manifest.labels.asset_labels.append("uv_missing")
+
+        # 2. Labels from validation_report
         if validation_report:
             if validation_report.get("final_decision") == "pass":
-                manifest.labels.asset_labels.append("customer_ready")
+                if "customer_ready" not in manifest.labels.asset_labels:
+                    manifest.labels.asset_labels.append("customer_ready")
             else:
                 contam = validation_report.get("contamination_report", "validation_failed")
                 if isinstance(contam, dict):

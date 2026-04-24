@@ -54,7 +54,7 @@ import threading
 import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from modules.asset_cleanup_pipeline.cleaner import AssetCleaner
 from modules.asset_cleanup_pipeline.normalizer import NormalizedMetadata
