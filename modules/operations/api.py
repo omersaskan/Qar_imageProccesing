@@ -290,8 +290,12 @@ async def upload_video(
             "path": str(video_path),
         }
     except HTTPException:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
         raise
     except Exception as e:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
         logger.error(f"Upload failed: {str(e)}")
         raise HTTPException(
             status_code=500,
@@ -459,7 +463,7 @@ async def list_training_manifests():
     from modules.training_data.dataset_registry import DatasetRegistry
     
     try:
-        registry = DatasetRegistry(Path(settings.data_root) / "training" / "dataset_registry.jsonl")
+        registry = DatasetRegistry(Path(settings.data_root) / "training_registry" / "index.jsonl")
         manifests = registry.get_all()
         return manifests
     except Exception as e:

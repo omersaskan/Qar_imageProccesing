@@ -34,6 +34,10 @@ This report outlines the precise changes and validations performed during the P0
   - `test_upload_empty_file`
   - `test_upload_unreadable_video`
   - `test_upload_short_video`
+  - `test_upload_max_size` (Mini-Fix)
+  - `test_upload_min_fps` (Mini-Fix)
+  - `test_upload_long_video` (Mini-Fix)
+  - `test_upload_min_resolution` (Mini-Fix)
 - `tests/reconstruction/test_training_data_manifests.py` (UPDATED)
   - `test_training_manifest_builder_with_missing_reports`
   - `test_dataset_registry_latest_wins`
@@ -54,12 +58,12 @@ platform win32 -- Python 3.12.7, pytest-8.3.4, pluggy-1.5.0
 rootdir: C:\modelPlate
 configfile: pyproject.toml
 plugins: anyio-4.7.0, dash-3.2.0
-collected 124 items
+collected 128 items
 
 ...
-====================== 124 passed, 13 warnings in 5.17s =======================
+====================== 128 passed, 13 warnings in 5.38s =======================
 ```
-All 124 component integration, pipeline integrity, and module unit tests executed successfully. No skipped tests.
+All 128 component integration, pipeline integrity, and module unit tests executed successfully. No skipped tests.
 
 ### Remaining Risks
 - **JSONL Scale Limitations:** While latest-wins deduplication acts as an effective proxy for updating, massive `index.jsonl` registries may eventually induce linear latency spikes during reads (`get_all()`). A future index compaction daemon or database migration is recommended before production scaling.

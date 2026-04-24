@@ -94,11 +94,16 @@ class TrainingManifestBuilder:
                 
         if best_attempt:
             metrics = best_attempt.get("metrics", {})
+            registered_images = best_attempt.get("registered_images", metrics.get("registered_images", 0))
+            sparse_points = best_attempt.get("sparse_points", metrics.get("sparse_points", 0))
+            dense_points_fused = best_attempt.get("dense_points_fused", metrics.get("dense_points_fused", 0))
+            mesher_used = best_attempt.get("mesher_used", metrics.get("mesher_used"))
+
             manifest.reconstruction = ReconstructionTrainingMetrics(
-                vertex_count=int(metrics.get("sparse_points", 0)), # Sparse or dense? Using available
+                vertex_count=int(sparse_points), # Sparse or dense? Using available
                 face_count=0, # not usually in audit
-                density_metrics={"sparse_points": metrics.get("sparse_points", 0), "dense_points_fused": metrics.get("dense_points_fused", 0)},
-                mesher_used=metrics.get("mesher_used")
+                density_metrics={"sparse_points": sparse_points, "dense_points_fused": dense_points_fused},
+                mesher_used=mesher_used
             )
             
         # Populate Export
@@ -143,7 +148,20 @@ class TrainingManifestBuilder:
             if validation_report.get("final_decision") == "pass":
                 manifest.labels.asset_labels.append("customer_ready")
             else:
-                manifest.labels.failure_reasons.append(validation_report.get("contamination_report", "validation_failed"))
+                contam = validation_report.get("contamination_report", "validation_failed")
+                if isinstance(contam, dict):
+                    manifest.labels.failure_reasons.append("validation_failed")
+                elif isinstance(contam, str):
+                    try:
+                        from .label_taxonomy import FailureReasonLabel
+                        if any(contam == item.value for item in FailureReasonLabel):
+                            manifest.labels.failure_reasons.append(contam)
+                        else:
+                            manifest.labels.failure_reasons.append("validation_failed")
+                    except Exception:
+                        manifest.labels.failure_reasons.append("validation_failed")
+                else:
+                    manifest.labels.failure_reasons.append("validation_failed")
 
         # Write to both expected locations
         manifest_json = manifest.model_dump_json(indent=2)
