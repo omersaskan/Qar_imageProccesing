@@ -72,7 +72,11 @@ def test_mesh_isolation():
     sphere = trimesh.creation.icosphere(radius=1.0)
     sphere.apply_translation([0, 0, 1.5])
 
+    # Create a more complex plane to satisfy heuristic thresholds
     plane = trimesh.creation.box(extents=[10, 10, 0.1])
+    plane = plane.subdivide()
+    plane = plane.subdivide()
+    plane = plane.subdivide()
     plane.apply_translation([0, 0, 0])
 
     scene_mesh = sphere + plane

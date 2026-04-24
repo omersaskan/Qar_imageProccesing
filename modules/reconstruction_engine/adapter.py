@@ -262,12 +262,12 @@ class OpenMVSCommandBuilder:
             str(workspace_path),
             "-o",
             str(output_mvs),
-            "--working-dir",
+            "--working-folder",
             str(workspace_path),
         ]
 
-    def densify_point_cloud(self, input_mvs: Path, output_mvs: Path) -> List[str]:
-        return [
+    def densify_point_cloud(self, input_mvs: Path, output_mvs: Path, working_folder: Optional[Path] = None) -> List[str]:
+        cmd = [
             self._get_bin("DensifyPointCloud"),
             "-i",
             str(input_mvs),
@@ -280,18 +280,24 @@ class OpenMVSCommandBuilder:
             "--max-threads",
             "0",
         ]
+        if working_folder:
+            cmd += ["--working-folder", str(working_folder)]
+        return cmd
 
-    def reconstruct_mesh(self, input_mvs: Path, output_mvs: Path) -> List[str]:
-        return [
+    def reconstruct_mesh(self, input_mvs: Path, output_mvs: Path, working_folder: Optional[Path] = None) -> List[str]:
+        cmd = [
             self._get_bin("ReconstructMesh"),
             "-i",
             str(input_mvs),
             "-o",
             str(output_mvs),
         ]
+        if working_folder:
+            cmd += ["--working-folder", str(working_folder)]
+        return cmd
 
-    def refine_mesh(self, input_mvs: Path, output_mvs: Path) -> List[str]:
-        return [
+    def refine_mesh(self, input_mvs: Path, output_mvs: Path, working_folder: Optional[Path] = None) -> List[str]:
+        cmd = [
             self._get_bin("RefineMesh"),
             "-i",
             str(input_mvs),
@@ -302,9 +308,18 @@ class OpenMVSCommandBuilder:
             "--max-iterations",
             "5",
         ]
+        if working_folder:
+            cmd += ["--working-folder", str(working_folder)]
+        return cmd
 
-    def texture_mesh(self, input_mvs: Path, output_mvs: Path) -> List[str]:
-        return [
+    def texture_mesh(
+        self,
+        input_mvs: Path,
+        output_mvs: Path,
+        mesh_path: Optional[Path] = None,
+        working_folder: Optional[Path] = None,
+    ) -> List[str]:
+        cmd = [
             self._get_bin("TextureMesh"),
             "-i",
             str(input_mvs),
@@ -312,7 +327,14 @@ class OpenMVSCommandBuilder:
             str(output_mvs),
             "--resolution-level",
             "0",
+            "--export-type",
+            "obj",
         ]
+        if mesh_path:
+            cmd += ["-m", str(mesh_path)]
+        if working_folder:
+            cmd += ["--working-folder", str(working_folder)]
+        return cmd
 
 
 class ReconstructionAdapter(ABC):
@@ -1072,7 +1094,7 @@ class OpenMVSAdapter(COLMAPAdapter):
 
                 mvs_project = dense_dir / "project.mvs"
                 mvs_dense = dense_dir / "project_dense.mvs"
-                mvs_mesh = dense_dir / "project_mesh.mvs"
+                mvs_mesh_ply = dense_dir / "project_mesh.ply"
                 mvs_textured = dense_dir / "project_textured.mvs"
 
                 try:
@@ -1088,7 +1110,7 @@ class OpenMVSAdapter(COLMAPAdapter):
 
                 try:
                     self._run_command(
-                        self.mvs_builder.densify_point_cloud(mvs_project, mvs_dense),
+                        self.mvs_builder.densify_point_cloud(mvs_project, mvs_dense, working_folder=dense_dir),
                         dense_dir,
                         log_file,
                     )
@@ -1099,18 +1121,23 @@ class OpenMVSAdapter(COLMAPAdapter):
 
                 try:
                     self._run_command(
-                        self.mvs_builder.reconstruct_mesh(mvs_dense, mvs_mesh),
+                        self.mvs_builder.reconstruct_mesh(mvs_dense, mvs_mesh_ply, working_folder=dense_dir),
                         dense_dir,
                         log_file,
                     )
                 except RuntimeReconstructionError:
-                    if not mvs_mesh.exists():
+                    if not mvs_mesh_ply.exists():
                         raise
                     log_file.write("\nNote: ReconstructMesh returned error but output exists. Continuing...\n")
 
                 try:
                     self._run_command(
-                        self.mvs_builder.texture_mesh(mvs_mesh, mvs_textured),
+                        self.mvs_builder.texture_mesh(
+                            mvs_dense, 
+                            mvs_textured, 
+                            mesh_path=mvs_mesh_ply, 
+                            working_folder=dense_dir
+                        ),
                         dense_dir,
                         log_file,
                     )
@@ -1120,7 +1147,19 @@ class OpenMVSAdapter(COLMAPAdapter):
                     log_file.write("\nNote: TextureMesh returned error but output exists. Continuing...\n")
 
                 final_mesh = dense_dir / "project_textured.obj"
+                
+                # Robust texture discovery: OpenMVS often appends material info to the texture name
                 final_tex = dense_dir / "project_textured.png"
+                if not final_tex.exists():
+                    tex_candidates = list(dense_dir.glob("project_textured_material_*_map_Kd.png"))
+                    if not tex_candidates:
+                        tex_candidates = list(dense_dir.glob("project_textured*.png"))
+                    
+                    if tex_candidates:
+                        # Filter out possible project_mesh.png etc if they exist
+                        valid_tex = [t for t in tex_candidates if "textured" in t.name]
+                        if valid_tex:
+                            final_tex = valid_tex[0]
 
                 if not final_mesh.exists():
                     mvs_mesh_ply = dense_dir / "project_mesh.ply"

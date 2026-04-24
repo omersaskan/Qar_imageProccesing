@@ -1,0 +1,41 @@
+{
+  "isolation": {
+    "initial_faces": 805636,
+    "initial_vertices": 402850,
+    "removed_planes": 0,
+    "removed_plane_faces": 0,
+    "removed_plane_vertices": 0,
+    "plane_candidate_count": 1,
+    "removed_support_bands": 0,
+    "removed_support_faces": 0,
+    "removed_support_vertices": 0,
+    "component_count": 1,
+    "removed_islands": 0,
+    "final_faces": 805636,
+    "final_vertices": 402850,
+    "removed_plane_face_share": 0.0,
+    "removed_plane_vertex_ratio": 0.0,
+    "compactness_score": 0.3287940646315282,
+    "flatness_score": 0.44884745004852905,
+    "selected_component_score": 0.905637436263182,
+    "aspect_ratio": 2.2279284418166587,
+    "footprint_dominance": 6.098219381942452
+  },
+  "final_polycount": 755609,
+  "bbox_min": {
+    "x": -1.45149453,
+    "y": -1.44936139,
+    "z": 0.0
+  },
+  "bbox_max": {
+    "x": 1.28567569,
+    "y": 1.33333733,
+    "z": 1.24900722
+  },
+  "pre_aligned_mesh_path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\cleaned\\job_cap_9e3dde83\\pre_aligned_mesh.obj",
+  "cleaned_mesh_path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\cleaned\\job_cap_9e3dde83\\cleaned_mesh.obj",
+  "metadata_path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\cleaned\\job_cap_9e3dde83\\normalized_metadata.json",
+  "cleaned_texture_path": null,
+  "uv_preserved": false,
+  "material_preserved": false
+}
