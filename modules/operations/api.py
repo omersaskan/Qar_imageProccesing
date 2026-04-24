@@ -444,16 +444,6 @@ async def get_session_guidance_summary(session_id: str):
         return f.read()
 
 
-# Asset Blobs (GLB Files)
-blobs_dir = Path(settings.data_root) / "registry" / "blobs"
-blobs_dir.mkdir(parents=True, exist_ok=True)
-app.mount("/api/assets/blobs", StaticFiles(directory=str(blobs_dir)), name="blobs")
-
-# Mount the UI directory if it exists
-ui_dir = Path("ui")
-if ui_dir.exists():
-    app.mount("/", StaticFiles(directory="ui", html=True), name="ui")
-
 @app.get("/api/training/manifests", dependencies=[Depends(verify_api_key)])
 async def list_training_manifests():
     """
@@ -469,6 +459,17 @@ async def list_training_manifests():
     except Exception as e:
         logger.error(f"Failed to fetch training manifests: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch training manifests")
+
+
+# Asset Blobs (GLB Files)
+blobs_dir = Path(settings.data_root) / "registry" / "blobs"
+blobs_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/api/assets/blobs", StaticFiles(directory=str(blobs_dir)), name="blobs")
+
+# Mount the UI directory if it exists
+ui_dir = Path("ui")
+if ui_dir.exists():
+    app.mount("/", StaticFiles(directory="ui", html=True), name="ui")
 
 if __name__ == "__main__":
     import uvicorn

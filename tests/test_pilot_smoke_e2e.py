@@ -229,22 +229,26 @@ def test_pilot_smoke_glb_quality():
             [ 1.0, -1.0, 0.0],
             [ 1.0,  1.0, 0.0],
             [-1.0,  1.0, 0.0],
-            [-1.0, -1.0, 0.1],
-            [ 1.0, -1.0, 0.1],
-            [ 1.0,  1.0, 0.1],
-            [-1.0,  1.0, 0.1],
+            [-1.0, -1.0, 0.01],
+            [ 1.0, -1.0, 0.01],
+            [ 1.0,  1.0, 0.01],
+            [-1.0,  1.0, 0.01],
         ], dtype=float)
 
         faces = np.array([
-            [0, 1, 2], [0, 2, 3], # bottom
-            [4, 5, 6], [4, 6, 7], # top
-            [0, 1, 5], [0, 5, 4], # front
-            [1, 2, 6], [1, 6, 5], # right
-            [2, 3, 7], [2, 7, 6], # back
-            [3, 0, 4], [3, 4, 7], # left
+            [0, 1, 2], [0, 2, 3],
+            [4, 5, 6], [4, 6, 7],
+            [0, 1, 5], [0, 5, 4],
+            [1, 2, 6], [1, 6, 5],
+            [2, 3, 7], [2, 7, 6],
+            [3, 0, 4], [3, 4, 7],
         ], dtype=int)
 
-        uv = np.random.rand(8, 2)
+        uv = np.array([
+            [0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0],
+            [0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0],
+        ], dtype=float)
+
         texture_image = Image.new("RGBA", (256, 256), color="red")
 
         mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
@@ -290,8 +294,6 @@ def test_pilot_smoke_glb_quality():
                     "component_count": 1,
                     "final_faces": inspection["face_count"],
                     "initial_faces": inspection["face_count"],
-                    "removed_plane_face_share": 0.0,
-                    "removed_plane_vertex_ratio": 0.0,
                     "compactness_score": 1.0,
                     "selected_component_score": 1.0,
                 }
