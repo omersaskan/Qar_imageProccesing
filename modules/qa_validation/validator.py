@@ -10,7 +10,9 @@ from .rules import (
     validate_contamination,
     validate_texture_integrity,
     validate_delivery_mesh,
+    validate_texture_quality,
 )
+from .texture_quality import TextureQualityAnalyzer
 
 
 class AssetValidator:
@@ -64,6 +66,26 @@ class AssetValidator:
             *delivery_decisions.values(),
         ]
 
+        # 1. Texture Quality Analysis
+        texture_quality_stats = {}
+        texture_path = asset_data.get("texture_path")
+        expected_color = asset_data.get("expected_product_color", "unknown")
+        
+        if texture_path:
+            analyzer = TextureQualityAnalyzer(thresholds=self.thresholds)
+            texture_quality_stats = analyzer.analyze_path(texture_path, expected_product_color=expected_color)
+            quality_decision = validate_texture_quality(texture_quality_stats)
+            all_decisions.append(quality_decision)
+        else:
+            # If no texture path, it's either geometry-only (already handled) 
+            # or we are validating a report without access to local files.
+            quality_decision = "pass" if semantic_status == "geometry_only" else "fail"
+            texture_quality_stats = {
+                "texture_quality_status": "unknown",
+                "texture_quality_grade": "F",
+                "texture_quality_reasons": ["MISSING_TEXTURE_PATH"]
+            }
+
         if "fail" in all_decisions:
             final_decision = "fail"
         elif "review" in all_decisions:
@@ -115,6 +137,16 @@ class AssetValidator:
             mobile_performance_grade=self._calculate_grade(asset_data.get("poly_count", 0)),
             material_quality_grade=material_grade,
             material_semantic_status=semantic_status,
+            
+            # Texture Quality Metrics
+            texture_quality_status=texture_quality_stats.get("texture_quality_status", "unknown"),
+            texture_quality_grade=texture_quality_stats.get("texture_quality_grade", "F"),
+            texture_quality_reasons=texture_quality_stats.get("texture_quality_reasons", []),
+            black_pixel_ratio=texture_quality_stats.get("black_pixel_ratio", 0.0),
+            near_white_ratio=texture_quality_stats.get("near_white_ratio", 0.0),
+            dominant_background_color_ratio=texture_quality_stats.get("dominant_background_color_ratio", 0.0),
+            atlas_coverage_ratio=texture_quality_stats.get("atlas_coverage_ratio", 0.0),
+            
             final_decision=final_decision,
         )
 

@@ -202,3 +202,16 @@ def validate_delivery_mesh(asset_data: Dict[str, Any], thresholds: ValidationThr
             results["delivery_fragmentation"] = "fail"
 
     return results
+
+def validate_texture_quality(quality_data: Dict[str, Any]) -> str:
+    """
+    Assesses quality status from TextureQualityAnalyzer.
+    """
+    status = str(quality_data.get("texture_quality_status", "unknown")).lower()
+    if status == "clean":
+        return "pass"
+    if status == "warning":
+        return "review"
+    if status == "contaminated":
+        return "fail"
+    return "fail"

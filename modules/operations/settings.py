@@ -98,6 +98,18 @@ class Settings(BaseSettings):
     openmvs_textured_output: bool = Field(True, validation_alias="OPENMVS_TEXTURED_OUTPUT")
     require_textured_output: bool = Field(False, validation_alias="REQUIRE_TEXTURED_OUTPUT")
 
+    # --- TEXTURE MASK REFINEMENT ---
+    texture_mask_erode_px: int = Field(3, validation_alias="TEXTURE_MASK_ERODE_PX")
+    texture_reject_support_contamination: bool = Field(True, validation_alias="TEXTURE_REJECT_SUPPORT_CONTAMINATION")
+    texture_reject_subject_clipped: bool = Field(True, validation_alias="TEXTURE_REJECT_SUBJECT_CLIPPED")
+    texture_min_clean_frames: int = Field(20, validation_alias="TEXTURE_MIN_CLEAN_FRAMES")
+
+    # --- TEXTURE QUALITY QA ---
+    max_black_pixel_ratio: float = Field(0.20, validation_alias="MAX_BLACK_PIXEL_RATIO")
+    max_dominant_background_ratio: float = Field(0.15, validation_alias="MAX_DOMINANT_BACKGROUND_RATIO")
+    min_atlas_coverage_ratio: float = Field(0.60, validation_alias="MIN_ATLAS_COVERAGE_RATIO")
+    min_near_white_ratio_white_cream: float = Field(0.40, validation_alias="MIN_NEAR_WHITE_RATIO_WHITE_CREAM")
+
     @property
     def is_dev(self) -> bool:
         return self.env == AppEnvironment.LOCAL_DEV

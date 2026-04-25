@@ -75,6 +75,7 @@ _COACHING_MESSAGES = {
     "ASSET_VALIDATION_FAILED": "Model kalite kontrolünden geçemedi. Lütfen metrikleri ve görsel sonuçları dashboard üzerinden kontrol edin.",
     "GROUND_ALIGNMENT_FAILED": "Model zemin hizalaması standart dışı. Ürünün düz bir zeminde ve dik durduğundan emin olun.",
     "MOBILE_GRADE_LOW": "Model poligon sayısı mobil cihazlar için çok yüksek (Grade D). Bu durum yükleme hızını etkileyebilir.",
+    "TEXTURE_ATLAS_CONTAMINATION": "Doku kalitesi düşük veya arka plan renkleri modele karışmış. Mat bir zemin kullanın ve homojen ışıklandırma sağlayın.",
 }
 
 # Mapping patterns to internal codes for failure_reason matching
@@ -114,6 +115,9 @@ _FAILURE_PATTERNS = [
 
     # Asset Quality Validation
     ("Validation Failed",   "ASSET_VALIDATION_FAILED", _CRIT),
+    ("CONTAMINATION",       "TEXTURE_ATLAS_CONTAMINATION", _WARN),
+    ("BLACK_PATCH",         "TEXTURE_ATLAS_CONTAMINATION", _WARN),
+    ("BACKGROUND_COLOR",    "TEXTURE_ATLAS_CONTAMINATION", _WARN),
 ]
 
 # Python-internal exception strings that must never reach operators

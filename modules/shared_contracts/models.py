@@ -111,6 +111,7 @@ class ProductPhysicalProfile(BaseModel):
     plate_diameter_cm: Optional[float] = Field(None, gt=0)
     ground_offset_cm: float = 0.0
     recommended_scale_multiplier: float = Field(1.0, gt=0)
+    expected_product_color: str = "unknown" # white_cream | dark | colorful | unknown
 
 class ValidationReport(BaseModel):
     asset_id: str
@@ -136,6 +137,15 @@ class ValidationReport(BaseModel):
     # Phase 2.2C: Material Semantics
     material_quality_grade: str = "F"
     material_semantic_status: str = "geometry_only"
+
+    # Texture Quality Metrics
+    texture_quality_status: str = "unknown" # clean|warning|contaminated|invalid
+    texture_quality_grade: str = "F" # A|B|C|D|F
+    texture_quality_reasons: List[str] = Field(default_factory=list)
+    black_pixel_ratio: float = 0.0
+    near_white_ratio: float = 0.0
+    dominant_background_color_ratio: float = 0.0
+    atlas_coverage_ratio: float = 0.0
 
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
