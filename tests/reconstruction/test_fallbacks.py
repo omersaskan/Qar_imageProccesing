@@ -55,7 +55,8 @@ def session_dir(tmp_path):
 def test_fallback_to_denser_frames(session_dir, tmp_path):
     # Setup settings for fallback
     with patch.object(settings, "recon_fallback_steps", ["default", "denser_frames"]), \
-         patch.object(settings, "recon_fallback_sample_rate", 5):
+         patch.object(settings, "recon_fallback_sample_rate", 5), \
+         patch.object(settings, "recon_diagnostic_enable_unmasked", False):
         
         adapter = MockAdapter()
         runner = ReconstructionRunner(adapter=adapter)
@@ -124,7 +125,8 @@ def test_fallback_to_denser_frames(session_dir, tmp_path):
 def test_unmasked_fallback_opt_in(session_dir, tmp_path):
     # 1. Unmasked disabled
     with patch.object(settings, "recon_fallback_steps", ["default", "unmasked"]), \
-         patch.object(settings, "recon_unmasked_fallback_enabled", False):
+         patch.object(settings, "recon_unmasked_fallback_enabled", False), \
+         patch.object(settings, "recon_diagnostic_enable_unmasked", False):
         
         adapter = MockAdapter()
         runner = ReconstructionRunner(adapter=adapter)
@@ -148,7 +150,8 @@ def test_unmasked_fallback_opt_in(session_dir, tmp_path):
 
     # 2. Unmasked enabled
     with patch.object(settings, "recon_fallback_steps", ["default", "unmasked"]), \
-         patch.object(settings, "recon_unmasked_fallback_enabled", True):
+         patch.object(settings, "recon_unmasked_fallback_enabled", True), \
+         patch.object(settings, "recon_diagnostic_enable_unmasked", False):
         
         adapter = MockAdapter()
         # Mock run_reconstruction to check enforce_masks

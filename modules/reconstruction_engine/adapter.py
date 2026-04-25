@@ -705,17 +705,18 @@ class COLMAPAdapter(ReconstructionAdapter):
         if dimension_mismatches[:5]:
             log_file.write(f"WARNING: Dense mask dimension mismatch sample: {dimension_mismatches[:5]}\n")
 
-        if exact_matches < required_count:
+        # Rigid requirements for asset-quality reconstruction
+        if exact_matches < len(images):
             log_file.write(
-                f"WARNING: Insufficient dense mask filename matches "
-                f"({exact_matches}/{len(images)}). Rejecting dense masks.\n"
+                f"ERROR: Missing exact dense mask matches for some images "
+                f"({exact_matches}/{len(images)}). High quality fusion requires all masks.\n"
             )
             return False
 
-        if dimension_matches < required_count:
+        if dimension_matches < len(images):
             log_file.write(
-                f"WARNING: Insufficient dense mask dimension matches "
-                f"({dimension_matches}/{len(images)}). Rejecting dense masks.\n"
+                f"ERROR: Dense mask dimension mismatch detected "
+                f"({dimension_matches}/{len(images)}). Rejecting dense masks to avoid fusion artifacts.\n"
             )
             return False
 
@@ -1183,21 +1184,26 @@ class COLMAPAdapter(ReconstructionAdapter):
                     max_depth_error=sf_max_depth,
                     max_normal_error=sf_max_normal
                 )
+                log_file.write(f"Executing: {' '.join(cmd_fuse)}\n")
                 self._run_command(cmd_fuse, output_dir, log_file)
 
                 fused_points = self._validate_dense_workspace(output_dir)
                 
                 # --- Post-Fusion Diagnostic Summary ---
-                log_file.write("\n--- StereoFusion Diagnostic Summary ---\n")
-                log_file.write(f"Final Fused Points: {fused_points}\n")
-                log_file.write(f"Depth Maps Found: {len(list((dense_dir / 'stereo/depth_maps').glob('*.bin')))}\n")
-                log_file.write(f"Normal Maps Found: {len(list((dense_dir / 'stereo/normal_maps').glob('*.bin')))}\n")
-                
-                if fused_points < 1000:
-                    log_file.write("CRITICAL WARNING: Very low fused point count. Meshing will likely fail or be poor quality.\n")
-                elif fused_points > 2_000_000:
-                    log_file.write(f"INFO: High density detected ({fused_points} points). Processing might be slow.\n")
-                log_file.write("---------------------------------------\n\n")
+                self._write_fusion_diagnostics(
+                    output_dir,
+                    fused_points,
+                    sparse_points,
+                    effective_mask_path,
+                    bool(is_mask_valid),
+                    {
+                        "min_num_pixels": sf_min_pix,
+                        "max_reproj_error": sf_max_reproj,
+                        "max_depth_error": sf_max_depth,
+                        "max_normal_error": sf_max_normal
+                    },
+                    log_file
+                )
 
                 poisson_ok = False
                 mesher_timeout = settings.recon_poisson_timeout_sec
@@ -1270,8 +1276,53 @@ class COLMAPAdapter(ReconstructionAdapter):
             "stereo_fusion_mask_path": str(effective_mask_path) if effective_mask_path else None,
             "dense_mask_valid": bool(is_mask_valid),
             "force_unmasked_fusion": bool(force_unmasked_fusion),
+            "diagnostics_path": str(output_dir / "fusion_diagnostics.json"),
             **dense_mask_stats,
         }
+
+    def _write_fusion_diagnostics(
+        self, 
+        output_dir: Path, 
+        fused_points: int, 
+        sparse_points: int,
+        mask_path: Optional[Path],
+        mask_valid: bool,
+        thresholds: Dict[str, Any],
+        log_file
+    ):
+        dense_dir = output_dir / "dense"
+        depth_count = len(list((dense_dir / 'stereo/depth_maps').glob('*.bin')))
+        normal_count = len(list((dense_dir / 'stereo/normal_maps').glob('*.bin')))
+        
+        ratio = fused_points / max(sparse_points, 1)
+        
+        diag = {
+            "depth_map_count": depth_count,
+            "normal_map_count": normal_count,
+            "fused_point_count": fused_points,
+            "sparse_point_count": sparse_points,
+            "sparse_dense_ratio": round(ratio, 4),
+            "selected_mask_path": str(mask_path) if mask_path else None,
+            "mask_validation_status": "valid" if mask_valid else "invalid/none",
+            "stereo_fusion_thresholds": thresholds,
+            "status": "success",
+            "recommendation": "none"
+        }
+        
+        if fused_points < 100_000:
+            diag["status"] = "warning"
+            diag["recommendation"] = "Low fused point count. Result might be sparse or low quality."
+        
+        if fused_points < 50_000:
+            diag["status"] = "fail"
+            diag["recommendation"] = "CRITICAL: Very low fused point count. Recapture recommended."
+
+        log_file.write("\n--- Post-Fusion Diagnostic Summary ---\n")
+        log_file.write(json.dumps(diag, indent=2) + "\n")
+        log_file.write("---------------------------------------\n\n")
+
+        with open(output_dir / "fusion_diagnostics.json", "w", encoding="utf-8") as f:
+            json.dump(diag, f, indent=2)
 
 
 class OpenMVSAdapter(COLMAPAdapter):

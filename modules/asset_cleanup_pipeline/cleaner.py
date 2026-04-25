@@ -458,6 +458,19 @@ class AssetCleaner:
             else None
         )
 
+        # ------------------------------------------------------------
+        # 10. Quality Gate (Item 4)
+        # ------------------------------------------------------------
+        quality_status = "success"
+        quality_reason = "none"
+        
+        if final_polycount < 5000:
+            quality_status = "quality_fail"
+            quality_reason = f"Final polycount ({final_polycount}) is below the asset-quality threshold (5,000)."
+        elif isolation_stats.get("component_count", 0) > 200:
+            quality_status = "warning"
+            quality_reason = "Large number of small islands detected. Mesh may be noisy."
+
         cleanup_stats = {
             "isolation": isolation_stats,
             "final_polycount": int(final_polycount),
@@ -469,6 +482,9 @@ class AssetCleaner:
             "cleaned_texture_path": cleaned_texture_path,
             "uv_preserved": bool(has_uv),
             "material_preserved": bool(has_material),
+            "quality_status": quality_status,
+            "quality_reason": quality_reason,
+            "recapture_recommended": quality_status == "quality_fail"
         }
 
         return metadata, cleanup_stats, str(cleaned_mesh_path)

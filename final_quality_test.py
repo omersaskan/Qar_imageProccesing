@@ -60,18 +60,22 @@ def main():
         )
         
         print("\n--- RECONSTRUCTION SUCCESSFUL ---")
-        print(f"Model Path: {result.model_path}")
-        print(f"Fused Point Count: {result.metrics.get('fused_points', 'N/A')}")
+        print(f"Model Path: {result['mesh_path']}")
+        print(f"Fused Point Count: {result['dense_points_fused']}")
+        print(f"Diagnostics: {result['diagnostics_path']}")
         
         # Write report
         with open("final_test_report.txt", "w") as f:
             f.write(f"Final Quality Test Report\n")
             f.write(f"=========================\n")
-            f.write(f"Fused Points: {result.metrics.get('fused_points', 'N/A')}\n")
-            f.write(f"Mesh Path: {result.model_path}\n")
+            f.write(f"Fused Points: {result['dense_points_fused']}\n")
+            f.write(f"Mesh Path: {result['mesh_path']}\n")
+            f.write(f"Diagnostics: {result['diagnostics_path']}\n")
             
     except Exception as e:
         print(f"\nCRITICAL FAILURE: {e}")
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
 
 if __name__ == "__main__":
