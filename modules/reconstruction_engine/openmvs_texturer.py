@@ -3,6 +3,7 @@ import subprocess
 from pathlib import Path
 from typing import Dict, Any, List
 
+
 class OpenMVSTexturer:
     """
     Coordinates OpenMVS to process a selected COLMAP mesh and output a textured artifact.
@@ -18,7 +19,6 @@ class OpenMVSTexturer:
         self._interface_colmap = self.bin_dir / "InterfaceCOLMAP.exe"
         self._texture_mesh = self.bin_dir / "TextureMesh.exe"
 
-        # On non-Windows, default to lack of extensions
         if os.name != "nt":
             self._interface_colmap = self.bin_dir / "InterfaceCOLMAP"
             self._texture_mesh = self.bin_dir / "TextureMesh"
@@ -46,22 +46,28 @@ class OpenMVSTexturer:
 
         process.wait()
         if process.returncode != 0:
-            raise RuntimeError(f"OpenMVS command failed with exit code {process.returncode}: {' '.join(cmd)}")
+            raise RuntimeError(
+                f"OpenMVS command failed with exit code {process.returncode}: {' '.join(cmd)}"
+            )
 
     def run_texturing(
         self,
         colmap_workspace: Path,
         dense_workspace: Path,
         selected_mesh: str,
-        output_dir: Path
+        output_dir: Path,
     ) -> Dict[str, Any]:
         """
         Convert COLMAP output into MVS scene, and run TextureMesh.
+
+        Important fix:
+        InterfaceCOLMAP should prefer dense/images when available. Some previous
+        runs used dense_workspace.parent / images, which can point to the raw
+        input folder instead of COLMAP undistorted images.
         """
         log_path = output_dir / "texturing.log"
         scene_mvs = output_dir / "scene.mvs"
         textured_obj = output_dir / "textured_model.obj"
-        texture_png = output_dir / "textured_model_material_0_map_Kd.png"
 
         with open(log_path, "w", encoding="utf-8") as log_file:
             log_file.write(f"Starting OpenMVS Texturing using mesh: {selected_mesh}\n")
@@ -71,15 +77,26 @@ class OpenMVSTexturer:
                 log_file.write(msg + "\n")
                 raise RuntimeError(msg)
 
-            # Step 1: InterfaceCOLMAP
+            image_folder = dense_workspace / "images"
+            if not image_folder.exists():
+                image_folder = dense_workspace.parent / "images"
+
+            log_file.write(f"OpenMVS image-folder selected: {image_folder}\n")
+            log_file.write(f"COLMAP workspace: {colmap_workspace}\n")
+            log_file.write(f"Dense workspace: {dense_workspace}\n")
+
             cmd_interface = [
                 str(self._interface_colmap),
-                "-i", str(dense_workspace),
-                "-o", str(scene_mvs),
-                "--working-folder", str(dense_workspace),
-                "--image-folder", str(dense_workspace / "images")
+                "-i",
+                str(dense_workspace),
+                "-o",
+                str(scene_mvs),
+                "--working-folder",
+                str(dense_workspace),
+                "--image-folder",
+                str(image_folder),
             ]
-            
+
             try:
                 self._run_command(cmd_interface, output_dir, log_file)
             except Exception as e:
@@ -88,33 +105,32 @@ class OpenMVSTexturer:
             if not scene_mvs.exists():
                 raise RuntimeError("Failed to generate scene.mvs")
 
-            # Step 2: TextureMesh
-            # We explicitly pass the selected mesh so we texture the cleaned or best candidate.
             cmd_texture = [
                 str(self._texture_mesh),
-                "-i", str(scene_mvs),
-                "--mesh-file", str(selected_mesh),
-                "--export-type", "obj",
-                "-o", str(output_dir / "textured_model"),
-                "--working-folder", str(output_dir)
+                "-i",
+                str(scene_mvs),
+                "--mesh-file",
+                str(selected_mesh),
+                "--export-type",
+                "obj",
+                "-o",
+                str(output_dir / "textured_model"),
+                "--working-folder",
+                str(output_dir),
             ]
-            
+
             try:
                 self._run_command(cmd_texture, output_dir, log_file)
             except Exception as e:
                 raise RuntimeError(f"TextureMesh failed: {e}")
-                
-            # Texture files can be generated as multiple atlas maps depending on settings.
-            # Usually textured_model.obj, textured_model.mtl, textured_model_material_0_map_Kd.png
-            # Let's discover generated textures honestly.
-            
+
             if not textured_obj.exists():
                 raise RuntimeError("TextureMesh finished but obj file missing.")
 
             generated_textures = list(output_dir.glob("*_map_Kd.*"))
             if not generated_textures:
                 generated_textures = list(output_dir.glob("*.png")) + list(output_dir.glob("*.jpg"))
-            
+
             log_file.write("Texturing completed successfully.\n")
 
         return {

@@ -1,11 +1,12 @@
 # modules/capture_workflow/frame_extractor.py
 from __future__ import annotations
+
 import cv2
 import json
 import numpy as np
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from .config import (
     QualityThresholds,
@@ -35,7 +36,10 @@ class FrameExtractor:
         self.config = (config or default_extraction_config).model_copy(deep=True)
         self.seg_config = (seg_config or default_segmentation_config).model_copy(deep=True)
         self.quality_analyzer = quality_analyzer or QualityAnalyzer(self.thresholds)
-        self.object_masker = object_masker or ObjectMasker(thresholds=self.thresholds, config=self.seg_config)
+        self.object_masker = object_masker or ObjectMasker(
+            thresholds=self.thresholds,
+            config=self.seg_config,
+        )
 
     def _apply_object_mask(self, frame: np.ndarray, mask: np.ndarray) -> np.ndarray:
         expanded_mask = cv2.dilate(mask, np.ones((5, 5), np.uint8), iterations=1)
@@ -50,9 +54,10 @@ class FrameExtractor:
         """
         Suppress scene pixels outside an expanded object ROI without crop/resize.
 
-        We intentionally keep the original image canvas and resolution intact.
-        Per-frame crop normalization would change effective intrinsics between
-        frames and can destabilize photogrammetry.
+        Important:
+        - This method is now used only for masked preview/debug output.
+        - The reconstruction input .jpg remains the raw frame, because COLMAP can
+          need background/table features for stable camera pose estimation.
         """
         if bbox is None:
             return self._apply_object_mask(frame, mask), mask
@@ -174,6 +179,11 @@ class FrameExtractor:
         masks_dir = output_path / "masks"
         masks_dir.mkdir(parents=True, exist_ok=True)
 
+        # Masked previews are useful for debugging/operator UX, but they should
+        # not replace the raw frames used by COLMAP.
+        masked_dir = output_path / "masked"
+        masked_dir.mkdir(parents=True, exist_ok=True)
+
         try:
             while True:
                 ret, frame = cap.read()
@@ -220,13 +230,30 @@ class FrameExtractor:
                     mask,
                     current_bbox,
                 )
-                self._write_verified_image(frame_path, frame, "Extracted frame", cv2.IMREAD_COLOR)
+
+                # IMPORTANT FIX:
+                # Reconstruction receives the raw frame, not the blacked-out preview.
+                # This preserves background/table features for camera pose estimation.
+                self._write_verified_image(frame_path, frame, "Raw extracted frame", cv2.IMREAD_COLOR)
+
+                masked_frame_path = masked_dir / frame_filename
+                self._write_verified_image(
+                    masked_frame_path,
+                    focused_frame,
+                    "Masked preview frame",
+                    cv2.IMREAD_COLOR,
+                )
+
                 self._write_verified_image(mask_path, focused_mask, "Mask", cv2.IMREAD_GRAYSCALE)
-                
+
                 with open(meta_path, "w", encoding="utf-8") as f:
-                    clean_meta = {k: v for k, v in mask_meta.items() if isinstance(v, (int, float, str, bool, type(None), dict, list))}
+                    clean_meta = {
+                        k: v
+                        for k, v in mask_meta.items()
+                        if isinstance(v, (int, float, str, bool, type(None), dict, list))
+                    }
                     json.dump(clean_meta, f, indent=2)
-                
+
                 if self.seg_config.debug_artifacts:
                     debug_dir = output_path / "debug"
                     debug_dir.mkdir(parents=True, exist_ok=True)
@@ -248,8 +275,11 @@ class FrameExtractor:
             "total_frames_read": frame_count,
             "rejection_counts": rejection_counts,
             "saved_count": len(extracted_paths),
+            "frame_mode": "raw_for_reconstruction",
+            "masked_preview_dir": str(masked_dir),
+            "masks_dir": str(masks_dir),
             "video_filename": Path(video_path).name,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
         }
 
         logger.info(f"[Extraction] Product-aware summary for {extraction_report['video_filename']}:")
@@ -257,5 +287,6 @@ class FrameExtractor:
         logger.info(f"   - Rejected by quality/mask: {rejection_counts['quality_or_mask']}")
         logger.info(f"   - Rejected by similarity: {rejection_counts['redundant_similarity']}")
         logger.info(f"   - Total saved: {len(extracted_paths)}")
+        logger.info("   - Frame mode: raw_for_reconstruction; masked previews saved separately")
 
         return extracted_paths, extraction_report

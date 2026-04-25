@@ -197,7 +197,7 @@ class ColmapCommandBuilder:
         return cmd
 
     def image_undistorter(self, images_dir: Path, input_path: Path, output_path: Path, max_size: Optional[int] = None) -> List[str]:
-        return [
+        cmd = [
             self.bin,
             "image_undistorter",
             "--image_path",
@@ -209,10 +209,10 @@ class ColmapCommandBuilder:
             "--output_type",
             "COLMAP",
         ]
-        
+
         if max_size:
             cmd += ["--max_image_size", str(max_size)]
-            
+
         return cmd
 
     def patch_match_stereo(self, workspace_path: Path) -> List[str]:
@@ -495,50 +495,228 @@ class COLMAPAdapter(ReconstructionAdapter):
         occupancy = float(np.sum(mask > 0) / max(h * w, 1))
         return 0.04 < occupancy < 0.90
 
+    def _resolve_source_mask_for_dense_image(
+        self,
+        effective_masks_dir: Path,
+        dense_image_path: Path,
+    ) -> Optional[Path]:
+        """
+        Resolve a source feature mask for an undistorted dense image.
+
+        Supported naming:
+        - COLMAP style: frame_0000.jpg -> frame_0000.jpg.png
+        - Stem style:   frame_0000.jpg -> frame_0000.png
+        """
+        if not effective_masks_dir or not effective_masks_dir.exists():
+            return None
+
+        candidates = [
+            effective_masks_dir / f"{dense_image_path.name}.png",
+            effective_masks_dir / f"{dense_image_path.stem}.png",
+        ]
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate
+        return None
+
+    def _generate_dense_masks_from_feature_masks(
+        self,
+        dense_dir: Path,
+        effective_masks_dir: Optional[Path],
+        log_file,
+    ) -> Dict[str, Any]:
+        """
+        Build dense/stereo/masks from the original feature masks.
+
+        Important:
+        This must NOT infer masks from non-black pixels in dense/images anymore.
+        After the frame_extractor fix, reconstruction images are raw frames, so
+        non-black detection would almost always produce full-frame masks.
+        """
+        dense_images_dir = dense_dir / "images"
+        stereo_masks_dir = dense_dir / "stereo" / "masks"
+        stereo_masks_dir.mkdir(parents=True, exist_ok=True)
+
+        images = sorted(
+            list(dense_images_dir.glob("*.jpg"))
+            + list(dense_images_dir.glob("*.jpeg"))
+            + list(dense_images_dir.glob("*.png"))
+        )
+
+        stats = {
+            "dense_masks_dir": str(stereo_masks_dir),
+            "dense_images_dir": str(dense_images_dir),
+            "dense_image_count": len(images),
+            "dense_mask_count": 0,
+            "dense_mask_exact_filename_matches": 0,
+            "dense_mask_dimension_matches": 0,
+            "dense_mask_fallback_white_count": 0,
+            "dense_mask_fallback_white_ratio": 1.0,
+            "dense_mask_generation_mode": "feature_mask_resize",
+        }
+
+        if not effective_masks_dir or not effective_masks_dir.exists():
+            log_file.write("Dense mask generation skipped: effective feature mask dir missing.\n")
+            stats["dense_mask_generation_mode"] = "none_no_feature_masks"
+            return stats
+
+        if not images:
+            log_file.write(f"Dense mask generation skipped: no dense images in {dense_images_dir}.\n")
+            stats["dense_mask_generation_mode"] = "none_no_dense_images"
+            return stats
+
+        min_occupancy = 0.005
+        max_occupancy = 0.98
+        kernel = np.ones((7, 7), np.uint8)
+
+        for img_file in images:
+            img = self._read_image(img_file, cv2.IMREAD_COLOR)
+            if img is None:
+                log_file.write(f"WARNING: Could not read dense image for mask generation: {img_file}\n")
+                continue
+
+            h, w = img.shape[:2]
+            source_mask = self._resolve_source_mask_for_dense_image(effective_masks_dir, img_file)
+            mask = None
+            if source_mask is not None:
+                mask = self._read_image(source_mask, cv2.IMREAD_GRAYSCALE)
+
+            if mask is None:
+                stats["dense_mask_fallback_white_count"] += 1
+                final_mask = np.full((h, w), 255, dtype=np.uint8)
+            else:
+                if mask.shape[:2] != (h, w):
+                    mask = cv2.resize(mask, (w, h), interpolation=cv2.INTER_NEAREST)
+                _, binary = cv2.threshold(mask, 1, 255, cv2.THRESH_BINARY)
+                binary = cv2.dilate(binary, kernel, iterations=1)
+
+                occupancy = float(np.count_nonzero(binary) / max(h * w, 1))
+                if occupancy < min_occupancy or occupancy > max_occupancy:
+                    stats["dense_mask_fallback_white_count"] += 1
+                    log_file.write(
+                        f"WARNING: Dense mask for {img_file.name} failed occupancy sanity "
+                        f"({occupancy:.4f}). Using full-white fallback.\n"
+                    )
+                    final_mask = np.full((h, w), 255, dtype=np.uint8)
+                else:
+                    final_mask = binary
+
+            mask_out = stereo_masks_dir / f"{img_file.name}.png"
+            ok, buff = cv2.imencode(".png", final_mask)
+            if ok:
+                buff.tofile(str(mask_out))
+                stats["dense_mask_count"] += 1
+                stats["dense_mask_exact_filename_matches"] += 1
+
+                written = self._read_image(mask_out, cv2.IMREAD_GRAYSCALE)
+                if written is not None and written.shape[:2] == (h, w):
+                    stats["dense_mask_dimension_matches"] += 1
+
+        stats["dense_mask_fallback_white_ratio"] = float(
+            stats["dense_mask_fallback_white_count"] / max(stats["dense_image_count"], 1)
+        )
+
+        log_file.write("\n--- Dense Masking Summary ---\n")
+        log_file.write("Strategy: resize original feature masks to dense/images dimensions\n")
+        log_file.write(f"Dense images: {stats['dense_image_count']}\n")
+        log_file.write(f"Dense masks written: {stats['dense_mask_count']}\n")
+        log_file.write(f"Exact filename matches: {stats['dense_mask_exact_filename_matches']}\n")
+        log_file.write(f"Dimension matches: {stats['dense_mask_dimension_matches']}\n")
+        log_file.write(f"Fallback white count: {stats['dense_mask_fallback_white_count']}\n")
+        log_file.write(f"Fallback white ratio: {stats['dense_mask_fallback_white_ratio']:.2%}\n")
+        log_file.write(f"Min/Max Occupancy Thresholds: {min_occupancy}/{max_occupancy}\n")
+        log_file.write("-----------------------------\n\n")
+
+        return stats
+
     def _validate_dense_masks(self, dense_masks_dir: Path, images_dir: Path, log_file) -> bool:
         """
-        Validates undistorted dense masks for alignment and count.
-        Returns: True if valid, False otherwise.
+        Validates undistorted dense masks for COLMAP stereo_fusion.
+
+        Expected naming:
+            dense/images/frame_0000.jpg
+            dense/stereo/masks/frame_0000.jpg.png
         """
         if not dense_masks_dir.exists():
             log_file.write(f"WARNING: Dense masks directory missing: {dense_masks_dir}\n")
             return False
 
-        images = list(images_dir.glob("*.jpg"))
+        if not images_dir.exists():
+            log_file.write(f"WARNING: Dense images directory missing: {images_dir}\n")
+            return False
+
+        images = sorted(
+            list(images_dir.glob("*.jpg"))
+            + list(images_dir.glob("*.jpeg"))
+            + list(images_dir.glob("*.png"))
+        )
         if not images:
-            log_file.write("WARNING: No undistorted images found for mask validation.\n")
+            log_file.write("WARNING: No undistorted dense images found for mask validation.\n")
             return False
 
-        # Sample check
-        sample_img_path = images[0]
-        sample_mask_path = dense_masks_dir / f"{sample_img_path.name}.png"
+        exact_matches = 0
+        dimension_matches = 0
+        missing_masks = []
+        dimension_mismatches = []
 
-        if not sample_mask_path.exists():
-            log_file.write(f"WARNING: Sample dense mask missing: {sample_mask_path.name}\n")
-            return False
+        for img_path in images:
+            expected_mask = dense_masks_dir / f"{img_path.name}.png"
+            if not expected_mask.exists():
+                missing_masks.append(expected_mask.name)
+                continue
 
-        # Load samples
-        img_arr = np.fromfile(str(sample_img_path), np.uint8)
-        img = cv2.imdecode(img_arr, cv2.IMREAD_UNCHANGED)
-        
-        mask_arr = np.fromfile(str(sample_mask_path), np.uint8)
-        mask = cv2.imdecode(mask_arr, cv2.IMREAD_GRAYSCALE)
+            exact_matches += 1
+            img = self._read_image(img_path, cv2.IMREAD_UNCHANGED)
+            mask = self._read_image(expected_mask, cv2.IMREAD_GRAYSCALE)
 
-        if img is None or mask is None:
-            log_file.write("WARNING: Could not load sample image/mask for dimension check.\n")
-            return False
+            if img is None or mask is None:
+                dimension_mismatches.append(
+                    {"image": img_path.name, "mask": expected_mask.name, "reason": "unreadable"}
+                )
+                continue
 
-        if img.shape[:2] != mask.shape[:2]:
+            if img.shape[:2] == mask.shape[:2]:
+                dimension_matches += 1
+            else:
+                dimension_mismatches.append(
+                    {
+                        "image": img_path.name,
+                        "mask": expected_mask.name,
+                        "image_shape": img.shape[:2],
+                        "mask_shape": mask.shape[:2],
+                    }
+                )
+
+        mask_count = len(list(dense_masks_dir.glob("*.png")))
+        required_count = int(len(images) * 0.90)
+
+        log_file.write(
+            "Dense mask validation: "
+            f"images={len(images)} "
+            f"masks={mask_count} "
+            f"exact_matches={exact_matches} "
+            f"dimension_matches={dimension_matches} "
+            f"missing={len(missing_masks)} "
+            f"dimension_mismatches={len(dimension_mismatches)}\n"
+        )
+
+        if missing_masks[:10]:
+            log_file.write(f"WARNING: Missing dense masks sample: {missing_masks[:10]}\n")
+        if dimension_mismatches[:5]:
+            log_file.write(f"WARNING: Dense mask dimension mismatch sample: {dimension_mismatches[:5]}\n")
+
+        if exact_matches < required_count:
             log_file.write(
-                f"WARNING: Dimension mismatch! Image {img.shape[:2]} vs Mask {mask.shape[:2]}. "
-                "Rejecting dense masks.\n"
+                f"WARNING: Insufficient dense mask filename matches "
+                f"({exact_matches}/{len(images)}). Rejecting dense masks.\n"
             )
             return False
 
-        # Count check
-        mask_count = len(list(dense_masks_dir.glob("*.png")))
-        if mask_count < len(images) * 0.9:
-            log_file.write(f"WARNING: Insufficient dense masks ({mask_count} masks for {len(images)} images).\n")
+        if dimension_matches < required_count:
+            log_file.write(
+                f"WARNING: Insufficient dense mask dimension matches "
+                f"({dimension_matches}/{len(images)}). Rejecting dense masks.\n"
+            )
             return False
 
         return True
@@ -935,80 +1113,34 @@ class COLMAPAdapter(ReconstructionAdapter):
                 # Initialize dense masking control variables
                 force_unmasked_fusion = False
                 stereo_masks_dir = dense_dir / "stereo" / "masks"
-                if effective_masks_dir and effective_masks_dir.exists():
-                    stereo_masks_dir.mkdir(parents=True, exist_ok=True)
-                    
-                    undistorted_images_dir = dense_dir / "images"
-                    if undistorted_images_dir.exists():
-                        img_files = list(undistorted_images_dir.glob("*.jpg"))
-                        total_frames = len(img_files)
-                        fallback_count = 0
-                        
-                        # Production Guards: Area-based occupancy sanity checks
-                        MIN_OCCUPANCY = 0.005 # 0.5% area - subject must exist
-                        MAX_OCCUPANCY = 0.98  # 98% area  - background must be removed
-                        
-                        for img_file in img_files:
-                            # Unicode-safe image read for Windows
-                            img_array = np.fromfile(str(img_file), np.uint8)
-                            img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-                            
-                            if img is None:
-                                log_file.write(f"WARNING: Could not read undistorted image for masking: {img_file}\n")
-                                continue
-                                
-                            # Extractor produces pure black (0,0,0) background.
-                            # We detect subject by keeping any pixel where at least one channel > 0.
-                            thresh = (np.any(img > 0, axis=-1).astype(np.uint8) * 255)
-                            
-                            # Dilate slightly to relax the mask and avoid subject edge clipping 
-                            kernel = np.ones((7, 7), np.uint8)
-                            gen_mask = cv2.dilate(thresh, kernel, iterations=1)
-                            
-                            if gen_mask.shape != img.shape[:2]:
-                                raise DenseMaskAlignmentError(
-                                    f"Shape mismatch: img={img.shape[:2]}, mask={gen_mask.shape}",
-                                    image_path=str(img_file)
-                                )
+                dense_mask_stats = {
+                    "dense_masks_dir": str(stereo_masks_dir),
+                    "dense_images_dir": str(dense_dir / "images"),
+                    "dense_image_count": 0,
+                    "dense_mask_count": 0,
+                    "dense_mask_exact_filename_matches": 0,
+                    "dense_mask_dimension_matches": 0,
+                    "dense_mask_fallback_white_count": 0,
+                    "dense_mask_fallback_white_ratio": 1.0,
+                    "dense_mask_generation_mode": "none",
+                }
 
-                            # Occupancy Sanity Check
-                            pixels = gen_mask.shape[0] * gen_mask.shape[1]
-                            occupancy = np.count_nonzero(gen_mask) / pixels
-                            
-                            final_mask = gen_mask
-                            if occupancy < MIN_OCCUPANCY or occupancy > MAX_OCCUPANCY:
-                                fallback_count += 1
-                                log_file.write(
-                                    f"WARNING: Mask for {img_file.name} failed occupancy sanity check ({occupancy:.4f}). "
-                                    f"Falling back to relaxed (full-white) mask.\n"
-                                )
-                                final_mask = np.full(gen_mask.shape, 255, dtype=np.uint8)
-                            
-                            mask_filename = img_file.name + ".png"
-                            mask_out_path = stereo_masks_dir / mask_filename
-                            # Unicode-safe image write for Windows
-                            _, mask_buff = cv2.imencode(".png", final_mask)
-                            mask_buff.tofile(str(mask_out_path))
-                            
-                        # Global fallback assessment
-                        if total_frames > 0:
-                            fallback_ratio = fallback_count / total_frames
-                            log_file.write("\n--- Dense Masking Summary ---\n")
-                            log_file.write(f"Strategy: Non-black pixel detection (Any channel > 0)\n")
-                            log_file.write(f"Total Frames Processed: {total_frames}\n")
-                            log_file.write(f"Fallback (Relaxed) Counter: {fallback_count}\n")
-                            log_file.write(f"Fallback Ratio: {fallback_ratio:.2%}\n")
-                            log_file.write(f"Min/Max Occupancy Thresholds: {MIN_OCCUPANCY}/{MAX_OCCUPANCY}\n")
-                            
-                            if fallback_ratio > 0.3:
-                                log_file.write(
-                                    "CRITICAL WARNING: High mask fallback ratio detected (>30%). "
-                                    "Reverting to UNMASKED dense fusion to prevent geometric bias from low-quality masks.\n"
-                                )
-                                force_unmasked_fusion = True
-                            else:
-                                force_unmasked_fusion = False
-                            log_file.write("-----------------------------\n\n")
+                if effective_masks_dir and effective_masks_dir.exists():
+                    dense_mask_stats = self._generate_dense_masks_from_feature_masks(
+                        dense_dir=dense_dir,
+                        effective_masks_dir=effective_masks_dir,
+                        log_file=log_file,
+                    )
+
+                    fallback_ratio = float(dense_mask_stats.get("dense_mask_fallback_white_ratio", 1.0))
+                    if fallback_ratio > 0.3:
+                        log_file.write(
+                            "CRITICAL WARNING: High dense-mask fallback ratio detected (>30%). "
+                            "Reverting to UNMASKED dense fusion to avoid biased / low-quality masks.\n"
+                        )
+                        force_unmasked_fusion = True
+                else:
+                    log_file.write("Dense mask generation skipped: effective_masks_dir is None.\n")
 
                 cmd_stereo = self.builder.patch_match_stereo(dense_dir)
                 self._run_command(cmd_stereo, output_dir, log_file)
@@ -1132,6 +1264,12 @@ class COLMAPAdapter(ReconstructionAdapter):
             "dense_points_fused": fused_points,
             "mesher_used": mesher_used,
             "selected_sparse_model": selected_model_name,
+            "mask_mode": "masked" if effective_masks_dir is not None else "unmasked",
+            "feature_mask_path": str(effective_masks_dir) if effective_masks_dir else None,
+            "stereo_fusion_mask_path": str(effective_mask_path) if effective_mask_path else None,
+            "dense_mask_valid": bool(is_mask_valid),
+            "force_unmasked_fusion": bool(force_unmasked_fusion),
+            **dense_mask_stats,
         }
 
 

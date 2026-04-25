@@ -1,30 +1,31 @@
+import json
+import logging
 import os
 import shutil
 import time
 from pathlib import Path
-import logging
 from typing import List, Optional, Tuple
 
 import cv2
 import numpy as np
 import trimesh
 
+from modules.operations.settings import settings, ReconstructionPipeline, AppEnvironment
 from modules.shared_contracts.models import (
-    ReconstructionJob, 
-    ReconstructionAttemptResult, 
-    ReconstructionAttemptType, 
-    ReconstructionAudit
+    ReconstructionJob,
+    ReconstructionAttemptResult,
+    ReconstructionAttemptType,
+    ReconstructionAudit,
 )
 from modules.utils.file_persistence import atomic_write_json, calculate_checksum
 from .adapter import COLMAPAdapter, ReconstructionAdapter, SimulatedAdapter
 from .failures import (
-    InsufficientInputError, 
-    MissingArtifactError, 
+    InsufficientInputError,
+    MissingArtifactError,
     RuntimeReconstructionError,
-    InsufficientReconstructionError
+    InsufficientReconstructionError,
 )
 from .output_manifest import MeshMetadata, OutputManifest
-from modules.operations.settings import settings, ReconstructionPipeline, AppEnvironment
 
 
 class ReconstructionRunner:
@@ -34,27 +35,22 @@ class ReconstructionRunner:
     @property
     def colmap_adapter(self) -> "COLMAPAdapter":
         if not hasattr(self, "_colmap_cached"):
-            # TICKET-012: Validate only when using the engine
             try:
                 settings.validate_setup()
             except (ValueError, FileNotFoundError) as e:
-                # Safe check: handles both AppEnvironment enum and raw string values
                 if settings.env in [AppEnvironment.PRODUCTION, AppEnvironment.PILOT]:
                     raise RuntimeError(f"Production environment must be configured: {e}")
                 logging.warning(f"Configuration warning: {e}")
 
-            from .adapter import COLMAPAdapter
             self._colmap_cached = COLMAPAdapter()
         return self._colmap_cached
 
     @property
     def openmvs_adapter(self) -> "OpenMVSAdapter":
         if not hasattr(self, "_openmvs_cached"):
-            # TICKET-012: Validate only when using the engine
             try:
                 settings.validate_setup()
             except (ValueError, FileNotFoundError) as e:
-                # Safe check: handles both AppEnvironment enum and raw string values
                 if settings.env in [AppEnvironment.PRODUCTION, AppEnvironment.PILOT]:
                     raise RuntimeError(f"Production environment must be configured: {e}")
                 logging.warning(f"Configuration warning: {e}")
@@ -67,13 +63,10 @@ class ReconstructionRunner:
     def adapter(self) -> "ReconstructionAdapter":
         if self._explicit_adapter:
             return self._explicit_adapter
-        
-        # Normalize and validate raw pipeline choice
+
         raw_choice = settings.recon_pipeline.lower()
-        # Safe comparison: handles both AppEnvironment enum and raw string values
         is_production = settings.env in [AppEnvironment.PILOT, AppEnvironment.PRODUCTION]
-        
-        # Mapping alias/legacy names if needed (though user wants strict colmap_openmvs)
+
         if raw_choice in ["openmvs", "colmap_openmvs"]:
             choice = ReconstructionPipeline.COLMAP_OPENMVS
         elif raw_choice in ["colmap", "colmap_dense"]:
@@ -81,29 +74,27 @@ class ReconstructionRunner:
         elif raw_choice == "simulated":
             choice = ReconstructionPipeline.SIMULATED
         else:
-            raise ValueError(f"Unsupported reconstruction pipeline: '{raw_choice}'. "
-                             f"Valid options: {[p.value for p in ReconstructionPipeline]}")
+            raise ValueError(
+                f"Unsupported reconstruction pipeline: '{raw_choice}'. "
+                f"Valid options: {[p.value for p in ReconstructionPipeline]}"
+            )
 
         logging.info(f"Runner selected engine adapter: {choice.value} (from input: {raw_choice})")
 
         if choice == ReconstructionPipeline.COLMAP_OPENMVS:
             return self.openmvs_adapter
-        elif choice == ReconstructionPipeline.COLMAP_DENSE:
+        if choice == ReconstructionPipeline.COLMAP_DENSE:
             return self.colmap_adapter
-        elif choice == ReconstructionPipeline.SIMULATED:
+        if choice == ReconstructionPipeline.SIMULATED:
             if is_production:
                 raise RuntimeError("Stub engine strictly prohibited in production.")
-            
             allow_simulated = os.getenv("ALLOW_SIMULATED_RECONSTRUCTION", "false").lower() == "true"
             if not allow_simulated:
-                 raise RuntimeError("Simulated reconstruction is disabled by default locally.")
-            
+                raise RuntimeError("Simulated reconstruction is disabled by default locally.")
             if not hasattr(self, "_simulated_cached"):
-                from .adapter import SimulatedAdapter
                 self._simulated_cached = SimulatedAdapter()
             return self._simulated_cached
-        
-        # Should be unreachable due to the validation above
+
         raise ValueError(f"Unhandled pipeline choice: {choice}")
 
     def _read_image(self, image_path: Path):
@@ -225,36 +216,37 @@ class ReconstructionRunner:
         """
         if not results:
             return -1.0
-        
-        # Base score from registered images (critical for sparse success)
+
         score = results.get("registered_images", 0) * 100.0
-        
-        # Contribution from point counts
         score += results.get("sparse_points", 0) * 0.5
         score += results.get("dense_points_fused", 0) * 0.1
-        
-        # Penalty for failed meshing
+
         if results.get("mesher_used") == "failed":
             score -= 5000.0
-        elif results.get("mesher_used") in ["poisson", "delaunay"]:
+        elif results.get("mesher_used") in ["poisson", "delaunay", "simulated"]:
             score += 2000.0
-            
-        # SPRINT: Early Quality Signal for Texturing
+
+        # Penalize unsafe mask conditions while still allowing the best empirical output to win.
+        if results.get("force_unmasked_fusion"):
+            score -= 250.0
+        if results.get("dense_mask_valid") is False and results.get("mask_mode") == "masked":
+            score -= 500.0
+
         texture_path = results.get("texture_path")
-        has_texture = texture_path and Path(texture_path).exists()
-        
+        has_texture = bool(texture_path and Path(texture_path).exists() and "_no_texture.png" not in str(texture_path))
+
         texture_penalty = 0.0
         if has_texture:
-            score += 3000.0  # Prefer textured OpenMVS output
+            score += 3000.0
         elif settings.require_textured_output:
             texture_penalty = -4000.0
-            score += texture_penalty  # Penalize geometry-only when texture is strictly required
-            
+            score += texture_penalty
+
         mesh_load_probe_ok = False
         mesh_probe_vertex_count = 0
         mesh_probe_face_count = 0
         mesh_probe_has_uv = False
-        
+
         mesh_path = results.get("mesh_path")
         if mesh_path and Path(mesh_path).exists():
             try:
@@ -269,8 +261,7 @@ class ReconstructionRunner:
                         mesh_probe_has_uv = True
             except Exception:
                 pass
-                
-        # Inject explicit meta fields
+
         results["has_texture_file"] = has_texture
         results["require_textured_output"] = settings.require_textured_output
         results["texture_required_penalty"] = texture_penalty
@@ -278,7 +269,7 @@ class ReconstructionRunner:
         results["mesh_probe_vertex_count"] = mesh_probe_vertex_count
         results["mesh_probe_face_count"] = mesh_probe_face_count
         results["mesh_probe_has_uv"] = mesh_probe_has_uv
-            
+
         return score
 
     def run(self, job: ReconstructionJob) -> OutputManifest:
@@ -286,43 +277,41 @@ class ReconstructionRunner:
             raise InsufficientInputError("At least 3 high-quality frames are required for reconstruction.")
 
         validated_frames = self._validate_input_frames(job.input_frames)
-        
-        # Determine fallback sequence from settings
-        fallback_steps = settings.recon_fallback_steps
-        if not fallback_steps:
-            fallback_steps = ["default"]
-            
+
+        fallback_steps = settings.recon_fallback_steps or ["default"]
+
         audit = ReconstructionAudit(capture_session_id=job.capture_session_id)
         job_dir = Path(job.job_dir).resolve()
         job_dir.mkdir(parents=True, exist_ok=True)
-        
+
         best_results = None
         best_score = -1.0
         best_index = -1
         run_start = time.monotonic()
-        
+
         for i, step_name in enumerate(fallback_steps):
             attempt_type = ReconstructionAttemptType(step_name)
-            
-            # Skip unmasked if disabled
+
             if attempt_type == ReconstructionAttemptType.UNMASKED and not settings.recon_unmasked_fallback_enabled:
-                logging.warning(f"Skipping UNMASKED fallback as it is disabled in settings.")
+                logging.warning("Skipping UNMASKED fallback as it is disabled in settings.")
                 continue
 
-            # Create isolated sub-workspace for this attempt
             attempt_dir = job_dir / f"attempt_{i}_{step_name}"
             attempt_dir.mkdir(parents=True, exist_ok=True)
-            
+
             logging.info(f"Starting reconstruction attempt {i}: type={step_name}")
-            
-            # Density & Masking logic
+
             density = 1.0
             enforce_masks = True
             current_frames = validated_frames
             sampling_rate_used = None
             reextracted_frames_dir = None
-            
-            if attempt_type == ReconstructionAttemptType.DENSER_FRAMES:
+
+            if attempt_type == ReconstructionAttemptType.DEFAULT:
+                if ReconstructionAttemptType.DENSER_FRAMES.value in fallback_steps:
+                    density = 0.5
+            elif attempt_type == ReconstructionAttemptType.DENSER_FRAMES:
+                density = 1.0
                 if job.source_video_path and Path(job.source_video_path).exists():
                     sampling_rate_used = settings.recon_fallback_sample_rate
                     logging.info(
@@ -338,10 +327,7 @@ class ReconstructionRunner:
                         extract_dir.mkdir(parents=True, exist_ok=True)
                         reextracted_frames_dir = str(extract_dir)
 
-                        extracted = extractor.extract_keyframes(
-                            job.source_video_path,
-                            reextracted_frames_dir,
-                        )
+                        extracted = extractor.extract_keyframes(job.source_video_path, reextracted_frames_dir)
 
                         if isinstance(extracted, tuple):
                             new_frames, extraction_report = extracted
@@ -357,41 +343,26 @@ class ReconstructionRunner:
 
                         if new_frames:
                             current_frames = [str(p) for p in new_frames]
-                            logging.info(
-                                f"Attempt {i}: Denser extraction successful. count={len(current_frames)}"
-                            )
+                            logging.info(f"Attempt {i}: Denser extraction successful. count={len(current_frames)}")
                         else:
-                            logging.warning(
-                                f"Attempt {i}: Denser extraction produced no frames. Falling back to default list."
-                            )
-
+                            logging.warning("Attempt %s: Denser extraction produced no frames.", i)
                     except Exception as ex_err:
                         logging.error(f"Attempt {i}: Denser extraction failed: {ex_err}")
                 else:
-                    logging.warning(
-                        f"Attempt {i}: source_video_path missing or invalid. Cannot densify accurately."
-                    ) # Default behavior might use a slightly reduced density to speed up/simplify
-                # but for this specific sprint, we'll keep it at 1.0 unless otherwise specified.
-                # However, if 'denser_frames' is a thing, usually 'default' is less dense.
-                # We'll use 0.5 for default if denser_frames is in the list.
-            if attempt_type == ReconstructionAttemptType.DEFAULT:
-                if ReconstructionAttemptType.DENSER_FRAMES.value in fallback_steps:
-                    density = 0.5
-            elif attempt_type == ReconstructionAttemptType.DENSER_FRAMES:
-                density = 1.0
+                    logging.warning("Attempt %s: source_video_path missing or invalid.", i)
+
             elif attempt_type == ReconstructionAttemptType.UNMASKED:
                 enforce_masks = False
                 density = 1.0
-            current_frames = [str(p) for p in current_frames]
-            current_frames = self._validate_input_frames(current_frames)
+
+            current_frames = self._validate_input_frames([str(p) for p in current_frames])
+
             try:
-                # 1. Primary Attempt (usually OpenMVS if configured)
                 current_adapter = self.adapter
                 primary_results = None
                 primary_error = None
-                
+
                 try:
-                    # Execution workspace handling (ASCII path safety for Windows)
                     execution_dir, final_dir = self._prepare_execution_workspace(job)
                     if final_dir:
                         final_dir = attempt_dir
@@ -399,28 +370,24 @@ class ReconstructionRunner:
                         execution_dir = attempt_dir
 
                     primary_results = current_adapter.run_reconstruction(
-                        current_frames, 
+                        current_frames,
                         execution_dir,
                         density=density,
-                        enforce_masks=enforce_masks
+                        enforce_masks=enforce_masks,
                     )
-                    
-                    # Sync back if using ASCII workroot
+
                     if final_dir:
                         self._sync_workspace_back(execution_dir, final_dir)
                         primary_results = self._remap_artifact_paths(primary_results, execution_dir, final_dir)
                         shutil.rmtree(execution_dir, ignore_errors=True)
-                        
+
                 except (InsufficientReconstructionError, RuntimeReconstructionError, InsufficientInputError) as e:
                     primary_error = e
                     logging.warning(f"Primary adapter ({current_adapter.engine_type}) failed for {step_name}: {e}")
-                
+
                 results = primary_results
                 engine_used = current_adapter.engine_type
-                
-                # 2. Engine Fallback (OpenMVS -> COLMAP)
-                # If primary failed and it was OpenMVS, try COLMAP as a reliable baseline
-                # unless textured output is strictly required.
+
                 if primary_error and current_adapter.engine_type == "colmap_openmvs":
                     if settings.require_textured_output:
                         logging.error("OpenMVS failed and require_textured_output is True. Skipping COLMAP fallback.")
@@ -429,24 +396,24 @@ class ReconstructionRunner:
                         try:
                             fallback_dir = attempt_dir / "colmap_fallback"
                             fallback_dir.mkdir(parents=True, exist_ok=True)
-                            
+
                             results = self.colmap_adapter.run_reconstruction(
                                 current_frames,
                                 fallback_dir,
                                 density=density,
-                                enforce_masks=enforce_masks
+                                enforce_masks=enforce_masks,
                             )
                             engine_used = "colmap (fallback)"
-                            primary_error = None # Clear error as fallback succeeded
+                            primary_error = None
                         except Exception as fe:
                             logging.error(f"COLMAP fallback also failed for {step_name}: {fe}")
                             primary_error = fe
-                
+
                 if primary_error:
-                    raise primary_error # Re-raise if both failed or if no fallback was attempted
-                
+                    raise primary_error
+
                 score = self._score_attempt(results)
-                
+
                 attempt_res = ReconstructionAttemptResult(
                     attempt_type=attempt_type,
                     status="success",
@@ -461,14 +428,36 @@ class ReconstructionRunner:
                     source_video_path=job.source_video_path if attempt_type == ReconstructionAttemptType.DENSER_FRAMES else None,
                     reextracted_frames_dir=reextracted_frames_dir,
                     metrics_rank_score=score,
-                    metadata={"engine": engine_used}
+                    metadata={
+                        "engine": engine_used,
+                        "density": density,
+                        "enforce_masks": enforce_masks,
+                        "attempt_dir": str(attempt_dir),
+                        "reextracted_frames_dir": reextracted_frames_dir,
+                        "sampling_rate_used": sampling_rate_used,
+                        "mesh_path": results.get("mesh_path"),
+                        "texture_path": results.get("texture_path"),
+                        "has_texture_file": results.get("has_texture_file"),
+                        "mesh_probe_has_uv": results.get("mesh_probe_has_uv"),
+                        "mesh_probe_vertex_count": results.get("mesh_probe_vertex_count"),
+                        "mesh_probe_face_count": results.get("mesh_probe_face_count"),
+                        "mask_mode": results.get("mask_mode"),
+                        "feature_mask_path": results.get("feature_mask_path"),
+                        "stereo_fusion_mask_path": results.get("stereo_fusion_mask_path"),
+                        "dense_mask_valid": results.get("dense_mask_valid"),
+                        "force_unmasked_fusion": results.get("force_unmasked_fusion"),
+                        "dense_mask_count": results.get("dense_mask_count"),
+                        "dense_mask_dimension_matches": results.get("dense_mask_dimension_matches"),
+                        "dense_mask_exact_filename_matches": results.get("dense_mask_exact_filename_matches"),
+                        "dense_mask_fallback_white_ratio": results.get("dense_mask_fallback_white_ratio"),
+                    },
                 )
-                
+
                 if score > best_score:
                     best_score = score
                     best_results = results
-                    best_index = i
-                
+                    best_index = len(audit.attempts)
+
             except (InsufficientReconstructionError, RuntimeReconstructionError, InsufficientInputError) as e:
                 attempt_res = ReconstructionAttemptResult(
                     attempt_type=attempt_type,
@@ -478,37 +467,45 @@ class ReconstructionRunner:
                     sampling_rate_used=sampling_rate_used,
                     source_video_path=job.source_video_path if attempt_type == ReconstructionAttemptType.DENSER_FRAMES else None,
                     reextracted_frames_dir=reextracted_frames_dir,
-                    metrics_rank_score=-100.0
+                    metrics_rank_score=-100.0,
+                    metadata={
+                        "attempt_dir": str(attempt_dir),
+                        "density": density,
+                        "enforce_masks": enforce_masks,
+                    },
                 )
-                logging.warning(f"Attempt {i} ({step_name}) were weak or failed: {e}")
+                logging.warning(f"Attempt {i} ({step_name}) was weak or failed: {e}")
             except Exception as e:
                 attempt_res = ReconstructionAttemptResult(
                     attempt_type=attempt_type,
                     status="failed",
                     frames_used=0,
                     error_message=f"Unexpected error: {str(e)}",
-                    metrics_rank_score=-1000.0
+                    metrics_rank_score=-1000.0,
+                    metadata={
+                        "attempt_dir": str(attempt_dir),
+                        "density": density,
+                        "enforce_masks": enforce_masks,
+                    },
                 )
                 logging.error(f"Attempt {i} ({step_name}) crashed: {e}")
-            
-            audit.attempts.append(attempt_res)
-            
-            # OPTIONAL: Early exit if default is EXTREMELY good? 
-            # User wants honest comparison, so we'll likely continue unless configured otherwise.
 
-        # After all attempts, select best
+            audit.attempts.append(attempt_res)
+
         if best_results is None or best_score < 0:
             audit.final_status = "recapture_required"
             self._save_audit(audit, job_dir)
-            # Find the most descriptive error
             last_err = audit.attempts[-1].error_message if audit.attempts else "All reconstruction attempts failed."
             raise InsufficientReconstructionError(f"All fallback attempts failed. Last error: {last_err}")
 
         audit.selected_best_index = best_index
         audit.final_status = "success"
         self._save_audit(audit, job_dir)
-        
-        logging.info(f"Reconstruction complete. Selected best attempt index: {best_index} ({audit.attempts[best_index].attempt_type})")
+
+        logging.info(
+            f"Reconstruction complete. Selected best attempt index: "
+            f"{best_index} ({audit.attempts[best_index].attempt_type})"
+        )
 
         best_engine = audit.attempts[best_index].metadata.get("engine", self.adapter.engine_type)
         elapsed_seconds = time.monotonic() - run_start
@@ -519,7 +516,6 @@ class ReconstructionRunner:
         atomic_write_json(audit_path, audit.model_dump(mode="json"))
 
     def _check_obj_uvs(self, obj_path: Path) -> bool:
-        """Simple OBJ parser to detect vt lines."""
         if not obj_path.exists() or obj_path.suffix.lower() != ".obj":
             return False
         try:
@@ -531,16 +527,22 @@ class ReconstructionRunner:
             pass
         return False
 
-    def _finalize_best_attempt(self, results: dict, job: ReconstructionJob, job_dir: Path, engine_used: str, elapsed_seconds: float = 0.0) -> OutputManifest:
+    def _finalize_best_attempt(
+        self,
+        results: dict,
+        job: ReconstructionJob,
+        job_dir: Path,
+        engine_used: str,
+        elapsed_seconds: float = 0.0,
+    ) -> OutputManifest:
         mesh_path = Path(results["mesh_path"])
-        texture_path = Path(results["texture_path"])
+        texture_path = Path(results.get("texture_path") or (job_dir / "_no_texture.png"))
         log_path = Path(results["log_path"])
 
         vertex_count, face_count = self._validate_mesh_artifact(mesh_path)
         checksum = calculate_checksum(mesh_path)
 
-        # Detect UVs
-        uv_present = results.get("mesh_probe_has_uv", False)
+        uv_present = bool(results.get("mesh_probe_has_uv", False))
         if not uv_present and mesh_path.suffix.lower() == ".obj":
             uv_present = self._check_obj_uvs(mesh_path)
 
@@ -566,8 +568,7 @@ class ReconstructionRunner:
             ),
             checksum=checksum,
         )
-        
-        # Overwrite root manifest with the best one
+
         manifest_path = job_dir / "manifest.json"
         atomic_write_json(manifest_path, manifest.model_dump(mode="json"))
         return manifest
