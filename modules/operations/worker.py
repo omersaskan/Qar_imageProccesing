@@ -785,6 +785,8 @@ class IngestionWorker:
             "material_integrity_status": export_metrics.get("material_integrity_status", "missing"),
             "delivery_geometry_count": int(export_metrics["geometry_count"]),
             "delivery_component_count": int(export_metrics["component_count"]),
+            "texture_path": texture_path if texture_path and Path(texture_path).exists() else None,
+            "expected_product_color": settings.expected_product_color,
         }
 
         report = self.validator.validate(asset_id, validation_input)

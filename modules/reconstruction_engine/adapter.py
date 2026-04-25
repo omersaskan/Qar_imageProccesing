@@ -1204,11 +1204,23 @@ class OpenMVSAdapter(COLMAPAdapter):
                 except Exception:
                     pass
             
+            reasons = meta.get("reasons", []) or meta.get("failure_reasons", [])
+            is_clipped = (
+                meta.get("is_clipped", False)
+                or meta.get("subject_clipped", False)
+                or "subject_clipped" in reasons
+            )
+            support_suspected = (
+                meta.get("support_suspected", False)
+                or meta.get("support_contamination_detected", False)
+                or "support_contamination_detected" in reasons
+            )
+
             mask_infos.append({
                 "path": mask_path,
                 "meta": meta,
-                "is_clipped": meta.get("is_clipped", False),
-                "support_suspected": meta.get("support_suspected", False),
+                "is_clipped": bool(is_clipped),
+                "support_suspected": bool(support_suspected),
                 "occupancy": float(meta.get("occupancy", 0.0))
             })
 

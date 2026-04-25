@@ -299,6 +299,19 @@ class GuidanceAggregator:
                 _WARN,
             ))
 
+        # Texture Quality (atlas contamination, black patches, white ratio)
+        if report.get("texture_quality_status") in {"contaminated", "invalid"}:
+            messages.append(_msg(
+                "TEXTURE_ATLAS_CONTAMINATION",
+                _COACHING_MESSAGES["TEXTURE_ATLAS_CONTAMINATION"],
+                _WARN,
+            ))
+
+        for reason in report.get("texture_quality_reasons", []):
+            detail = _match_failure_reason(reason)
+            if detail:
+                messages.append(detail)
+
         # Review decision → advice code
         if report.get("final_decision") == "review":
             messages.append(_msg(

@@ -27,6 +27,12 @@ class ValidationThresholds(BaseModel):
     # material / semantic requirements
     require_pbr_complete: bool = False
 
+    # texture quality thresholds
+    max_black_pixel_ratio: float = Field(0.20, ge=0, le=1.0)
+    max_dominant_background_ratio: float = Field(0.15, ge=0, le=1.0)
+    min_atlas_coverage_ratio: float = Field(0.60, ge=0, le=1.0)
+    min_near_white_ratio_white_cream: float = Field(0.40, ge=0, le=1.0)
+
 
 def validate_polycount(count: int, thresholds: ValidationThresholds) -> str:
     if count <= thresholds.polycount_pass:

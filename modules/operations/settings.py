@@ -109,6 +109,7 @@ class Settings(BaseSettings):
     max_dominant_background_ratio: float = Field(0.15, validation_alias="MAX_DOMINANT_BACKGROUND_RATIO")
     min_atlas_coverage_ratio: float = Field(0.60, validation_alias="MIN_ATLAS_COVERAGE_RATIO")
     min_near_white_ratio_white_cream: float = Field(0.40, validation_alias="MIN_NEAR_WHITE_RATIO_WHITE_CREAM")
+    expected_product_color: str = Field("unknown", validation_alias="EXPECTED_PRODUCT_COLOR")
 
     @property
     def is_dev(self) -> bool:
