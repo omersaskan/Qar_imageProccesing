@@ -72,6 +72,9 @@ _COACHING_MESSAGES = {
     "CONTAMINATION_HIGH": "3D modelde yüksek düzeyde gürültü veya yüzey kirliliği tespit edildi. Arka planı temizleyip yeniden çekim yapmayı deneyin.",
     "TEXTURE_UV_FAILURE": "Doku koordinatlarında (UV) bütünlük sorunu tespit edildi. Modelin görsel kalitesi etkilenebilir.",
     "VALIDATION_REVIEW_ADVICE": "Model manuel inceleme gerektiriyor. Lütfen dashboard üzerinden görsel kalite kontrolünü tamamlayın.",
+    "ASSET_VALIDATION_FAILED": "Model kalite kontrolünden geçemedi. Lütfen metrikleri ve görsel sonuçları dashboard üzerinden kontrol edin.",
+    "GROUND_ALIGNMENT_FAILED": "Model zemin hizalaması standart dışı. Ürünün düz bir zeminde ve dik durduğundan emin olun.",
+    "MOBILE_GRADE_LOW": "Model poligon sayısı mobil cihazlar için çok yüksek (Grade D). Bu durum yükleme hızını etkileyebilir.",
 }
 
 # Mapping patterns to internal codes for failure_reason matching
@@ -108,6 +111,9 @@ _FAILURE_PATTERNS = [
     ("insufficient size",   "LOW_RECONSTRUCTABLE_OVERLAP", _CRIT),
     ("model too small",     "LOW_RECONSTRUCTABLE_OVERLAP", _CRIT),
     ("registered_images",   "LOW_RECONSTRUCTABLE_OVERLAP", _CRIT),
+
+    # Asset Quality Validation
+    ("Validation Failed",   "ASSET_VALIDATION_FAILED", _CRIT),
 ]
 
 # Python-internal exception strings that must never reach operators
@@ -294,6 +300,22 @@ class GuidanceAggregator:
             messages.append(_msg(
                 "VALIDATION_REVIEW_ADVICE",
                 _COACHING_MESSAGES["VALIDATION_REVIEW_ADVICE"],
+                _WARN,
+            ))
+
+        # Ground alignment failure
+        if report.get("ground_aligned") is False:
+            messages.append(_msg(
+                "GROUND_ALIGNMENT_FAILED",
+                _COACHING_MESSAGES["GROUND_ALIGNMENT_FAILED"],
+                _WARN,
+            ))
+
+        # Mobile performance grade D
+        if report.get("mobile_performance_grade") == "D":
+            messages.append(_msg(
+                "MOBILE_GRADE_LOW",
+                _COACHING_MESSAGES["MOBILE_GRADE_LOW"],
                 _WARN,
             ))
 

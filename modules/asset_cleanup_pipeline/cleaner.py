@@ -188,23 +188,23 @@ class AssetCleaner:
         if not map_kd_found:
             raise ValueError("MTL missing 'map_Kd' line")
             
-        # Copy files and normalize OBJ usemtl
+        # Aligned OBJ and normalization
         cleaned_mesh_path = output_dir / "cleaned_mesh.obj"
         cleaned_mtl_path = output_dir / mtl_filename
         cleaned_tex_path = output_dir / raw_tex.name
         
-        with open(raw_mesh, "r", encoding="utf-8", errors="ignore") as f_in, \
-             open(cleaned_mesh_path, "w", encoding="utf-8") as f_out:
-            for line in f_in:
-                if line.startswith("usemtl "):
-                    f_out.write("usemtl material_0\n")
-                else:
-                    f_out.write(line)
+        # 1. Perform safe alignment (translates vertices, computes bbox and pivot offset)
+        pivot_offset, bbox_min, bbox_max = self._safe_align_obj(raw_mesh, cleaned_mesh_path)
 
+        # 2. OBJ usemtl normalization (could be merged with alignment but kept separate for clarity)
+        # Actually, let's merge it into _safe_align_obj or do it here. 
+        # Since _safe_align_obj already wrote the file, we can either update it or do it during rewrite.
+        # Let's update _safe_align_obj to also normalize usemtl.
+        
         import shutil
         shutil.copy2(raw_tex, cleaned_tex_path)
         
-        # Normalize MTL
+        # 3. Normalize MTL
         with open(cleaned_mtl_path, "w", encoding="utf-8") as f:
             f.write(f"newmtl material_0\n")
             f.write(f"Ka 1.000000 1.000000 1.000000\n")
@@ -214,11 +214,12 @@ class AssetCleaner:
             f.write(f"illum 2\n")
             f.write(f"map_Kd {raw_tex.name}\n")
             
-        # Get face count via trimesh but do NOT export/modify
-        mesh = trimesh.load(str(cleaned_mesh_path))
-        if isinstance(mesh, trimesh.Scene):
-            mesh = mesh.dump(concatenate=True)
-        face_count = len(mesh.faces)
+        # 4. Get face count via direct OBJ parsing (No trimesh!)
+        face_count = 0
+        with open(cleaned_mesh_path, "r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                if line.startswith("f "):
+                    face_count += 1
         
         return {
             "cleanup_mode": "texture_safe_copy",
@@ -227,7 +228,64 @@ class AssetCleaner:
             "cleaned_mesh_path": str(cleaned_mesh_path),
             "cleaned_texture_path": str(cleaned_tex_path),
             "final_polycount": int(face_count),
+            "pivot_offset": pivot_offset,
+            "bbox_min": bbox_min,
+            "bbox_max": bbox_max,
         }
+
+    def _safe_align_obj(self, input_path: Path, output_path: Path) -> Tuple[Dict[str, float], Dict[str, float], Dict[str, float]]:
+        """
+        Translates vertices to ground (Z=0) and center (XY=0) without using trimesh.
+        Also normalizes usemtl to material_0.
+        Returns: (pivot_offset, bbox_min, bbox_max)
+        """
+        vertices = []
+        # First pass: collect vertices and compute bounds
+        with open(input_path, "r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                if line.startswith("v "):
+                    parts = line.split()
+                    if len(parts) >= 4:
+                        vertices.append([float(parts[1]), float(parts[2]), float(parts[3])])
+
+        if not vertices:
+            raise ValueError("No vertices found in OBJ")
+
+        import numpy as np
+        v_np = np.array(vertices)
+        v_min = v_np.min(axis=0)
+        v_max = v_np.max(axis=0)
+        v_centroid = v_np.mean(axis=0)
+
+        # Shift X,Y to center, Z to ground (min_z = 0)
+        shift_x = -float(v_centroid[0])
+        shift_y = -float(v_centroid[1])
+        shift_z = -float(v_min[2])
+
+        pivot_offset = {"x": shift_x, "y": shift_y, "z": shift_z}
+        
+        # Second pass: write translated vertices and other lines
+        with open(input_path, "r", encoding="utf-8", errors="ignore") as f_in, \
+             open(output_path, "w", encoding="utf-8") as f_out:
+            for line in f_in:
+                if line.startswith("v "):
+                    parts = line.split()
+                    if len(parts) >= 4:
+                        nx = float(parts[1]) + shift_x
+                        ny = float(parts[2]) + shift_y
+                        nz = float(parts[3]) + shift_z
+                        f_out.write(f"v {nx:.6f} {ny:.6f} {nz:.6f}\n")
+                    else:
+                        f_out.write(line)
+                elif line.startswith("usemtl "):
+                    f_out.write("usemtl material_0\n")
+                else:
+                    f_out.write(line)
+
+        bbox_min = {"x": float(v_min[0] + shift_x), "y": float(v_min[1] + shift_y), "z": 0.0}
+        bbox_max = {"x": float(v_max[0] + shift_x), "y": float(v_max[1] + shift_y), "z": float(v_max[2] + shift_z)}
+
+        return pivot_offset, bbox_min, bbox_max
 
     def process_cleanup(
         self,
@@ -264,19 +322,20 @@ class AssetCleaner:
             )
             
             # Generate metadata
-            bbox_min, bbox_max = self.bbox_extractor.extract(stats["cleaned_mesh_path"])
+            bbox_min = stats["bbox_min"]
+            bbox_max = stats["bbox_max"]
+            pivot_offset = stats["pivot_offset"]
+            
             metadata = self.normalizer.generate_metadata(
                 bbox_min,
                 bbox_max,
-                {"x": 0.0, "y": 0.0, "z": 0.0}, # Texture safe copy doesn't realign yet
+                pivot_offset,
                 stats["final_polycount"],
             )
             metadata_path = job_cleaned_dir / "normalized_metadata.json"
             self.normalizer.save_metadata(metadata, str(metadata_path))
             
             stats["metadata_path"] = str(metadata_path)
-            stats["bbox_min"] = bbox_min
-            stats["bbox_max"] = bbox_max
             
             return metadata, stats, stats["cleaned_mesh_path"]
 
@@ -296,11 +355,14 @@ class AssetCleaner:
             )
             
             # Generate metadata
-            bbox_min, bbox_max = self.bbox_extractor.extract(stats["cleaned_mesh_path"])
+            bbox_min = stats["bbox_min"]
+            bbox_max = stats["bbox_max"]
+            pivot_offset = stats["pivot_offset"]
+            
             metadata = self.normalizer.generate_metadata(
                 bbox_min,
                 bbox_max,
-                {"x": 0.0, "y": 0.0, "z": 0.0}, # Texture safe copy doesn't realign yet
+                pivot_offset,
                 stats["final_polycount"],
             )
             metadata_path = job_cleaned_dir / "normalized_metadata.json"

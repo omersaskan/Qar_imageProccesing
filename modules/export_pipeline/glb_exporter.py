@@ -271,6 +271,7 @@ class GLBExporter:
             "has_material": inspection_result["has_material"],
             "used_texture_path": used_texture_path,
             "texture_applied_successfully": actual_texture_success,
+            "has_embedded_texture": actual_texture_success,
             "material_semantic_status": inspection_result["material_semantic_status"],
             "texture_integrity_status": inspection_result["texture_integrity_status"]
         }
