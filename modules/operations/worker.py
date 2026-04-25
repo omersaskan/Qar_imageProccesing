@@ -608,14 +608,31 @@ class IngestionWorker:
         second _load_manifest() call within this method.
         """
         manifest = self._load_manifest(session)
+        
+        raw_mesh_path = manifest.textured_mesh_path or manifest.mesh_path
+        raw_texture_path = manifest.texture_path
+
+        logger.info("Cleanup input mesh=%s", raw_mesh_path)
+        logger.info(
+            "Cleanup texture path=%s exists=%s",
+            raw_texture_path,
+            bool(raw_texture_path and Path(raw_texture_path).exists()),
+        )
+        logger.info(
+            "Cleanup manifest texturing_status=%s has_texture=%s uv_present=%s",
+            manifest.texturing_status,
+            manifest.mesh_metadata.has_texture,
+            manifest.mesh_metadata.uv_present,
+        )
+
         logger.info(f"Starting mesh cleanup for {session.session_id}...")
 
         try:
             metadata, cleanup_stats, cleaned_mesh_path = self.cleaner.process_cleanup(
                 job_id=manifest.job_id,
-                raw_mesh_path=manifest.mesh_path,
+                raw_mesh_path=raw_mesh_path,
                 profile_type=CleanupProfileType.MOBILE_DEFAULT,
-                raw_texture_path=manifest.texture_path,
+                raw_texture_path=raw_texture_path,
             )
         except Exception as e:
             import traceback

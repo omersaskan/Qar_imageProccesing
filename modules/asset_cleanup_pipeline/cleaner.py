@@ -4,12 +4,15 @@ from typing import Tuple, Dict, Optional
 
 import trimesh
 
+from modules.operations.logging_config import get_component_logger
 from .profiles import PROFILES, CleanupProfileType
 from .remesher import Remesher
 from .alignment import AlignmentProcessor
 from .bbox import BBoxExtractor
 from .normalizer import Normalizer, NormalizedMetadata
 from .isolation import MeshIsolator
+
+logger = get_component_logger("cleaner")
 
 
 class AssetCleaner:
@@ -58,6 +61,79 @@ class AssetCleaner:
 
         except Exception:
             return False, False
+
+    def _is_valid_textured_obj_bundle(
+        self, raw_mesh_path: str, raw_texture_path: Optional[str] = None
+    ) -> Tuple[bool, str, Optional[str]]:
+        """
+        Validates if the input is a valid textured OBJ bundle.
+        Returns: (is_valid, reason, resolved_texture_path)
+        """
+        mesh_path = Path(raw_mesh_path)
+        if mesh_path.suffix.lower() != ".obj":
+            return False, f"Not an OBJ file: {mesh_path.suffix}", None
+
+        if not mesh_path.exists():
+            return False, f"Mesh file missing: {raw_mesh_path}", None
+
+        # 1. Scan OBJ for vt and mtllib
+        vt_found = False
+        mtllib_filename = None
+        try:
+            with open(mesh_path, "r", encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    stripped = line.strip()
+                    if stripped.startswith("vt "):
+                        vt_found = True
+                    if stripped.startswith("mtllib "):
+                        parts = stripped.split(None, 1)
+                        if len(parts) > 1:
+                            mtllib_filename = parts[1].strip()
+                    if vt_found and mtllib_filename:
+                        break
+        except Exception as e:
+            return False, f"Error reading OBJ: {e}", None
+
+        if not vt_found:
+            return False, "OBJ missing 'vt' lines (no UVs)", None
+        if not mtllib_filename:
+            return False, "OBJ missing 'mtllib' reference", None
+
+        # 2. Resolve and check MTL
+        mtl_path = mesh_path.parent / mtllib_filename
+        if not mtl_path.exists():
+            return False, f"MTL file missing: {mtllib_filename}", None
+
+        # 3. Scan MTL for map_Kd
+        map_kd_filename = None
+        try:
+            with open(mtl_path, "r", encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    if line.strip().startswith("map_Kd "):
+                        parts = line.strip().split(None, 1)
+                        if len(parts) > 1:
+                            map_kd_filename = parts[1].strip()
+                        break
+        except Exception as e:
+            return False, f"Error reading MTL: {e}", None
+
+        if not map_kd_filename:
+            return False, "MTL missing 'map_Kd' reference", None
+
+        # 4. Resolve texture
+        # If raw_texture_path is provided, we use it, otherwise we use the one from MTL
+        resolved_tex_path = None
+        if raw_texture_path and Path(raw_texture_path).exists():
+            resolved_tex_path = raw_texture_path
+        else:
+            potential_tex = mtl_path.parent / map_kd_filename
+            if potential_tex.exists():
+                resolved_tex_path = str(potential_tex)
+
+        if not resolved_tex_path:
+            return False, f"Texture file missing: {map_kd_filename}", None
+
+        return True, "Valid textured OBJ bundle", resolved_tex_path
 
     def _run_texture_safe_copy(
         self,
@@ -168,6 +244,41 @@ class AssetCleaner:
         """
         if not os.path.exists(raw_mesh_path):
             raise FileNotFoundError(f"Raw mesh not found at: {raw_mesh_path}")
+
+        # REQUIRED FIX: Auto-detect textured OBJ before any trimesh load or destructive path
+        valid, reason, resolved_texture_path = self._is_valid_textured_obj_bundle(
+            raw_mesh_path, raw_texture_path
+        )
+        logger.info("texture_safe_copy auto-detect: valid=%s reason=%s", valid, reason)
+
+        if valid:
+            logger.info("Skipping destructive cleanup for textured OBJ: %s", raw_mesh_path)
+            # Route to texture_safe_copy
+            job_cleaned_dir = self.cleaned_root / job_id
+            job_cleaned_dir.mkdir(parents=True, exist_ok=True)
+            
+            stats = self._run_texture_safe_copy(
+                raw_mesh_path,
+                resolved_texture_path,
+                job_cleaned_dir
+            )
+            
+            # Generate metadata
+            bbox_min, bbox_max = self.bbox_extractor.extract(stats["cleaned_mesh_path"])
+            metadata = self.normalizer.generate_metadata(
+                bbox_min,
+                bbox_max,
+                {"x": 0.0, "y": 0.0, "z": 0.0}, # Texture safe copy doesn't realign yet
+                stats["final_polycount"],
+            )
+            metadata_path = job_cleaned_dir / "normalized_metadata.json"
+            self.normalizer.save_metadata(metadata, str(metadata_path))
+            
+            stats["metadata_path"] = str(metadata_path)
+            stats["bbox_min"] = bbox_min
+            stats["bbox_max"] = bbox_max
+            
+            return metadata, stats, stats["cleaned_mesh_path"]
 
         profile = PROFILES[profile_type]
 
