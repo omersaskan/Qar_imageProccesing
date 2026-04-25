@@ -220,7 +220,7 @@ class FrameExtractor:
                     mask,
                     current_bbox,
                 )
-                self._write_verified_image(frame_path, focused_frame, "Extracted frame", cv2.IMREAD_COLOR)
+                self._write_verified_image(frame_path, frame, "Extracted frame", cv2.IMREAD_COLOR)
                 self._write_verified_image(mask_path, focused_mask, "Mask", cv2.IMREAD_GRAYSCALE)
                 
                 with open(meta_path, "w", encoding="utf-8") as f:

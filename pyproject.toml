@@ -30,5 +30,5 @@ dev = [
 include = ["modules*"]
 
 [tool.pytest.ini_options]
-testpaths = ["modules/*/tests"]
-pythonpath = ["modules"]
+testpaths = ["modules/*/tests", "tests"]
+pythonpath = ["."]

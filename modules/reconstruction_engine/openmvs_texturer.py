@@ -77,7 +77,7 @@ class OpenMVSTexturer:
                 "-i", str(dense_workspace),
                 "-o", str(scene_mvs),
                 "--working-folder", str(dense_workspace),
-                "--image-folder", str(dense_workspace.parent / "images")
+                "--image-folder", str(dense_workspace / "images")
             ]
             
             try:
