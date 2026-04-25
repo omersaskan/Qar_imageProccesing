@@ -43,7 +43,10 @@ def test_export_geometry_only(test_dir):
     res = exporter.export_to_glb(str(obj_path), None, str(glb_path))
     
     assert res["has_uv"] is False
-    assert res["has_material"] is False
+    assert res["has_material"] is True
+    assert res["has_embedded_texture"] is False
+    assert res["material_semantic_status"] == "geometry_only"
+    assert res["texture_integrity_status"] == "missing"
     assert res["texture_applied_successfully"] is False
     
     inspect_res = exporter.inspect_exported_asset(str(glb_path))

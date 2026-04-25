@@ -93,12 +93,16 @@ class AssetValidator:
         else:
             final_decision = "pass"
 
-        # SPRINT: Customer-ready Guard
-        # Geometry-only or UV-only GLBs must never pass as customer-ready
-        if semantic_status in ["geometry_only", "uv_only", "material_incomplete"]:
+        # Customer-ready semantic guard:
+        # - geometry_only is a hard fail
+        # - uv_only / material_incomplete should not pass, but can be reviewed
+        if semantic_status == "geometry_only":
             final_decision = "fail"
-            combined_report = {"semantic_guard": "fail"} # Initialize dict here to be updated below
-
+            combined_report = {"semantic_guard": "fail_geometry_only"}
+        elif semantic_status in ["uv_only", "material_incomplete"]:
+            if final_decision == "pass":
+                final_decision = "review"
+                combined_report = {"semantic_guard": "review_material_incomplete"}
         comp_count = int(iso_stats.get("component_count", 1))
         final_faces = int(iso_stats.get("final_faces", 0))
         initial_faces = max(int(iso_stats.get("initial_faces", 1)), 1)

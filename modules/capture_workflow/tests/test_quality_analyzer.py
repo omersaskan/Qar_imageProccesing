@@ -1,8 +1,7 @@
 import pytest
 import numpy as np
-from capture_workflow.quality_analyzer import QualityAnalyzer
-from capture_workflow.config import QualityThresholds
-
+from modules.capture_workflow.quality_analyzer import QualityAnalyzer
+from modules.capture_workflow.config import QualityThresholds
 
 def _make_checkerboard(size: int = 100, tile: int = 10) -> np.ndarray:
     grid = np.indices((size, size)).sum(axis=0) // tile

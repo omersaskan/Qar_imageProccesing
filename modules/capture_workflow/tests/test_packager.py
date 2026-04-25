@@ -1,8 +1,8 @@
 import pytest
 from datetime import datetime
-from shared_contracts.models import CaptureSession, ReconstructionJobDraft
-from capture_workflow.packager import Packager
-from shared_contracts.lifecycle import AssetStatus
+from modules.shared_contracts.models import CaptureSession, ReconstructionJobDraft
+from modules.capture_workflow.packager import Packager
+from modules.shared_contracts.lifecycle import AssetStatus
 
 def test_packager_minimal():
     packager = Packager()

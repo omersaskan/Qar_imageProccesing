@@ -53,7 +53,10 @@ def test_extract_keyframes_mocked(mock_videocapture, tmp_path):
         frames, _report = extractor.extract_keyframes("dummy.mp4", str(output_dir))
 
     assert len(frames) == 1
-    assert mock_write_verified_image.call_count == 2
+    assert mock_write_verified_image.call_count == 3
+    assert _report["frame_mode"] == "raw_for_reconstruction"
+    assert "masked_preview_dir" in _report
+    assert "masks_dir" in _report
 
 @patch('cv2.VideoCapture')
 @patch('cv2.imencode')

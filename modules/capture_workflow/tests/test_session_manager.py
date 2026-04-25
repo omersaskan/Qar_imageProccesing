@@ -1,7 +1,7 @@
 import pytest
 from pathlib import Path
-from capture_workflow.session_manager import SessionManager
-from shared_contracts.lifecycle import AssetStatus
+from modules.capture_workflow.session_manager import SessionManager
+from modules.shared_contracts.lifecycle import AssetStatus
 
 def test_session_creation_persistence(tmp_path):
     # Use tmp_path for isolated testing

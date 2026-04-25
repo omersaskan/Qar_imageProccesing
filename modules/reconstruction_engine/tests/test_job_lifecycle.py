@@ -1,9 +1,9 @@
 import pytest
 import json
 from pathlib import Path
-from shared_contracts.models import ReconstructionJobDraft
-from shared_contracts.lifecycle import ReconstructionStatus
-from reconstruction_engine.job_manager import JobManager
+from modules.shared_contracts.models import ReconstructionJobDraft
+from modules.shared_contracts.lifecycle import ReconstructionStatus
+from modules.reconstruction_engine.job_manager import JobManager
 
 def test_create_and_load_job(tmp_path):
     manager = JobManager(data_root=str(tmp_path))

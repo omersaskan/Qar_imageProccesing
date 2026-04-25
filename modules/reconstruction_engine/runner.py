@@ -285,7 +285,7 @@ class ReconstructionRunner:
         job_dir.mkdir(parents=True, exist_ok=True)
 
         best_results = None
-        best_score = -1.0
+        best_score = float("-inf")
         best_index = -1
         run_start = time.monotonic()
 
@@ -492,12 +492,12 @@ class ReconstructionRunner:
 
             audit.attempts.append(attempt_res)
 
-        if best_results is None or best_score < 0:
+        if best_results is None:
             audit.final_status = "recapture_required"
             self._save_audit(audit, job_dir)
             last_err = audit.attempts[-1].error_message if audit.attempts else "All reconstruction attempts failed."
             raise InsufficientReconstructionError(f"All fallback attempts failed. Last error: {last_err}")
-
+        
         audit.selected_best_index = best_index
         audit.final_status = "success"
         self._save_audit(audit, job_dir)
