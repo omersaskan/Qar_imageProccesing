@@ -21,8 +21,7 @@ from .failures import (
     DenseMaskAlignmentError,
 )
 from modules.utils.mask_resolution import resolve_mask_path
-from modules.operations.settings import settings
-
+from modules.operations.settings import Settings, settings
 
 class ColmapCapabilityManager:
     """
@@ -402,8 +401,10 @@ class COLMAPAdapter(ReconstructionAdapter):
     - logging makes the mask decision visible in reconstruction.log
     """
 
-    def __init__(self, engine_path: Optional[str] = None):
-        self._engine_path = engine_path or os.getenv("RECON_ENGINE_PATH")
+    def __init__(self, engine_path: Optional[str] = None, settings_override: Optional[Settings] = None):
+        active_settings = settings_override or settings
+        
+        self._engine_path = engine_path or active_settings.colmap_path
 
         if not self._engine_path:
             well_known = [
@@ -418,10 +419,10 @@ class COLMAPAdapter(ReconstructionAdapter):
                     self._engine_path = p
                     break
 
-        self._use_gpu = settings.use_gpu
-        self._gpu_index = settings.gpu_index
-        self._max_image_size = int(os.getenv("RECON_MAX_IMAGE_SIZE", "2000"))
-        self._matcher = os.getenv("RECON_MATCHER", "exhaustive").lower()
+        self._use_gpu = active_settings.use_gpu
+        self._gpu_index = active_settings.gpu_index
+        self._max_image_size = active_settings.recon_max_image_size
+        self._matcher = active_settings.recon_matcher.lower()
         self.mesh_selector = MeshSelector()
         self.builder = ColmapCommandBuilder(self._engine_path, self._use_gpu, self._gpu_index)
 

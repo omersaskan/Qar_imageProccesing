@@ -39,6 +39,8 @@ class Settings(BaseSettings):
             self.openmvs_path = os.environ.get("OPENMVS_BIN")
     use_gpu: bool = Field(True, validation_alias="RECON_USE_GPU")
     gpu_index: str = Field("0", validation_alias="RECON_GPU_INDEX")
+    recon_max_image_size: int = Field(2000, validation_alias="RECON_MAX_IMAGE_SIZE")
+    recon_matcher: str = Field("exhaustive", validation_alias="RECON_MATCHER")
 
     # Retention
     published_frames_days: int = Field(3, validation_alias="RETENTION_PUBLISHED_FRAMES_DAYS")
