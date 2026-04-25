@@ -42,6 +42,8 @@ class ColmapCapabilityManager:
             "matching_prefix": "FeatureMatching",
             "has_ba_gpu": True,
             "has_cuda": False,
+            "has_extraction_gpu_index": False,
+            "has_matching_gpu_index": False,
         }
 
         if not binary_path or not os.path.exists(binary_path):
@@ -63,6 +65,13 @@ class ColmapCapabilityManager:
             # CUDA detection: check if use_gpu exists in help
             if "use_gpu" in output.lower():
                 caps["has_cuda"] = True
+            
+            # Check for gpu_index in extraction
+            extraction_prefix = caps["extraction_prefix"]
+            if f"--{extraction_prefix}.gpu_index" in output:
+                caps["has_extraction_gpu_index"] = True
+            elif "--FeatureExtraction.gpu_index" in output:
+                caps["has_extraction_gpu_index"] = True
 
             # Probe exhaustive_matcher
             res = subprocess.run(
@@ -74,6 +83,13 @@ class ColmapCapabilityManager:
             output = res.stdout + res.stderr
             if "--SiftMatching.use_gpu" in output:
                 caps["matching_prefix"] = "SiftMatching"
+            
+            # Check for gpu_index in matching
+            matching_prefix = caps["matching_prefix"]
+            if f"--{matching_prefix}.gpu_index" in output:
+                caps["has_matching_gpu_index"] = True
+            elif "--FeatureMatching.gpu_index" in output:
+                caps["has_matching_gpu_index"] = True
 
             # Probe mapper
             res = subprocess.run(
@@ -100,9 +116,10 @@ class ColmapCommandBuilder:
     Now capability-aware to support versions from 3.6 to 4.0+.
     """
 
-    def __init__(self, binary_path: str, use_gpu: bool = True):
+    def __init__(self, binary_path: str, use_gpu: bool = True, gpu_index: str = "0"):
         self.bin = binary_path
         self._requested_gpu = use_gpu
+        self.gpu_index = gpu_index
         self.caps = ColmapCapabilityManager.get_capabilities(binary_path)
         
         # Override GPU request if the build doesn't support it
@@ -125,6 +142,12 @@ class ColmapCommandBuilder:
             str(images_dir),
             f"--{prefix}.use_gpu",
             "1" if self.use_gpu else "0",
+        ]
+
+        if self.use_gpu and self.caps["has_extraction_gpu_index"]:
+            cmd += [f"--{prefix}.gpu_index", self.gpu_index]
+
+        cmd += [
             f"--{prefix}.max_image_size",
             str(max_size),
         ]
@@ -138,13 +161,18 @@ class ColmapCommandBuilder:
         matcher_type = "exhaustive_matcher" if mode == "exhaustive" else "sequential_matcher"
         prefix = self.caps["matching_prefix"]
         cmd = [
-            self.bin,
             matcher_type,
             "--database_path",
             str(db_path),
             f"--{prefix}.use_gpu",
             "1" if self.use_gpu else "0",
         ]
+
+        if self.use_gpu and self.caps["has_matching_gpu_index"]:
+            cmd.insert(3, f"--{prefix}.gpu_index")
+            cmd.insert(4, self.gpu_index)
+
+        cmd.insert(0, self.bin)
         return cmd
 
     def mapper(self, db_path: Path, images_dir: Path, output_path: Path) -> List[str]:
@@ -192,7 +220,7 @@ class ColmapCommandBuilder:
         
         # GPU index -1 means CPU mode in COLMAP
         if self.use_gpu:
-            cmd += ["--PatchMatchStereo.gpu_index", "0"]
+            cmd += ["--PatchMatchStereo.gpu_index", self.gpu_index]
         else:
             cmd += ["--PatchMatchStereo.gpu_index", "-1"]
             
@@ -375,11 +403,12 @@ class COLMAPAdapter(ReconstructionAdapter):
                     self._engine_path = p
                     break
 
-        self._use_gpu = os.getenv("RECON_USE_GPU", "true").lower() == "true"
+        self._use_gpu = settings.use_gpu
+        self._gpu_index = settings.gpu_index
         self._max_image_size = int(os.getenv("RECON_MAX_IMAGE_SIZE", "2000"))
         self._matcher = os.getenv("RECON_MATCHER", "exhaustive").lower()
         self.mesh_selector = MeshSelector()
-        self.builder = ColmapCommandBuilder(self._engine_path, self._use_gpu)
+        self.builder = ColmapCommandBuilder(self._engine_path, self._use_gpu, self._gpu_index)
 
     @property
     def engine_type(self) -> str:

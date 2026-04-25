@@ -14,19 +14,28 @@ def write_frame_and_mask(frame_path: Path):
     masks_dir.mkdir(parents=True, exist_ok=True)
     (masks_dir / f"{frame_path.name}.png").write_bytes(b"mask")
 
-def test_colmap_adapter_init():
-    os.environ["RECON_ENGINE_PATH"] = "C:/colmap/COLMAP.bat"
-    os.environ["RECON_USE_GPU"] = "false"
-    os.environ["RECON_MAX_IMAGE_SIZE"] = "1000"
+@patch("modules.reconstruction_engine.adapter.settings")
+def test_colmap_adapter_init(mock_settings):
+    mock_settings.colmap_path = "C:/colmap/COLMAP.bat"
+    mock_settings.use_gpu = False
+    mock_settings.gpu_index = "0"
     
     adapter = COLMAPAdapter()
-    assert adapter._engine_path == "C:/colmap/COLMAP.bat"
+    assert Path(adapter._engine_path) == Path("C:/colmap/COLMAP.bat")
     assert adapter._use_gpu is False
-    assert adapter._max_image_size == 1000
 
 @patch("modules.reconstruction_engine.adapter.subprocess.Popen")
 @patch("modules.reconstruction_engine.adapter.shutil.copy2")
-def test_colmap_adapter_run(mock_copy, mock_popen, tmp_path):
+@patch("modules.reconstruction_engine.adapter.ColmapCapabilityManager.get_capabilities")
+def test_colmap_adapter_run(mock_caps, mock_copy, mock_popen, tmp_path):
+    mock_caps.return_value = {
+        "extraction_prefix": "FeatureExtraction",
+        "matching_prefix": "FeatureMatching",
+        "has_ba_gpu": True,
+        "has_cuda": True,
+        "has_extraction_gpu_index": True,
+        "has_matching_gpu_index": True,
+    }
     engine_path = "colmap.exe"
     adapter = COLMAPAdapter(engine_path=engine_path)
     
@@ -80,6 +89,13 @@ def test_colmap_adapter_run(mock_copy, mock_popen, tmp_path):
 
     assert results["mesh_path"] == str(mesh_file)
     assert results["log_path"] == str(output_dir / "reconstruction.log")
+    
+    # Verify reconstruction.log content
+    log_content = Path(results["log_path"]).read_text(encoding="utf-8")
+    assert "--FeatureExtraction.use_gpu 1" in log_content
+    assert "--FeatureMatching.use_gpu 1" in log_content
+    assert "--PatchMatchStereo.gpu_index" in log_content
+
     assert mock_copy.call_count == 6
 
     commands = [call.args[0][1] for call in mock_popen.call_args_list]

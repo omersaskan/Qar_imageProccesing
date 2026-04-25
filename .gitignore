@@ -40,3 +40,12 @@ tmp/
 # OS
 .DS_Store
 Thumbs.db
+
+# Media
+*.jpg
+*.png
+
+# Test Workspaces
+workspace_fast_smoke/
+workspace_quality_test/
+gpu_test_workspace/

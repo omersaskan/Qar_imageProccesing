@@ -38,6 +38,7 @@ class Settings(BaseSettings):
         if not os.environ.get("OPENMVS_BIN_PATH") and os.environ.get("OPENMVS_BIN"):
             self.openmvs_path = os.environ.get("OPENMVS_BIN")
     use_gpu: bool = Field(True, validation_alias="RECON_USE_GPU")
+    gpu_index: str = Field("0", validation_alias="RECON_GPU_INDEX")
 
     # Retention
     published_frames_days: int = Field(3, validation_alias="RETENTION_PUBLISHED_FRAMES_DAYS")

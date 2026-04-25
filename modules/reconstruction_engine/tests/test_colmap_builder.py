@@ -17,6 +17,8 @@ class TestColmapCommandBuilder(unittest.TestCase):
             "matching_prefix": "FeatureMatching",
             "has_ba_gpu": True,
             "has_cuda": True,
+            "has_extraction_gpu_index": False,
+            "has_matching_gpu_index": False,
         }
 
     @patch("modules.reconstruction_engine.adapter.ColmapCapabilityManager.get_capabilities")
@@ -27,6 +29,8 @@ class TestColmapCommandBuilder(unittest.TestCase):
             "matching_prefix": "SiftMatching",
             "has_ba_gpu": True,
             "has_cuda": True,
+            "has_extraction_gpu_index": False,
+            "has_matching_gpu_index": False,
         }
         
         builder = ColmapCommandBuilder(self.bin, use_gpu=True)
@@ -44,6 +48,8 @@ class TestColmapCommandBuilder(unittest.TestCase):
             "matching_prefix": "FeatureMatching",
             "has_ba_gpu": True,
             "has_cuda": False,
+            "has_extraction_gpu_index": False,
+            "has_matching_gpu_index": False,
         }
         
         # User wants GPU, but build doesn't support it
@@ -61,6 +67,8 @@ class TestColmapCommandBuilder(unittest.TestCase):
             "matching_prefix": "FeatureMatching",
             "has_ba_gpu": False,
             "has_cuda": True,
+            "has_extraction_gpu_index": False,
+            "has_matching_gpu_index": False,
         }
         
         builder = ColmapCommandBuilder(self.bin, use_gpu=True)
@@ -87,6 +95,8 @@ class TestColmapCommandBuilder(unittest.TestCase):
             "matching_prefix": "FeatureMatching",
             "has_ba_gpu": True,
             "has_cuda": False,
+            "has_extraction_gpu_index": False,
+            "has_matching_gpu_index": False,
         }
         builder = ColmapCommandBuilder(self.bin, use_gpu=True)
         cmd = builder.patch_match_stereo(Path("dense"))
