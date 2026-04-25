@@ -154,6 +154,11 @@ class ColmapCommandBuilder:
         if masks_dir is not None:
             cmd += ["--ImageReader.mask_path", str(masks_dir)]
 
+        # Video frames from a single session should share one camera model
+        cmd += ["--ImageReader.single_camera", "1"]
+        # Use a robust model for mobile/video captures
+        cmd += ["--ImageReader.camera_model", "RADIAL"]
+
         return cmd
 
     def matcher(self, mode: str, db_path: Path) -> List[str]:
@@ -191,7 +196,7 @@ class ColmapCommandBuilder:
             
         return cmd
 
-    def image_undistorter(self, images_dir: Path, input_path: Path, output_path: Path) -> List[str]:
+    def image_undistorter(self, images_dir: Path, input_path: Path, output_path: Path, max_size: Optional[int] = None) -> List[str]:
         return [
             self.bin,
             "image_undistorter",
@@ -204,6 +209,11 @@ class ColmapCommandBuilder:
             "--output_type",
             "COLMAP",
         ]
+        
+        if max_size:
+            cmd += ["--max_image_size", str(max_size)]
+            
+        return cmd
 
     def patch_match_stereo(self, workspace_path: Path) -> List[str]:
         cmd = [
@@ -914,7 +924,12 @@ class COLMAPAdapter(ReconstructionAdapter):
 
                 dense_dir = output_dir / "dense"
                 dense_dir.mkdir(exist_ok=True)
-                cmd_undistort = self.builder.image_undistorter(images_dir, model_path, dense_dir)
+                cmd_undistort = self.builder.image_undistorter(
+                    images_dir, 
+                    model_path, 
+                    dense_dir, 
+                    max_size=settings.recon_max_image_size
+                )
                 self._run_command(cmd_undistort, output_dir, log_file)
 
                 # Initialize dense masking control variables
