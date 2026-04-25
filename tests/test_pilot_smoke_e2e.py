@@ -174,13 +174,30 @@ def test_pilot_smoke_pipeline_shell(mock_auth):
                 final_decision="pass",
             )
 
+        def mock_cleanup(*args, **kwargs):
+            from modules.asset_cleanup_pipeline.normalizer import NormalizedMetadata
+            metadata = NormalizedMetadata(
+                bbox_min={"x":-1,"y":-1,"z":-1},
+                bbox_max={"x":1,"y":1,"z":1},
+                pivot_offset={"x":0,"y":0,"z":0},
+                final_polycount=10000
+            )
+            stats = {
+                "quality_status": "success",
+                "final_polycount": 10000,
+                "isolation": {"component_count": 1}
+            }
+            cleaned_path = str(Path(settings.data_root) / "reconstructions" / f"job_{session_id}" / "final" / "mesh.ply")
+            return metadata, stats, cleaned_path
+
         with patch("modules.reconstruction_engine.runner.ReconstructionRunner.run", side_effect=mock_recon):
             with patch("modules.operations.texturing_service.TexturingService.run", side_effect=mock_texture):
                 with patch("modules.capture_workflow.frame_extractor.FrameExtractor.extract_keyframes", side_effect=mock_extract):
                     with patch("modules.capture_workflow.coverage_analyzer.CoverageAnalyzer.analyze_coverage", side_effect=mock_coverage):
                         with patch("modules.qa_validation.validator.AssetValidator.validate", side_effect=mock_validate):
-                            for _ in range(12):
-                                worker_instance._process_pending_sessions()
+                            with patch("modules.asset_cleanup_pipeline.cleaner.AssetCleaner.process_cleanup", side_effect=mock_cleanup):
+                                for _ in range(12):
+                                    worker_instance._process_pending_sessions()
 
         sess = worker_instance.session_manager.get_session(session_id)
         assert status_value(sess.status) == AssetStatus.PUBLISHED.value

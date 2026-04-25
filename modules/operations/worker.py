@@ -634,6 +634,14 @@ class IngestionWorker:
                 profile_type=CleanupProfileType.MOBILE_DEFAULT,
                 raw_texture_path=raw_texture_path,
             )
+
+            if cleanup_stats.get("quality_status") == "quality_fail":
+                cleanup_stats_path = Path(cleaned_mesh_path).parent / "cleanup_stats.json"
+                atomic_write_json(cleanup_stats_path, cleanup_stats)
+                return self._mark_session_needs_recapture(
+                    session,
+                    reason=cleanup_stats.get("quality_reason", "Cleanup quality gate failed"),
+                )
         except Exception as e:
             import traceback
             logger.exception("Mesh cleanup failed for %s", session.session_id)

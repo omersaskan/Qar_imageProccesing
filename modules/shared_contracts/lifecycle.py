@@ -24,10 +24,10 @@ _ALLOWED_TRANSITIONS: Dict[AssetStatus, Set[AssetStatus]] = {
     AssetStatus.CREATED: {AssetStatus.CAPTURED, AssetStatus.RECAPTURE_REQUIRED, AssetStatus.FAILED}, # Allow initial failure
     AssetStatus.CAPTURED: {AssetStatus.RECONSTRUCTED, AssetStatus.CAPTURED, AssetStatus.RECAPTURE_REQUIRED, AssetStatus.FAILED}, # Retry capture or fail
     AssetStatus.RECAPTURE_REQUIRED: {AssetStatus.CAPTURED, AssetStatus.FAILED}, # Recapture can unblock the session
-    AssetStatus.RECONSTRUCTED: {AssetStatus.CLEANED, AssetStatus.CAPTURED, AssetStatus.FAILED}, # Redo capture or fail
-    AssetStatus.CLEANED: {AssetStatus.EXPORTED, AssetStatus.RECONSTRUCTED, AssetStatus.FAILED}, # Re-export, redo reconstruction or fail
-    AssetStatus.EXPORTED: {AssetStatus.VALIDATED, AssetStatus.CLEANED, AssetStatus.FAILED}, # Revalidate, redo cleanup or fail
-    AssetStatus.VALIDATED: {AssetStatus.PUBLISHED, AssetStatus.EXPORTED, AssetStatus.FAILED}, # Publish, re-export or fail
+    AssetStatus.RECONSTRUCTED: {AssetStatus.CLEANED, AssetStatus.CAPTURED, AssetStatus.RECAPTURE_REQUIRED, AssetStatus.FAILED}, # Redo capture or fail
+    AssetStatus.CLEANED: {AssetStatus.EXPORTED, AssetStatus.RECONSTRUCTED, AssetStatus.RECAPTURE_REQUIRED, AssetStatus.FAILED}, # Re-export, redo reconstruction or fail
+    AssetStatus.EXPORTED: {AssetStatus.VALIDATED, AssetStatus.CLEANED, AssetStatus.RECAPTURE_REQUIRED, AssetStatus.FAILED}, # Revalidate, redo cleanup or fail
+    AssetStatus.VALIDATED: {AssetStatus.PUBLISHED, AssetStatus.EXPORTED, AssetStatus.RECAPTURE_REQUIRED, AssetStatus.FAILED}, # Publish, re-export or fail
     AssetStatus.PUBLISHED: {AssetStatus.VALIDATED}, # Rollback to validated state
     AssetStatus.FAILED: set(), # Terminal state
 }
