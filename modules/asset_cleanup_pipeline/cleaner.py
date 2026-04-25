@@ -112,13 +112,20 @@ class AssetCleaner:
         if not map_kd_found:
             raise ValueError("MTL missing 'map_Kd' line")
             
-        # Copy files
+        # Copy files and normalize OBJ usemtl
         cleaned_mesh_path = output_dir / "cleaned_mesh.obj"
         cleaned_mtl_path = output_dir / mtl_filename
         cleaned_tex_path = output_dir / raw_tex.name
         
+        with open(raw_mesh, "r", encoding="utf-8", errors="ignore") as f_in, \
+             open(cleaned_mesh_path, "w", encoding="utf-8") as f_out:
+            for line in f_in:
+                if line.startswith("usemtl "):
+                    f_out.write("usemtl material_0\n")
+                else:
+                    f_out.write(line)
+
         import shutil
-        shutil.copy2(raw_mesh, cleaned_mesh_path)
         shutil.copy2(raw_tex, cleaned_tex_path)
         
         # Normalize MTL

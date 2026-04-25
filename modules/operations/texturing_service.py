@@ -377,14 +377,37 @@ class TexturingService:
             return False
             
         # MTL has map_Kd and target exists
-        map_kd_found = False
+        map_kd_target = None
         try:
             with open(p_mtl, "r", encoding="utf-8", errors="ignore") as f:
                 for line in f:
-                    if line.strip().startswith("map_Kd "):
-                        map_kd_found = True
+                    stripped = line.strip()
+                    if stripped.startswith("map_Kd "):
+                        parts = stripped.split(None, 1)
+                        if len(parts) > 1:
+                            map_kd_target = parts[1].strip()
                         break
         except Exception:
             return False
         
-        return map_kd_found
+        if not map_kd_target:
+            return False
+
+        # Resolve relative to MTL parent
+        try:
+            # Handle potential relative paths like ./texture.jpg
+            target_path = (p_mtl.parent / map_kd_target)
+            if not target_path.exists():
+                return False
+            
+            # Consistency check with provided texture_path
+            # In a valid bundle, the MTL map_Kd should point to the same file as p_tex
+            if target_path.resolve() != p_tex.resolve():
+                # If resolves are different, check if at least the filenames match
+                # (Sometimes resolution fails in complex environments, but the relative link must be sound)
+                if target_path.name != p_tex.name:
+                    return False
+        except Exception:
+            return False
+        
+        return True

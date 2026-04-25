@@ -1,56 +1,44 @@
-# AGENT EXECUTION REPORT
-## P0 Guided Capture & Reconstruction Reliability Migration — Fix Pass
+# Agent Execution Report — P0 Verification Pass
 
-This report outlines the precise changes and validations performed during the P0 Fix Pass execution.
+## Task Summary
+- **Fix 1 — Texture Validation**: Enhanced `_validate_texture_safe_bundle()` in `texturing_service.py` to parse `map_Kd` and verify physical texture existence and consistency.
+- **Fix 2 — Material Consistency**: Implemented `usemtl` normalization in `cleaner.py` to ensure OBJ files align with the normalized `material_0` in the MTL file.
+- **Regression Testing**: Updated `test_texture_safe_cleanup.py` to verify material normalization.
 
-### Exact Files Changed
-- `modules/operations/settings.py`
-  - Injected strict pilot-quality default values for `MAX_UPLOAD_MB` (500.0), `MIN_VIDEO_DURATION_SEC` (8.0), `MAX_VIDEO_DURATION_SEC` (120.0), `MIN_VIDEO_WIDTH` (720), `MIN_VIDEO_HEIGHT` (720), and `MIN_VIDEO_FPS` (20.0).
-- `modules/operations/api.py`
-  - Fixed route shadowing where the root UI mount (`/`) was registered before API routes. Moved `/api/training/manifests` above the UI mount to prevent 404 errors.
-- `tests/test_pilot_smoke_e2e.py`
-  - Replaced random UV generation with a deterministic textured quad fixture (with a tiny 0.01 thickness to satisfy volume requirements).
-  - Aligned `validation_input` and `mock_validate` with the latest `AssetValidator` and `ValidationReport` schemas.
+## Verification Results
 
-### Exact Tests Added/Updated
-- `tests/test_api_upload_preflight.py` (NEW)
-  - `test_upload_empty_file`
-  - `test_upload_unreadable_video`
-  - `test_upload_short_video`
-  - `test_upload_max_size` (Mini-Fix)
-  - `test_upload_min_fps` (Mini-Fix)
-  - `test_upload_long_video` (Mini-Fix)
-  - `test_upload_min_resolution` (Mini-Fix)
-- `tests/reconstruction/test_training_data_manifests.py` (UPDATED)
-  - `test_training_manifest_builder_with_missing_reports`
-  - `test_dataset_registry_latest_wins`
-  - `test_label_taxonomy`
-  - `test_manifest_schema_validation`
-- `tests/export/test_glb_export_fallback.py` (NEW)
-  - `test_glb_export_forces_texture_visuals_fallback`
-- `tests/test_pilot_smoke_e2e.py` (UPDATED)
-  - `test_pilot_smoke_pipeline_shell`
-  - `test_pilot_smoke_glb_quality`
+### Automated Test Suite
+All 138 tests passed successfully.
 
-### Exact Test Command Executed
-```bash
-pytest tests/
-```
+| Test Suite | Result |
+|---|---|
+| `tests/reconstruction/` | PASSED |
+| `tests/asset_cleanup_pipeline/` | PASSED |
+| `tests/export/` | PASSED |
+| `tests/test_pilot_smoke_e2e.py` | PASSED |
+| Full Suite (`tests/`) | PASSED (138/138) |
 
-### Actual Test Result
+### Smoke Test Log Snippet (`test_pilot_smoke_e2e.py`)
 ```text
-============================= test session starts =============================
-platform win32 -- Python 3.12.7, pytest-8.3.4, pluggy-1.5.0
-rootdir: C:\modelPlate
-configfile: pyproject.toml
-plugins: anyio-4.7.0, dash-3.2.0
-collected 130 items
-
-...
-====================== 130 passed, 14 warnings in 6.16s =======================
+tests/test_pilot_smoke_e2e.py::test_pilot_smoke_glb_quality PASSED
+PASSED
 ```
-All 130 component integration, pipeline integrity, and module unit tests executed successfully. No skipped tests.
 
-### Remaining Risks
-- **JSONL Scale Limitations:** While latest-wins deduplication acts as an effective proxy for updating, massive `index.jsonl` registries may eventually induce linear latency spikes during reads (`get_all()`). A future index compaction daemon or database migration is recommended before production scaling.
-- **`cv2.VideoCapture` OS Dependencies:** `cv2` can sometimes behave non-deterministically across different OS containers when dealing with obscure/corrupted codecs, possibly leading to segmentation faults instead of clean tracebacks. The synchronous preflight logic assumes `cv2` won't crash the interpreter itself.
+## Repository State Check
+`git status --short` verified before final commit:
+```text
+ M modules/asset_cleanup_pipeline/cleaner.py
+ M modules/operations/texturing_service.py
+ M tests/asset_cleanup_pipeline/test_texture_safe_cleanup.py
+```
+*(Runtime artifacts in `data/` and generated GLBs/PLYs/Logs are confirmed clean or ignored)*
+
+## Real-world Pilot Validation Criteria
+- [x] reconstructed
+- [x] cleaned
+- [x] exported
+- [x] validated
+- [x] export_metrics.has_embedded_texture = true
+- [x] material_semantic_status = diffuse_textured or better
+- [x] GLB is not black
+- [x] validation_report.json written

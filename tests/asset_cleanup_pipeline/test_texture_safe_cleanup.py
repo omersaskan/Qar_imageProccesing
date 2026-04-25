@@ -22,6 +22,7 @@ def test_texture_safe_copy_success(temp_workspace):
     
     with open(mesh_path, "w") as f:
         f.write("mtllib material.mtl\n")
+        f.write("usemtl old_material\n")
         f.write("v 0 0 0\n")
         f.write("v 1 0 0\n")
         f.write("v 0 1 0\n")
@@ -60,6 +61,13 @@ def test_texture_safe_copy_success(temp_workspace):
         content = f.read()
         assert "map_Kd texture.jpg" in content
         assert "Ka 1.000000 1.000000 1.000000" in content
+        assert "newmtl material_0" in content
+
+    # Check OBJ usemtl normalization
+    with open(stats["cleaned_mesh_path"], "r") as f:
+        obj_content = f.read()
+        assert "usemtl material_0" in obj_content
+        assert "usemtl old_material" not in obj_content
 
 def test_texture_safe_copy_fails_missing_vt(temp_workspace):
     src_dir = temp_workspace / "source"
