@@ -618,7 +618,11 @@ class IngestionWorker:
                 raw_texture_path=manifest.texture_path,
             )
         except Exception as e:
-            raise IrrecoverableError(f"Mesh cleanup failed: {e}")
+            import traceback
+            logger.exception("Mesh cleanup failed for %s", session.session_id)
+            raise IrrecoverableError(
+                f"Mesh cleanup failed: {type(e).__name__}: {e}\n{traceback.format_exc()[-4000:]}"
+            )
 
         texturing_result = self.texturing_service.run(
             manifest=manifest,
@@ -668,6 +672,17 @@ class IngestionWorker:
         blob_path = self.blobs_dir / f"{asset_id}.glb"
 
         logger.info(f"Exporting cleaned GLB for {session.session_id}...")
+        
+        logger.info("Export input mesh: %s exists=%s", session.cleanup_mesh_path, Path(session.cleanup_mesh_path or "").exists())
+        logger.info("Export texture path: %s exists=%s", texture_path, bool(texture_path and Path(texture_path).exists()))
+        logger.info(
+            "Manifest mesh_path=%s textured_mesh_path=%s texturing_status=%s texture_atlas_paths=%s",
+            manifest.mesh_path,
+            manifest.textured_mesh_path,
+            manifest.texturing_status,
+            manifest.texture_atlas_paths,
+        )
+
         try:
             self.exporter.export(
                 mesh_path=session.cleanup_mesh_path,
@@ -677,7 +692,11 @@ class IngestionWorker:
                 metadata=metadata,
             )
         except Exception as e:
-            raise IrrecoverableError(f"GLB Export failed: {e}")
+            import traceback
+            logger.exception("GLB export failed for %s", session.session_id)
+            raise IrrecoverableError(
+                f"GLB Export failed: {type(e).__name__}: {e}\n{traceback.format_exc()[-4000:]}"
+            )
 
         return self._persist_session(
             session,

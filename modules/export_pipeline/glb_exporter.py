@@ -132,12 +132,16 @@ class GLBExporter:
             if vis["has_uv"]: visual_info["has_uv"] = True
             if vis["has_material"]: visual_info["has_material"] = True
 
+        import logging
+        logger = logging.getLogger("glb_exporter")
+        
         used_texture_path = None
         texture_applied_successfully = False
         texture_warning = None
 
         if texture_path and os.path.exists(texture_path):
             used_texture_path = texture_path
+            logger.info("Texture path provided for export: %s", used_texture_path)
 
             if visual_info["has_uv"]:
                 try:
@@ -146,43 +150,67 @@ class GLBExporter:
                     with Image.open(texture_path) as texture_image:
                         tex_image = texture_image.convert("RGBA").copy()
                     
+                    # Force a sane PBR material
                     material = trimesh.visual.material.PBRMaterial(
                         baseColorTexture=tex_image,
+                        baseColorFactor=[1.0, 1.0, 1.0, 1.0],
                         metallicFactor=0.0,
                         roughnessFactor=1.0,
+                        doubleSided=True,
                     )
+                    logger.info("Forcing PBRMaterial with baseColorFactor=[1.0, 1.0, 1.0, 1.0]")
 
                     for m in meshes:
-                        if hasattr(m.visual, "uv") and m.visual.uv is not None:
-                            # Do not overwrite if it already has a valid texture mapping
-                            if self._material_has_texture(m, "baseColorTexture"):
-                                texture_applied_successfully = True
-                                continue
-                            
+                        if hasattr(m.visual, "uv") and m.visual.uv is not None and len(m.visual.uv) > 0:
+                            # SPRINT: Black material prevention
+                            # Even if it has a material, if it's black or suspicious, we override it.
                             existing_mat = getattr(m.visual, "material", None)
-                            if existing_mat is not None:
+                            is_suspicious = False
+                            if existing_mat:
+                                logger.info("Existing material found: %s", type(existing_mat).__name__)
+                                # Check for black diffuse/baseColor
+                                kd = getattr(existing_mat, "diffuse", None)
+                                if kd is not None and all(c <= 0 for c in kd[:3]):
+                                    is_suspicious = True
+                                bcf = getattr(existing_mat, "baseColorFactor", None)
+                                if bcf is not None and all(c <= 0 for c in bcf[:3]):
+                                    is_suspicious = True
+                                    
+                                if is_suspicious:
+                                    logger.warning("Suspicious (black) material detected, forcing override.")
+
+                            if not existing_mat or is_suspicious:
+                                m.visual = trimesh.visual.TextureVisuals(
+                                    uv=m.visual.uv,
+                                    material=material,
+                                )
+                                texture_applied_successfully = True
+                            else:
+                                # Try to inject texture into existing material
                                 try:
-                                    # Inject into existing material without nuking other maps/properties
                                     if hasattr(existing_mat, "baseColorTexture"):
                                         existing_mat.baseColorTexture = tex_image
+                                        # Ensure it's not black
+                                        if hasattr(existing_mat, "baseColorFactor"):
+                                            existing_mat.baseColorFactor = [1.0, 1.0, 1.0, 1.0]
                                         texture_applied_successfully = True
-                                        continue
                                     elif hasattr(existing_mat, "image"):
                                         existing_mat.image = tex_image
                                         texture_applied_successfully = True
-                                        continue
-                                except Exception:
-                                    pass
-
-                            # If existing_mat does not support textures, or no material exists, assign a new TextureVisuals
-                            import logging
-                            logger = logging.getLogger("glb_exporter")
-                            logger.warning("Forcing TextureVisuals fallback for unsupported material.")
-                            m.visual = trimesh.visual.TextureVisuals(
-                                uv=m.visual.uv,
-                                material=material,
-                            )
-                            texture_applied_successfully = True
+                                    else:
+                                        # Fallback to forcing PBR
+                                        m.visual = trimesh.visual.TextureVisuals(
+                                            uv=m.visual.uv,
+                                            material=material,
+                                        )
+                                        texture_applied_successfully = True
+                                except Exception as e:
+                                    logger.warning("Failed to inject texture into existing material: %s. Forcing PBR fallback.", e)
+                                    m.visual = trimesh.visual.TextureVisuals(
+                                        uv=m.visual.uv,
+                                        material=material,
+                                    )
+                                    texture_applied_successfully = True
 
                     visual_info["has_uv"] = True
                     visual_info["has_material"] = True

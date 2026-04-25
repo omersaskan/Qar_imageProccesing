@@ -20,7 +20,8 @@ data/cleaned/
 data/training_manifests/
 data/training_registry/
 data/registry/blobs/
-data/registry/meta/*.json
+data/registry/meta/
+data/registry/active/
 data/logs/
 data/worker.process
 data/worker.process.lock

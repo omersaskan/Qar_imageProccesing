@@ -262,7 +262,7 @@ class OpenMVSCommandBuilder:
             str(workspace_path),
             "-o",
             str(output_mvs),
-            "--working-dir",
+            "--working-folder",
             str(workspace_path),
         ]
 
@@ -273,6 +273,8 @@ class OpenMVSCommandBuilder:
             str(input_mvs),
             "-o",
             str(output_mvs),
+            "--working-folder",
+            str(input_mvs.parent),
             "--resolution-level",
             "1",
             "--number-views",
@@ -281,13 +283,15 @@ class OpenMVSCommandBuilder:
             "0",
         ]
 
-    def reconstruct_mesh(self, input_mvs: Path, output_mvs: Path) -> List[str]:
+    def reconstruct_mesh(self, input_mvs: Path, output_mesh_ply: Path) -> List[str]:
         return [
             self._get_bin("ReconstructMesh"),
             "-i",
             str(input_mvs),
             "-o",
-            str(output_mvs),
+            str(output_mesh_ply),
+            "--working-folder",
+            str(input_mvs.parent),
         ]
 
     def refine_mesh(self, input_mvs: Path, output_mvs: Path) -> List[str]:
@@ -303,13 +307,19 @@ class OpenMVSCommandBuilder:
             "5",
         ]
 
-    def texture_mesh(self, input_mvs: Path, output_mvs: Path) -> List[str]:
+    def texture_mesh(self, input_scene_mvs: Path, input_mesh_ply: Path, output_obj: Path) -> List[str]:
         return [
             self._get_bin("TextureMesh"),
             "-i",
-            str(input_mvs),
+            str(input_scene_mvs),
+            "--mesh-file",
+            str(input_mesh_ply),
             "-o",
-            str(output_mvs),
+            str(output_obj),
+            "--export-type",
+            "obj",
+            "--working-folder",
+            str(input_scene_mvs.parent),
             "--resolution-level",
             "0",
         ]
@@ -1072,8 +1082,8 @@ class OpenMVSAdapter(COLMAPAdapter):
 
                 mvs_project = dense_dir / "project.mvs"
                 mvs_dense = dense_dir / "project_dense.mvs"
-                mvs_mesh = dense_dir / "project_mesh.mvs"
-                mvs_textured = dense_dir / "project_textured.mvs"
+                project_mesh_ply = dense_dir / "project_mesh.ply"
+                project_textured_obj = dense_dir / "project_textured.obj"
 
                 self._run_command(
                     self.mvs_builder.interface_colmap(dense_dir, mvs_project),
@@ -1086,34 +1096,53 @@ class OpenMVSAdapter(COLMAPAdapter):
                     log_file,
                 )
                 self._run_command(
-                    self.mvs_builder.reconstruct_mesh(mvs_dense, mvs_mesh),
+                    self.mvs_builder.reconstruct_mesh(mvs_dense, project_mesh_ply),
                     dense_dir,
                     log_file,
                 )
+
+                if not project_mesh_ply.exists():
+                    raise RuntimeReconstructionError(
+                        f"ReconstructMesh failed: {project_mesh_ply} not found."
+                    )
+
                 self._run_command(
-                    self.mvs_builder.texture_mesh(mvs_mesh, mvs_textured),
+                    self.mvs_builder.texture_mesh(mvs_dense, project_mesh_ply, project_textured_obj),
                     dense_dir,
                     log_file,
                 )
 
-                final_mesh = dense_dir / "project_textured.obj"
-                final_tex = dense_dir / "project_textured.png"
+                final_mesh = project_textured_obj
+                # OpenMVS 2.4 generates project_textured_material_*_map_Kd.jpg or .png
+                # We need to discover the real texture path
+                discovered_texture = None
+                for ext in ["*.jpg", "*.png"]:
+                    for p in dense_dir.glob(f"project_textured_material_*_map_Kd{ext}"):
+                        discovered_texture = p
+                        break
+                    if discovered_texture:
+                        break
 
-                if not final_mesh.exists():
-                    mvs_mesh_ply = dense_dir / "project_mesh.ply"
-                    if mvs_mesh_ply.exists():
-                        log_file.write("\nWarning: Texturing failed, using untextured mesh.\n")
-                        final_mesh = mvs_mesh_ply
+                if not project_textured_obj.exists() or not discovered_texture:
+                    if settings.require_textured_output:
+                        raise RuntimeReconstructionError(
+                            f"Textured output required but missing. mesh_exists={project_textured_obj.exists()}, texture_found={bool(discovered_texture)}"
+                        )
+                    
+                    log_file.write("\nWarning: Texturing failed or produced incomplete results. Falling back to geometry-only mesh.\n")
+                    if project_mesh_ply.exists():
+                        final_mesh = project_mesh_ply
+                        discovered_texture = None
                     else:
                         raise RuntimeReconstructionError(
-                            "OpenMVS completed but no mesh output found."
+                            "OpenMVS completed but no mesh output found (textured or untextured)."
                         )
 
                 stats = self._mesh_stats(str(final_mesh))
 
                 return {
                     "mesh_path": str(final_mesh),
-                    "texture_path": str(final_tex) if final_tex.exists() else str(output_dir / "_no_texture.png"),
+                    "texture_path": str(discovered_texture) if discovered_texture else str(output_dir / "_no_texture.png"),
                     "log_path": str(log_path),
                     "vertex_count": stats["vertex_count"],
                     "face_count": stats["face_count"],
@@ -1122,7 +1151,7 @@ class OpenMVSAdapter(COLMAPAdapter):
                     "dense_points_fused": stats.get("vertex_count", 0),  # OpenMVS fused point proxy
                     "mesher_used": "openmvs_reconstruct_mesh",
                     "engine_type": self.engine_type,
-                    "textured": final_tex.exists(),
+                    "textured": bool(discovered_texture),
                     "selected_sparse_model": best_model["path"].name,
                 }
 

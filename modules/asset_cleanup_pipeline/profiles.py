@@ -5,6 +5,7 @@ class CleanupProfileType(str, Enum):
     MOBILE_LOW = "mobile_low"
     MOBILE_DEFAULT = "mobile_default"
     HQ_REFERENCE = "hq_reference"
+    TEXTURE_SAFE_COPY = "texture_safe_copy"
 
 class CleanupProfile(BaseModel):
     name: CleanupProfileType
@@ -29,6 +30,13 @@ PROFILES = {
     CleanupProfileType.HQ_REFERENCE: CleanupProfile(
         name=CleanupProfileType.HQ_REFERENCE,
         target_polycount=200000,
+        decimation_ratio=1.0,
+        texture_size=4096,
+        remove_noise=False
+    ),
+    CleanupProfileType.TEXTURE_SAFE_COPY: CleanupProfile(
+        name=CleanupProfileType.TEXTURE_SAFE_COPY,
+        target_polycount=500000,
         decimation_ratio=1.0,
         texture_size=4096,
         remove_noise=False

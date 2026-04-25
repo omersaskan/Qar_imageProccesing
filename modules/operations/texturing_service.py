@@ -78,6 +78,45 @@ class TexturingService:
         Returns a TexturingResult with the resolved mesh path, atlas paths,
         status string, and an updated (but not yet persisted) manifest.
         """
+        if cleanup_stats.get("cleanup_mode") == "texture_safe_copy":
+            logger.info("Cleanup mode is texture_safe_copy. Skipping OpenMVS texturing.")
+            
+            cleaned_mesh = cleanup_stats["cleaned_mesh_path"]
+            cleaned_texture = cleanup_stats["cleaned_texture_path"]
+            
+            valid = self._validate_texture_safe_bundle(cleaned_mesh, cleaned_texture)
+            if not valid:
+                logger.warning("Texture safe bundle validation failed - degraded.")
+                return TexturingResult(
+                    texturing_status="degraded",
+                    cleaned_mesh_path=cleaned_mesh_path,
+                    texture_atlas_paths=[],
+                    manifest=manifest,
+                )
+
+            # Update manifest for successful skip
+            manifest.mesh_path = cleaned_mesh
+            manifest.textured_mesh_path = cleaned_mesh
+            manifest.texture_path = cleaned_texture
+            manifest.texture_atlas_paths = [cleaned_texture]
+            manifest.texturing_engine = "texture_safe_copy"
+            manifest.texturing_status = "real"
+            manifest.mesh_metadata.has_texture = True
+            manifest.mesh_metadata.uv_present = True
+            
+            from modules.utils.file_persistence import calculate_checksum
+            try:
+                manifest.checksum = calculate_checksum(cleaned_mesh)
+            except Exception:
+                pass
+
+            return TexturingResult(
+                texturing_status="real",
+                cleaned_mesh_path=cleaned_mesh,
+                texture_atlas_paths=[cleaned_texture],
+                manifest=manifest,
+            )
+
         # Locate the COLMAP dense workspace relative to the raw mesh path.
         mesh_parent = Path(manifest.mesh_path).parent
         colmap_dir = mesh_parent.parent if mesh_parent.name == "dense" else mesh_parent
@@ -300,3 +339,52 @@ class TexturingService:
                 f_out.write(line)
 
         return out_path
+
+    def _validate_texture_safe_bundle(self, mesh_path: str, texture_path: str) -> bool:
+        """Verify the cleaned OBJ/MTL/texture bundle."""
+        p_mesh = Path(mesh_path)
+        p_tex = Path(texture_path)
+        
+        if not p_mesh.exists() or not p_tex.exists():
+            return False
+            
+        # OBJ contains vt lines
+        vt_found = False
+        mtllib_found = False
+        mtl_filename = None
+        try:
+            with open(p_mesh, "r", encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    stripped = line.strip()
+                    if stripped.startswith("vt "):
+                        vt_found = True
+                    if stripped.startswith("mtllib "):
+                        mtllib_found = True
+                        parts = stripped.split(None, 1)
+                        if len(parts) > 1:
+                            mtl_filename = parts[1].strip()
+                    if vt_found and mtllib_found:
+                        break
+        except Exception:
+            return False
+        
+        if not vt_found or not mtllib_found or not mtl_filename:
+            return False
+            
+        # MTL exists next to OBJ
+        p_mtl = p_mesh.parent / mtl_filename
+        if not p_mtl.exists():
+            return False
+            
+        # MTL has map_Kd and target exists
+        map_kd_found = False
+        try:
+            with open(p_mtl, "r", encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    if line.strip().startswith("map_Kd "):
+                        map_kd_found = True
+                        break
+        except Exception:
+            return False
+        
+        return map_kd_found

@@ -518,6 +518,19 @@ class ReconstructionRunner:
         audit_path = job_dir / "reconstruction_audit.json"
         atomic_write_json(audit_path, audit.model_dump(mode="json"))
 
+    def _check_obj_uvs(self, obj_path: Path) -> bool:
+        """Simple OBJ parser to detect vt lines."""
+        if not obj_path.exists() or obj_path.suffix.lower() != ".obj":
+            return False
+        try:
+            with open(obj_path, "r", encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    if line.startswith("vt "):
+                        return True
+        except Exception:
+            pass
+        return False
+
     def _finalize_best_attempt(self, results: dict, job: ReconstructionJob, job_dir: Path, engine_used: str, elapsed_seconds: float = 0.0) -> OutputManifest:
         mesh_path = Path(results["mesh_path"])
         texture_path = Path(results["texture_path"])
@@ -526,18 +539,30 @@ class ReconstructionRunner:
         vertex_count, face_count = self._validate_mesh_artifact(mesh_path)
         checksum = calculate_checksum(mesh_path)
 
+        # Detect UVs
+        uv_present = results.get("mesh_probe_has_uv", False)
+        if not uv_present and mesh_path.suffix.lower() == ".obj":
+            uv_present = self._check_obj_uvs(mesh_path)
+
+        has_texture = texture_path.exists() and "_no_texture.png" not in str(texture_path)
+
         manifest = OutputManifest(
             job_id=job.job_id,
             mesh_path=str(mesh_path),
-            texture_path=str(texture_path),
+            textured_mesh_path=str(mesh_path) if has_texture else None,
+            texture_path=str(texture_path) if has_texture else None,
+            texture_atlas_paths=[str(texture_path)] if has_texture else [],
             log_path=str(log_path),
             processing_time_seconds=round(elapsed_seconds, 2),
             engine_type=engine_used,
+            texturing_engine="openmvs_texturemesh" if has_texture and "openmvs" in engine_used.lower() else None,
+            texturing_status="real" if has_texture else "absent",
             is_stub=self.adapter.is_stub,
             mesh_metadata=MeshMetadata(
                 vertex_count=vertex_count,
                 face_count=face_count,
-                has_texture=texture_path.exists(),
+                has_texture=has_texture,
+                uv_present=uv_present,
             ),
             checksum=checksum,
         )
