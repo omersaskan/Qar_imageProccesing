@@ -76,7 +76,8 @@ class OpenMVSTexturer:
                 str(self._interface_colmap),
                 "-i", str(dense_workspace),
                 "-o", str(scene_mvs),
-                "--image-folder", str(colmap_workspace / "images")
+                "--working-folder", str(dense_workspace),
+                "--image-folder", str(dense_workspace.parent / "images")
             ]
             
             try:
@@ -94,7 +95,8 @@ class OpenMVSTexturer:
                 "-i", str(scene_mvs),
                 "--mesh-file", str(selected_mesh),
                 "--export-type", "obj",
-                "-o", str(output_dir / "textured_model")
+                "-o", str(output_dir / "textured_model"),
+                "--working-folder", str(output_dir)
             ]
             
             try:
