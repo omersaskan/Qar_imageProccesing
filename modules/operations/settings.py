@@ -69,6 +69,9 @@ class Settings(BaseSettings):
     # Whether unmasked fallback is even allowed.
     recon_unmasked_fallback_enabled: bool = Field(False, validation_alias="RECON_UNMASKED_FALLBACK_ENABLED")
     
+    # SPRINT 4: Diagnostic toggle to force-enable unmasked fallback for troubleshooting.
+    recon_diagnostic_enable_unmasked: bool = Field(False, validation_alias="RECON_DIAGNOSTIC_ENABLE_UNMASKED")
+    
     # Default effort will use whatever is on disk (usually from extraction rate=15).
     # Fallback DENSER_FRAMES will re-extract with this rate.
     recon_fallback_sample_rate: int = Field(5, validation_alias="RECON_FALLBACK_SAMPLE_RATE")

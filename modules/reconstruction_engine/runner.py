@@ -278,7 +278,10 @@ class ReconstructionRunner:
 
         validated_frames = self._validate_input_frames(job.input_frames)
 
-        fallback_steps = settings.recon_fallback_steps or ["default"]
+        fallback_steps = list(settings.recon_fallback_steps or ["default"])
+        # SPRINT 4: Diagnostic override to ensure unmasked is tried
+        if settings.recon_diagnostic_enable_unmasked and "unmasked" not in fallback_steps:
+            fallback_steps.append("unmasked")
 
         audit = ReconstructionAudit(capture_session_id=job.capture_session_id)
         job_dir = Path(job.job_dir).resolve()
@@ -292,9 +295,11 @@ class ReconstructionRunner:
         for i, step_name in enumerate(fallback_steps):
             attempt_type = ReconstructionAttemptType(step_name)
 
-            if attempt_type == ReconstructionAttemptType.UNMASKED and not settings.recon_unmasked_fallback_enabled:
-                logging.warning("Skipping UNMASKED fallback as it is disabled in settings.")
-                continue
+            if attempt_type == ReconstructionAttemptType.UNMASKED:
+                # Allow if either enabled globally or via diagnostic toggle
+                if not (settings.recon_unmasked_fallback_enabled or settings.recon_diagnostic_enable_unmasked):
+                    logging.warning("Skipping UNMASKED fallback as it is disabled in settings.")
+                    continue
 
             attempt_dir = job_dir / f"attempt_{i}_{step_name}"
             attempt_dir.mkdir(parents=True, exist_ok=True)

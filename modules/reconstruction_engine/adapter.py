@@ -842,8 +842,9 @@ class COLMAPAdapter(ReconstructionAdapter):
                 )
             return prep["masks_dir"]
 
-        # Unmasked fallback: do NOT pass a mask directory to COLMAP.
-        return prep["masks_dir"] if copied_mask_count == accepted_frames and copied_mask_count > 0 else None
+        # Unmasked fallback must be truly unmasked.
+        # If enforce_masks=False, do not pass ImageReader.mask_path and do not generate dense masks.
+        return None
 
     def _validate_dense_workspace(self, workspace_path: Path) -> int:
         dense_dir = workspace_path / "dense"
