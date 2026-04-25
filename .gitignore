@@ -44,6 +44,7 @@ Thumbs.db
 # Media
 *.jpg
 *.png
+*.photometric.bin
 
 # Test Workspaces
 workspace_fast_smoke/
