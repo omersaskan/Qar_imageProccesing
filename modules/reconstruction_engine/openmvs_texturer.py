@@ -69,6 +69,7 @@ class OpenMVSTexturer:
         scene_mvs = output_dir / "scene.mvs"
         textured_obj = output_dir / "textured_model.obj"
 
+        used_output_stem = "textured_model"
         with open(log_path, "w", encoding="utf-8") as log_file:
             log_file.write(f"Starting OpenMVS Texturing using mesh: {selected_mesh}\n")
 
@@ -122,20 +123,68 @@ class OpenMVSTexturer:
             try:
                 self._run_command(cmd_texture, output_dir, log_file)
             except Exception as e:
-                raise RuntimeError(f"TextureMesh failed: {e}")
+                log_file.write(f"WARNING: TextureMesh failed with default settings: {e}\n")
+                log_file.write("Retrying with safe profile (resolution-level 2)...\n")
+                
+                # SPRINT 4: Use a separate output basename for safe profile to avoid conflicts
+                # with potentially corrupted partial files from the first attempt.
+                used_output_stem = "textured_model_safe"
+                safe_output_base = output_dir / used_output_stem
+                cmd_texture_safe = [
+                    str(self._texture_mesh),
+                    "-i", str(scene_mvs),
+                    "--mesh-file", str(selected_mesh),
+                    "--export-type", "obj",
+                    "-o", str(safe_output_base),
+                    "--working-folder", str(output_dir),
+                    "--resolution-level", "2",
+                ]
+                
+                try:
+                    self._run_command(cmd_texture_safe, output_dir, log_file)
+                    log_file.write("TextureMesh successful with safe profile.\n")
+                    # Update textured_obj to point to the safe version
+                    textured_obj = output_dir / f"{used_output_stem}.obj"
+                except Exception as e2:
+                    log_file.write(f"ERROR: TextureMesh failed even with safe profile: {e2}\n")
+                    raise RuntimeError(f"TextureMesh failed even with safe profile: {e2}")
 
             if not textured_obj.exists():
-                raise RuntimeError("TextureMesh finished but obj file missing.")
+                raise RuntimeError(f"TextureMesh finished but obj file missing: {textured_obj}")
 
-            generated_textures = list(output_dir.glob("*_map_Kd.*"))
+            # Collect textures that match the successful output stem
+            generated_textures = list(output_dir.glob(f"{used_output_stem}*_map_Kd.*"))
+            
+            # SPRINT 4: Robust MTL parsing to discover textures regardless of naming convention
+            mtl_file = output_dir / f"{used_output_stem}.mtl"
+            if mtl_file.exists():
+                try:
+                    with open(mtl_file, "r", encoding="utf-8", errors="ignore") as f:
+                        for line in f:
+                            if line.strip().startswith("map_Kd"):
+                                # Use maxsplit=1 to handle filenames with spaces
+                                parts = line.strip().split(None, 1)
+                                if len(parts) > 1:
+                                    tex_name = parts[1].strip()
+                                    tex_path = output_dir / tex_name
+                                    if tex_path.exists() and tex_path not in generated_textures:
+                                        generated_textures.append(tex_path)
+                                        log_file.write(f"Texture discovered via MTL: {tex_name}\n")
+                except Exception as e:
+                    log_file.write(f"WARNING: Failed to parse MTL for textures: {e}\n")
+
             if not generated_textures:
-                generated_textures = list(output_dir.glob("*.png")) + list(output_dir.glob("*.jpg"))
+                # Fallback to general images but still filter by used_output_stem to avoid partials
+                generated_textures = [
+                    p for p in (list(output_dir.glob(f"{used_output_stem}*.png")) + list(output_dir.glob(f"{used_output_stem}*.jpg")))
+                    if p.name != f"{used_output_stem}.png" and p.name != f"{used_output_stem}.jpg"
+                ]
 
-            log_file.write("Texturing completed successfully.\n")
+            log_file.write(f"Texturing completed successfully. Used stem: {used_output_stem}, Atlas count: {len(generated_textures)}\n")
 
         return {
             "textured_mesh_path": str(textured_obj),
-            "texture_atlas_paths": [str(p) for p in generated_textures if "textured_model" in p.name],
+            "texture_atlas_paths": [str(p) for p in generated_textures],
             "texturing_engine": "openmvs",
             "log_path": str(log_path),
         }
