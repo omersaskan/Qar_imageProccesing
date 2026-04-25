@@ -94,6 +94,12 @@ class Settings(BaseSettings):
     # Poisson mesher timeout in seconds.
     recon_poisson_timeout_sec: int = Field(300, validation_alias="RECON_POISSON_TIMEOUT_SEC")
     
+    # COLMAP StereoFusion Thresholds
+    recon_stereo_fusion_min_num_pixels: int = Field(2, validation_alias="RECON_STEREO_FUSION_MIN_NUM_PIXELS")
+    recon_stereo_fusion_max_reproj_error: float = Field(2.0, validation_alias="RECON_STEREO_FUSION_MAX_REPROJ_ERROR")
+    recon_stereo_fusion_max_depth_error: float = Field(0.01, validation_alias="RECON_STEREO_FUSION_MAX_DEPTH_ERROR")
+    recon_stereo_fusion_max_normal_error: float = Field(10.0, validation_alias="RECON_STEREO_FUSION_MAX_NORMAL_ERROR")
+
     # OpenMVS specific flags
     openmvs_fail_hard: bool = Field(False, validation_alias="OPENMVS_FAIL_HARD")
     openmvs_textured_output: bool = Field(True, validation_alias="OPENMVS_TEXTURED_OUTPUT")

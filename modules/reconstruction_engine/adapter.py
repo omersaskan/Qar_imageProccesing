@@ -226,7 +226,16 @@ class ColmapCommandBuilder:
             
         return cmd
 
-    def stereo_fusion(self, workspace_path: Path, output_path: Path, mask_path: Optional[Path] = None) -> List[str]:
+    def stereo_fusion(
+        self,
+        workspace_path: Path,
+        output_path: Path,
+        mask_path: Optional[Path] = None,
+        min_num_pixels: int = 2,
+        max_reproj_error: float = 2.0,
+        max_depth_error: float = 0.01,
+        max_normal_error: float = 10.0,
+    ) -> List[str]:
         cmd = [
             self.bin,
             "stereo_fusion",
@@ -235,7 +244,13 @@ class ColmapCommandBuilder:
             "--output_path",
             str(output_path),
             "--StereoFusion.min_num_pixels",
-            "2",
+            str(min_num_pixels),
+            "--StereoFusion.max_reproj_error",
+            str(max_reproj_error),
+            "--StereoFusion.max_depth_error",
+            str(max_depth_error),
+            "--StereoFusion.max_normal_error",
+            str(max_normal_error),
         ]
         if mask_path is not None:
             cmd += ["--StereoFusion.mask_path", str(mask_path)]
@@ -468,6 +483,54 @@ class COLMAPAdapter(ReconstructionAdapter):
         h, w = mask.shape[:2]
         occupancy = float(np.sum(mask > 0) / max(h * w, 1))
         return 0.04 < occupancy < 0.90
+
+    def _validate_dense_masks(self, dense_masks_dir: Path, images_dir: Path, log_file) -> bool:
+        """
+        Validates undistorted dense masks for alignment and count.
+        Returns: True if valid, False otherwise.
+        """
+        if not dense_masks_dir.exists():
+            log_file.write(f"WARNING: Dense masks directory missing: {dense_masks_dir}\n")
+            return False
+
+        images = list(images_dir.glob("*.jpg"))
+        if not images:
+            log_file.write("WARNING: No undistorted images found for mask validation.\n")
+            return False
+
+        # Sample check
+        sample_img_path = images[0]
+        sample_mask_path = dense_masks_dir / f"{sample_img_path.name}.png"
+
+        if not sample_mask_path.exists():
+            log_file.write(f"WARNING: Sample dense mask missing: {sample_mask_path.name}\n")
+            return False
+
+        # Load samples
+        img_arr = np.fromfile(str(sample_img_path), np.uint8)
+        img = cv2.imdecode(img_arr, cv2.IMREAD_UNCHANGED)
+        
+        mask_arr = np.fromfile(str(sample_mask_path), np.uint8)
+        mask = cv2.imdecode(mask_arr, cv2.IMREAD_GRAYSCALE)
+
+        if img is None or mask is None:
+            log_file.write("WARNING: Could not load sample image/mask for dimension check.\n")
+            return False
+
+        if img.shape[:2] != mask.shape[:2]:
+            log_file.write(
+                f"WARNING: Dimension mismatch! Image {img.shape[:2]} vs Mask {mask.shape[:2]}. "
+                "Rejecting dense masks.\n"
+            )
+            return False
+
+        # Count check
+        mask_count = len(list(dense_masks_dir.glob("*.png")))
+        if mask_count < len(images) * 0.9:
+            log_file.write(f"WARNING: Insufficient dense masks ({mask_count} masks for {len(images)} images).\n")
+            return False
+
+        return True
 
     def _read_image(self, image_path: Path, read_flag: int):
         image = cv2.imread(str(image_path), read_flag)
@@ -934,24 +997,58 @@ class COLMAPAdapter(ReconstructionAdapter):
                 cmd_stereo = self.builder.patch_match_stereo(dense_dir)
                 self._run_command(cmd_stereo, output_dir, log_file)
 
-                # Final guard for stereo fusion: Use masks ONLY if they are reliable
-                effective_mask_path = stereo_masks_dir if (stereo_masks_dir.exists() and not force_unmasked_fusion) else None
+                # Final guard for stereo fusion: Prefer dense masks if reliable
+                is_mask_valid = self._validate_dense_masks(
+                    stereo_masks_dir, 
+                    dense_dir / "images", 
+                    log_file
+                )
                 
+                effective_mask_path = None
+                if is_mask_valid and not force_unmasked_fusion:
+                    effective_mask_path = stereo_masks_dir
+                    log_file.write(f"Using validated dense masks from: {effective_mask_path}\n")
+                else:
+                    log_file.write("Proceeding UNMASKED for stereo_fusion (masks invalid or forced off).\n")
+
+                # Load StereoFusion settings
+                sf_min_pix = settings.recon_stereo_fusion_min_num_pixels
+                sf_max_reproj = settings.recon_stereo_fusion_max_reproj_error
+                sf_max_depth = settings.recon_stereo_fusion_max_depth_error
+                sf_max_normal = settings.recon_stereo_fusion_max_normal_error
+
+                log_file.write("\n--- StereoFusion Configuration ---\n")
+                log_file.write(f"Min Num Pixels: {sf_min_pix}\n")
+                log_file.write(f"Max Reproj Error: {sf_max_reproj}\n")
+                log_file.write(f"Max Depth Error: {sf_max_depth}\n")
+                log_file.write(f"Max Normal Error: {sf_max_normal}\n")
+                log_file.write(f"Mask Path: {effective_mask_path}\n")
+                log_file.write("----------------------------------\n")
+
                 cmd_fuse = self.builder.stereo_fusion(
                     dense_dir, 
                     dense_dir / "fused.ply", 
-                    mask_path=effective_mask_path
+                    mask_path=effective_mask_path,
+                    min_num_pixels=sf_min_pix,
+                    max_reproj_error=sf_max_reproj,
+                    max_depth_error=sf_max_depth,
+                    max_normal_error=sf_max_normal
                 )
                 self._run_command(cmd_fuse, output_dir, log_file)
 
                 fused_points = self._validate_dense_workspace(output_dir)
-                log_file.write(f"Dense fusion successful. Fused points: {fused_points}\n")
-
-                # Guard: If point count is extremely high/low, log it
-                if fused_points > 2_000_000:
-                    log_file.write(f"WARNING: Extremely high fused point count ({fused_points}). Poisson may take a long time.\n")
-                elif fused_points < 1000:
-                    log_file.write(f"WARNING: Very low fused point count ({fused_points}). Meshing might fail.\n")
+                
+                # --- Post-Fusion Diagnostic Summary ---
+                log_file.write("\n--- StereoFusion Diagnostic Summary ---\n")
+                log_file.write(f"Final Fused Points: {fused_points}\n")
+                log_file.write(f"Depth Maps Found: {len(list((dense_dir / 'stereo/depth_maps').glob('*.bin')))}\n")
+                log_file.write(f"Normal Maps Found: {len(list((dense_dir / 'stereo/normal_maps').glob('*.bin')))}\n")
+                
+                if fused_points < 1000:
+                    log_file.write("CRITICAL WARNING: Very low fused point count. Meshing will likely fail or be poor quality.\n")
+                elif fused_points > 2_000_000:
+                    log_file.write(f"INFO: High density detected ({fused_points} points). Processing might be slow.\n")
+                log_file.write("---------------------------------------\n\n")
 
                 poisson_ok = False
                 mesher_timeout = settings.recon_poisson_timeout_sec
