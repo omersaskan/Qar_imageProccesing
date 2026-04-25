@@ -11,12 +11,25 @@ dist/
 *.egg-info/
 *.egg-info
 
-# Project Data (Large assets and session-specific files)
+# Runtime/generated data
 data/captures/
 data/sessions/*.json
 !data/sessions/.gitkeep
-data/reconstructions/*/
+data/reconstructions/
+data/cleaned/
+data/training_manifests/
+data/training_registry/
+data/registry/blobs/
 data/registry/meta/*.json
+data/logs/
+data/worker.process
+data/worker.process.lock
+
+# Scratch/generated artifacts
+fused.ply
+fused.ply.vis
+out.txt
+*.log
 tmp/
 
 # IDEs
@@ -26,7 +39,3 @@ tmp/
 # OS
 .DS_Store
 Thumbs.db
-
-# Logs
-data/logs/
-*.log
