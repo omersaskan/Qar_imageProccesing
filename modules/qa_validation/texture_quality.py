@@ -117,8 +117,8 @@ class TextureQualityAnalyzer:
         match_score = 1.0
         if expected_product_color == "white_cream":
             # Cream/White should have high luminance and low saturation
-            # Penalty for too much dark or too much saturation
-            match_score = max(0.0, 1.0 - (near_black_ratio * 1.5) - (non_neutral_ratio * 0.5))
+            # Penalty for too much dark, too much saturation, or neon artifacts
+            match_score = max(0.0, 1.0 - (near_black_ratio * 1.5) - (non_neutral_ratio * 0.5) - (neon_ratio * 2.0))
             if avg_luminance < 0.4:
                 match_score *= (avg_luminance / 0.4)
 
@@ -225,6 +225,7 @@ class TextureQualityAnalyzer:
     def _error_result(self, message: str) -> Dict[str, Any]:
         return {
             "texture_quality_status": "fail",
+            "texture_quality_grade": "F",
             "texture_quality_reasons": [f"ERROR: {message}"],
             "black_pixel_ratio": 0.0,
             "near_black_ratio": 0.0,
@@ -233,5 +234,8 @@ class TextureQualityAnalyzer:
             "dominant_background_color_ratio": 0.0,
             "atlas_coverage_ratio": 0.0,
             "default_fill_or_flat_color_ratio": 0.0,
-            "alpha_empty_ratio": 0.0
+            "alpha_empty_ratio": 0.0,
+            "neon_artifact_ratio": 0.0,
+            "average_luminance": 0.0,
+            "expected_product_color_match_score": 0.0
         }
