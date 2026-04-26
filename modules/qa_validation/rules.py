@@ -257,9 +257,18 @@ def validate_object_filtering(asset_data: Dict[str, Any]) -> str:
     Requires filtering_status == 'object_isolated'.
     """
     status = str(asset_data.get("filtering_status", "unknown")).lower()
+    
+    # 1. Clear Pass
     if status == "object_isolated":
         return "pass"
+        
+    # 2. Clear Fail
+    if status == "failed":
+        return "fail"
+        
+    # 3. Review Required: Scene might be raw or isolation is unverified
     if status == "scene_raw":
-        # Raw scene geometry is a review/fail condition for delivered products
         return "review"
-    return "pass" # Default pass for backward compatibility
+        
+    # 4. Unknown/Missing (Production risk)
+    return "review"

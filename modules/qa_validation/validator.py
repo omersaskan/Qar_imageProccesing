@@ -183,6 +183,8 @@ class AssetValidator:
         combined_report.update(contamination_decisions)
         combined_report.update(texture_integrity_decisions)
         combined_report.update(delivery_decisions)
+        combined_report.update(accessor_decisions)
+        combined_report["object_filtering"] = validate_object_filtering(asset_data)
 
         return ValidationReport(
             asset_id=asset_id,

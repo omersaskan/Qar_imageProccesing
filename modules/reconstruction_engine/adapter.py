@@ -548,7 +548,7 @@ class COLMAPAdapter(ReconstructionAdapter):
             "dense_images_dir": str(dense_images_dir),
             "dense_image_count": len(images),
             "dense_mask_count": 0,
-            "dense_mask_exact_filename_matches": 0,
+            "dense_mask_exact_matches": 0,
             "dense_mask_dimension_matches": 0,
             "dense_mask_fallback_white_count": 0,
             "dense_mask_fallback_white_ratio": 1.0,
@@ -606,7 +606,7 @@ class COLMAPAdapter(ReconstructionAdapter):
             if ok:
                 buff.tofile(str(mask_out))
                 stats["dense_mask_count"] += 1
-                stats["dense_mask_exact_filename_matches"] += 1
+                stats["dense_mask_exact_matches"] += 1
 
                 written = self._read_image(mask_out, cv2.IMREAD_GRAYSCALE)
                 if written is not None and written.shape[:2] == (h, w):
@@ -620,7 +620,7 @@ class COLMAPAdapter(ReconstructionAdapter):
         log_file.write("Strategy: resize original feature masks to dense/images dimensions\n")
         log_file.write(f"Dense images: {stats['dense_image_count']}\n")
         log_file.write(f"Dense masks written: {stats['dense_mask_count']}\n")
-        log_file.write(f"Exact filename matches: {stats['dense_mask_exact_filename_matches']}\n")
+        log_file.write(f"Exact filename matches: {stats['dense_mask_exact_matches']}\n")
         log_file.write(f"Dimension matches: {stats['dense_mask_dimension_matches']}\n")
         log_file.write(f"Fallback white count: {stats['dense_mask_fallback_white_count']}\n")
         log_file.write(f"Fallback white ratio: {stats['dense_mask_fallback_white_ratio']:.2%}\n")
@@ -841,10 +841,10 @@ class COLMAPAdapter(ReconstructionAdapter):
                     "Mask enforcement requested, but not all accepted frames have copied masks. "
                     f"accepted={accepted_frames}, copied_masks={copied_mask_count}"
                 )
+        
+        if copied_mask_count > 0:
             return prep["masks_dir"]
-
-        # Unmasked fallback must be truly unmasked.
-        # If enforce_masks=False, do not pass ImageReader.mask_path and do not generate dense masks.
+            
         return None
 
     def _validate_dense_workspace(self, workspace_path: Path) -> int:
@@ -1044,11 +1044,15 @@ class COLMAPAdapter(ReconstructionAdapter):
         )
         images_dir: Path = prep["images_dir"]
 
-        effective_masks_dir = self._resolve_effective_masks_dir(
+        available_masks_dir = self._resolve_effective_masks_dir(
             prep=prep,
             enforce_masks=enforce_masks,
             min_required_frames=3,
         )
+        
+        # Hybrid strategy decoupling
+        sfm_masks_dir = None if settings.recon_hybrid_masking else available_masks_dir
+        dense_masks_source_dir = available_masks_dir
 
         log_path = output_dir / "reconstruction.log"
         with open(log_path, "w", encoding="utf-8") as log_file:
@@ -1056,12 +1060,10 @@ class COLMAPAdapter(ReconstructionAdapter):
             log_file.write(
                 f"Workspace prepared. accepted={prep['accepted_frames']} "
                 f"copied_masks={prep['copied_mask_count']} "
-                f"unreadable={prep['rejected_unreadable_frame']} "
-                f"missing_mask={prep['rejected_missing_mask']} "
-                f"bad_mask={prep['rejected_bad_mask']} "
-                f"modes(stem={counts['stem']}, legacy={counts['legacy']}, none={counts['none']}) "
-                f"mask_mode={'masked' if effective_masks_dir is not None else 'unmasked'}\n"
+                f"modes(stem={counts['stem']}, legacy={counts['legacy']}, none={counts['none']})\n"
             )
+            log_file.write(f"SFM mask mode: {'unmasked (hybrid)' if sfm_masks_dir is None and dense_masks_source_dir is not None else ('masked' if sfm_masks_dir else 'unmasked')}\n")
+            log_file.write(f"Dense mask availability: {'available' if dense_masks_source_dir else 'unavailable'}\n")
 
             try:
                 # Safe defaults for return dict (avoid locals() fragility)
@@ -1069,16 +1071,10 @@ class COLMAPAdapter(ReconstructionAdapter):
                 selected_model_name = "none"
                 db_path = output_dir / "database.db"
 
-                # Hybrid masking: Unmasked pose (SfM), masked object (MVS)
-                # We extract features from the whole image to get better camera poses from the background.
-                pose_masks_dir = None if settings.recon_hybrid_masking else effective_masks_dir
-                
-                log_file.write(f"Feature extraction mask mode: {'UNMASKED (Hybrid Pose Estimation)' if pose_masks_dir is None and effective_masks_dir is not None else 'MASKED'}\n")
-
                 cmd_extract = self.builder.feature_extractor(
                     db_path,
                     images_dir,
-                    pose_masks_dir,
+                    sfm_masks_dir,
                     self._max_image_size,
                 )
                 self._run_command(cmd_extract, output_dir, log_file)
@@ -1133,10 +1129,10 @@ class COLMAPAdapter(ReconstructionAdapter):
                     "dense_mask_generation_mode": "none",
                 }
 
-                if effective_masks_dir and effective_masks_dir.exists():
+                if dense_masks_source_dir and dense_masks_source_dir.exists():
                     dense_mask_stats = self._generate_dense_masks_from_feature_masks(
                         dense_dir=dense_dir,
-                        effective_masks_dir=effective_masks_dir,
+                        effective_masks_dir=dense_masks_source_dir,
                         log_file=log_file,
                     )
 
@@ -1279,9 +1275,13 @@ class COLMAPAdapter(ReconstructionAdapter):
             "dense_points_fused": fused_points,
             "mesher_used": mesher_used,
             "selected_sparse_model": selected_model_name,
-            "mask_mode": "masked" if effective_masks_dir is not None else "unmasked",
+            
+            # Part 2 Diagnostics
+            "sfm_mask_mode": "unmasked" if sfm_masks_dir is None else "masked",
+            "dense_mask_mode": "masked" if effective_mask_path else ("unmasked" if dense_masks_source_dir else "unavailable"),
             "filtering_status": "object_isolated" if effective_mask_path else "scene_raw",
-            "feature_mask_path": str(effective_masks_dir) if effective_masks_dir else None,
+            
+            "feature_mask_path": str(dense_masks_source_dir) if dense_masks_source_dir else None,
             "stereo_fusion_mask_path": str(effective_mask_path) if effective_mask_path else None,
             "dense_mask_valid": bool(is_mask_valid),
             "force_unmasked_fusion": bool(force_unmasked_fusion),
@@ -1370,21 +1370,23 @@ class OpenMVSAdapter(COLMAPAdapter):
             )
 
             images_dir = prep["images_dir"]
-            effective_masks_dir = self._resolve_effective_masks_dir(
+            available_masks_dir = self._resolve_effective_masks_dir(
                 prep=prep,
                 enforce_masks=enforce_masks,
                 min_required_frames=5,
             )
+            
+            sfm_masks_dir = None if settings.recon_hybrid_masking else available_masks_dir
+            dense_masks_source_dir = available_masks_dir
 
             counts = prep["match_mode_counts"]
             log_file.write(
                 f"OpenMVS workspace prepared. accepted={prep['accepted_frames']} "
                 f"copied_masks={prep['copied_mask_count']} "
-                f"missing_mask={prep['rejected_missing_mask']} "
-                f"bad_mask={prep['rejected_bad_mask']} "
-                f"modes(stem={counts['stem']}, legacy={counts['legacy']}, none={counts['none']}) "
-                f"mask_mode={'masked' if effective_masks_dir is not None else 'unmasked'}\n"
+                f"modes(stem={counts['stem']}, legacy={counts['legacy']}, none={counts['none']})\n"
             )
+            log_file.write(f"SFM mask mode: {'unmasked (hybrid)' if sfm_masks_dir is None and dense_masks_source_dir is not None else ('masked' if sfm_masks_dir else 'unmasked')}\n")
+            log_file.write(f"Dense mask availability: {'available' if dense_masks_source_dir else 'unavailable'}\n")
 
             # --- MASK REFINEMENT PASS ---
             if enforce_masks:
@@ -1397,16 +1399,11 @@ class OpenMVSAdapter(COLMAPAdapter):
             dense_dir.mkdir(exist_ok=True)
 
             try:
-                # Hybrid masking: Unmasked pose (SfM), masked object (MVS)
-                pose_masks_dir = None if settings.recon_hybrid_masking else effective_masks_dir
-                
-                log_file.write(f"Feature extraction mask mode: {'UNMASKED (Hybrid Pose Estimation)' if pose_masks_dir is None and effective_masks_dir is not None else 'MASKED'}\n")
-
                 self._run_command(
                     self.builder.feature_extractor(
                         db_path,
                         images_dir,
-                        pose_masks_dir,
+                        sfm_masks_dir,
                         self._max_image_size,
                     ),
                     output_dir,
@@ -1501,12 +1498,23 @@ class OpenMVSAdapter(COLMAPAdapter):
                     "face_count": stats["face_count"],
                     "registered_images": registered_images,
                     "sparse_points": sparse_points,
-                    "dense_points_fused": stats.get("vertex_count", 0),  # OpenMVS fused point proxy
+                    "dense_points_fused": stats.get("vertex_count", 0),
                     "mesher_used": "openmvs_reconstruct_mesh",
                     "engine_type": self.engine_type,
                     "textured": bool(discovered_texture),
                     "selected_sparse_model": best_model["path"].name,
-                    "filtering_status": "object_isolated" if effective_masks_dir else "scene_raw",
+                    
+                    # Part 2 Diagnostics
+                    "sfm_mask_mode": "unmasked" if sfm_masks_dir is None else "masked",
+                    "dense_mask_mode": "masked" if dense_masks_source_dir else "unmasked",
+                    "filtering_status": "object_isolated" if dense_masks_source_dir else "scene_raw",
+                    
+                    # OpenMVS Diagnostic Proxies
+                    "dense_mask_count": len(input_frames) if dense_masks_source_dir else 0,
+                    "dense_image_count": len(input_frames),
+                    "dense_mask_exact_matches": len(input_frames) if dense_masks_source_dir else 0,
+                    "dense_mask_dimension_matches": len(input_frames) if dense_masks_source_dir else 0,
+                    "dense_mask_fallback_white_ratio": 0.0 if dense_masks_source_dir else 1.0,
                 }
 
             except Exception as e:
