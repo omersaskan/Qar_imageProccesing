@@ -1,0 +1,19 @@
+{
+  "depth_map_count": 0,
+  "normal_map_count": 0,
+  "fused_point_count": 1000,
+  "sparse_point_count": 1000,
+  "sparse_dense_ratio": 1.0,
+  "selected_mask_path": null,
+  "mask_validation_status": "invalid/none",
+  "filtering_status": "scene_raw",
+  "hybrid_strategy": "unmasked_pose_masked_object",
+  "stereo_fusion_thresholds": {
+    "min_num_pixels": 1,
+    "max_reproj_error": 4.0,
+    "max_depth_error": 0.03,
+    "max_normal_error": 25.0
+  },
+  "status": "fail",
+  "recommendation": "CRITICAL: Very low fused point count. Recapture recommended."
+}
