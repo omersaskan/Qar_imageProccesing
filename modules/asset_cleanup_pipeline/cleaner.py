@@ -205,12 +205,12 @@ class AssetCleaner:
             if isolation_stats.get("object_isolation_status") != "success":
                 raise ValueError(f"Object isolation failed: {isolation_stats.get('object_isolation_status')}")
 
-            # Export isolated mesh to a temp OBJ to preserve UVs (trimesh OBJ export handles vt)
-            isolated_temp_obj = output_dir / "isolated_temp.obj"
-            isolated_mesh.export(str(isolated_temp_obj))
+            # Export isolated mesh to a persistent debug artifact
+            isolated_debug_obj = output_dir / "debug_isolated_mesh.obj"
+            isolated_mesh.export(str(isolated_debug_obj))
             
             # Use the isolated mesh for subsequent alignment
-            work_mesh = isolated_temp_obj
+            work_mesh = isolated_debug_obj
         except Exception as e:
             logger.error("Isolation failed during texture_safe_copy: %s", e)
             return {
@@ -223,9 +223,7 @@ class AssetCleaner:
         # 2. Perform safe alignment (translates vertices, computes bbox and pivot offset)
         pivot_offset, bbox_min, bbox_max = self._safe_align_obj(work_mesh, cleaned_mesh_path)
         
-        # Cleanup temp
-        if work_mesh != raw_mesh and work_mesh.exists():
-            work_mesh.unlink()
+        # We preserve work_mesh (debug_isolated_mesh.obj) as requested for diagnostic audit
 
         # 3. OBJ usemtl normalization ...
         import shutil
@@ -404,7 +402,7 @@ class AssetCleaner:
             
             return metadata, stats, stats["cleaned_mesh_path"]
 
-        isolation_temp_path = job_cleaned_dir / "isolated_temp.obj"
+        isolation_debug_path = job_cleaned_dir / "debug_isolated_mesh.obj"
         cleaned_mesh_path = job_cleaned_dir / "cleaned_mesh.obj"
         metadata_path = job_cleaned_dir / "normalized_metadata.json"
 
@@ -424,9 +422,9 @@ class AssetCleaner:
         isolated_mesh, isolation_stats = self.isolator.isolate_product(mesh)
 
         if len(isolated_mesh.vertices) == 0 or len(isolated_mesh.faces) == 0:
-            raise ValueError("Isolation produced an empty mesh")
+            raise ValueError(f"Isolation failed: {isolation_stats.get('object_isolation_status', 'empty')}")
 
-        isolated_mesh.export(str(isolation_temp_path))
+        isolated_mesh.export(str(isolation_debug_path))
 
         pre_aligned_path = job_cleaned_dir / "pre_aligned_mesh.obj"
 
@@ -434,7 +432,7 @@ class AssetCleaner:
         # 3. Remesh / decimate
         # ------------------------------------------------------------
         final_polycount = self.remesher.process(
-            str(isolation_temp_path),
+            str(isolation_debug_path),
             str(pre_aligned_path),
             profile,
         )
@@ -466,8 +464,8 @@ class AssetCleaner:
         # ------------------------------------------------------------
         # 7. Temp cleanup
         # ------------------------------------------------------------
-        if isolation_temp_path.exists():
-            isolation_temp_path.unlink()
+        # We preserve isolation_debug_path for diagnostic audit as requested.
+        pass
 
         # ------------------------------------------------------------
         # 8. Final artifact existence checks
@@ -524,7 +522,7 @@ class AssetCleaner:
             "removed_face_ratio": isolation_stats.get("removed_face_ratio"),
             "mask_support_ratio": isolation_stats.get("mask_support_ratio"),
             "point_cloud_support_ratio": isolation_stats.get("point_cloud_support_ratio"),
-            "texture_input_mesh_path": str(isolation_temp_path),
+            "texture_input_mesh_path": str(isolation_debug_path),
             "unsafe_scene_copy_forbidden": False,
         }
 

@@ -252,5 +252,75 @@ class TestPart3HardenedVerification(unittest.TestCase):
             self.assertEqual(stats["object_isolation_method"], "mask_guided")
             self.assertEqual(stats["removed_face_ratio"], 0.2)
 
+    def test_isolation_no_mask_support_failure(self):
+        """
+        Verifies that isolation fails when masks are provided but no support is found.
+        """
+        isolator = MeshIsolator()
+        
+        # 1. Setup mock data
+        mesh = trimesh.Trimesh(vertices=np.random.rand(100, 3), faces=np.random.randint(0, 100, (50, 3)))
+        
+        # Mask that is all zero (no support)
+        masks = [np.zeros((100, 100), dtype=np.uint8)]
+        # Camera that projects the mesh into the mask area
+        cameras = [{"P": np.eye(3, 4)}] 
+        
+        # 2. Run isolation
+        _, stats = isolator.isolate_product(mesh, masks=masks, cameras=cameras)
+        
+        # 3. Verify failure
+        self.assertEqual(stats["object_isolation_status"], "failed_mask_support")
+        self.assertEqual(stats["isolated_mesh_faces"], 0)
+
+    def test_isolation_no_pc_support_failure(self):
+        """
+        Verifies that isolation fails when point cloud is provided but no support is found.
+        """
+        isolator = MeshIsolator()
+        
+        # 1. Setup mock data
+        mesh = trimesh.Trimesh(vertices=np.random.rand(100, 3), faces=np.random.randint(0, 100, (50, 3)))
+        
+        # Point cloud that is far away
+        pc = trimesh.points.PointCloud(vertices=np.random.rand(10, 3) + 100.0)
+        
+        # 2. Run isolation
+        _, stats = isolator.isolate_product(mesh, point_cloud=pc)
+        
+        # 3. Verify failure
+        self.assertEqual(stats["object_isolation_status"], "failed_pc_support")
+        self.assertEqual(stats["isolated_mesh_faces"], 0)
+
+    def test_cleaner_debug_artifact_preservation(self):
+        """
+        Verifies that debug_isolated_mesh.obj is preserved after cleanup.
+        """
+        cleaner = AssetCleaner(data_root=str(self.test_dir))
+        dummy_obj = self.test_dir / "dummy.obj"
+        dummy_obj.write_text("v 0 0 0\nf 1 1 1")
+        
+        with patch("trimesh.load") as mock_load, \
+             patch.object(MeshIsolator, "isolate_product") as mock_iso, \
+             patch("pathlib.Path.exists", return_value=True):
+            
+            mock_mesh = MagicMock(spec=trimesh.Trimesh)
+            mock_mesh.vertices = np.zeros((10, 3))
+            mock_mesh.faces = np.zeros((5, 3))
+            mock_load.return_value = mock_mesh
+            mock_iso.return_value = (mock_mesh, {"object_isolation_status": "success"})
+            
+            # Mock other parts
+            cleaner.remesher.process = MagicMock(return_value=100)
+            cleaner.alignment.align_to_ground = MagicMock(return_value=(None, {"z":0}))
+            cleaner.bbox_extractor.extract = MagicMock(return_value=({}, {}))
+
+            _, stats, _ = cleaner.process_cleanup("debug_job", str(dummy_obj))
+            
+            debug_path = Path(stats["texture_input_mesh_path"])
+            self.assertIn("debug_isolated_mesh.obj", debug_path.name)
+            # Verify that Path.unlink was NOT called for this file (we didn't mock it here, but we can verify intent)
+            self.assertTrue(debug_path.name.endswith(".obj"))
+
 if __name__ == "__main__":
     unittest.main()

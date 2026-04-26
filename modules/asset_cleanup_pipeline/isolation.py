@@ -371,7 +371,7 @@ class MeshIsolator:
         avg_support = total_mask_support / max(len(keep), 1)
         
         if not keep:
-            return mesh, {"mask_support_ratio": 0.0, "mask_support_status": "no_support"}
+            return trimesh.Trimesh(), {"mask_support_ratio": 0.0, "mask_support_status": "no_support"}
         
         return trimesh.util.concatenate(keep), {
             "mask_support_ratio": float(avg_support),
@@ -418,9 +418,7 @@ class MeshIsolator:
         avg_support = total_pc_support / max(len(keep), 1)
         
         if not keep:
-            # Fallback to largest if everything was pruned (safety)
-            best = max(components, key=lambda c: len(c.faces))
-            return best, {"pc_support_ratio": 0.0, "pc_support_status": "no_support"}
+            return trimesh.Trimesh(), {"pc_support_ratio": 0.0, "pc_support_status": "no_support"}
         
         return trimesh.util.concatenate(keep), {
             "pc_support_ratio": float(avg_support),
@@ -454,11 +452,31 @@ class MeshIsolator:
         if masks and cameras:
             current_mesh, mask_support_metrics = self.isolate_by_masks(current_mesh, cameras, masks)
             isolation_method = "mask_guided"
+            if len(current_mesh.faces) == 0:
+                return current_mesh, {
+                    "object_isolation_status": "failed_mask_support",
+                    "object_isolation_method": isolation_method,
+                    "initial_faces": initial_faces,
+                    "initial_vertices": initial_vertices,
+                    "final_faces": 0,
+                    "isolated_mesh_faces": 0,
+                    **mask_support_metrics
+                }
             
         # 3) Point-cloud based filtering (Data support)
         if point_cloud is not None:
             current_mesh, pc_support_metrics = self.isolate_by_point_cloud(current_mesh, point_cloud)
             isolation_method = "hybrid_pc_mask" if isolation_method == "mask_guided" else "pc_guided"
+            if len(current_mesh.faces) == 0:
+                return current_mesh, {
+                    "object_isolation_status": "failed_pc_support",
+                    "object_isolation_method": isolation_method,
+                    "initial_faces": initial_faces,
+                    "initial_vertices": initial_vertices,
+                    "final_faces": 0,
+                    "isolated_mesh_faces": 0,
+                    **pc_support_metrics
+                }
 
         # 4) split components and score
         components = current_mesh.split(only_watertight=False)
