@@ -56,10 +56,12 @@ class Remesher:
                 if has_uv_init:
                     # SPRINT 5C: Strict limit enforcement for mobile profiles
                     # trimesh.simplify_quadric_decimation preserves UVs
-                    actual_target = target_faces
+                    # In this environment, it expects a RATIO (0-1)
+                    target_ratio = target_faces / max(pre_faces, 1)
+                    target_ratio = min(1.0, max(0.001, target_ratio))
                     
-                    logger.info(f"Decimating {pre_faces} -> {actual_target} (UV-safe)...")
-                    candidate = mesh.simplify_quadric_decimation(actual_target)
+                    logger.info(f"Decimating {pre_faces} -> {target_faces} (ratio {target_ratio:.3f}, UV-safe)...")
+                    candidate = mesh.simplify_quadric_decimation(target_ratio)
                     has_uv_post, has_mat_post = self._inspect_visuals(candidate)
                     
                     if not has_uv_post or (has_mat_init and not has_mat_post):
