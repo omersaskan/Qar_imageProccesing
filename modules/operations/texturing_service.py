@@ -24,6 +24,8 @@ from typing import Any, Dict, Optional, Tuple
 
 from modules.operations.logging_config import get_component_logger
 from modules.reconstruction_engine.output_manifest import OutputManifest
+from modules.utils.file_persistence import atomic_write_json, calculate_checksum
+import trimesh
 
 logger = get_component_logger("texturing_service")
 
@@ -157,8 +159,6 @@ class TexturingService:
         expected_color: str = "unknown",
     ) -> TexturingResult:
         from modules.reconstruction_engine.openmvs_texturer import OpenMVSTexturer
-        from modules.utils.file_persistence import calculate_checksum
-        import trimesh
 
         texturer = OpenMVSTexturer()
         texturing_dir = Path(cleaned_mesh_path).parent / "texturing"
@@ -257,9 +257,12 @@ class TexturingService:
             else:
                 final_texture_stats = repair_results.get("stats")
 
+            # Update paths to ensure they point to the retry results if applicable
+            textured_path = texture_results["textured_mesh_path"]
+            generated_textures = texture_results.get("texture_atlas_paths", [])
+
             # Save texture quality report
             if final_texture_stats:
-                from modules.utils.file_persistence import atomic_write_json
                 report_path = texturing_dir / "texture_quality_report.json"
                 atomic_write_json(report_path, final_texture_stats)
                 cleanup_stats["texture_quality_report_path"] = str(report_path)

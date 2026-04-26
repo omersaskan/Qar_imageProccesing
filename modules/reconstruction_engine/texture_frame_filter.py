@@ -29,14 +29,30 @@ class TextureFrameFilter:
              shutil.rmtree(selected_dir)
         selected_dir.mkdir(parents=True, exist_ok=True)
         
-        # SPRINT 5C: Mask-aware source improvement
+        # SPRINT 5C: Mask-aware source improvement - Robust resolution
         masked_dir = output_dir / "selected_images_masked"
         if masked_dir.exists():
             shutil.rmtree(masked_dir)
         masked_dir.mkdir(parents=True, exist_ok=True)
         
-        mask_folder = image_folder.parent / "masks"
-        has_masks = mask_folder.exists()
+        # Check multiple potential mask locations
+        potential_mask_paths = [
+            image_folder.parent / "stereo" / "masks",
+            image_folder.parent / "masks",
+            image_folder.parent.parent / "dense" / "stereo" / "masks",
+            image_folder.parent.parent / "dense" / "masks",
+            image_folder.parent.parent / "masks",
+        ]
+        
+        mask_folder = None
+        for p in potential_mask_paths:
+            if p.exists() and any(p.glob("*.png")):
+                mask_folder = p
+                break
+        
+        has_masks = mask_folder is not None
+        mask_count = len(list(mask_folder.glob("*.png"))) if has_masks else 0
+        logger.info(f"Mask resolution: folder={mask_folder}, count={mask_count}")
 
         analyzed_stats = []
         rejected_stats = []
