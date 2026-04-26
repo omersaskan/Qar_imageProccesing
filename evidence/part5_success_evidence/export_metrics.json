@@ -1,0 +1,48 @@
+{
+  "format": "GLB",
+  "filesize": 917636,
+  "profile": "mobile_high",
+  "smoothing_mode": "none",
+  "texture_applied": true,
+  "optimization_hooks": {
+    "meshopt": "skipped_unavailable",
+    "draco": "skipped_unavailable",
+    "gltf_validator": "skipped_unavailable"
+  },
+  "delivery_ready": true,
+  "export_status": "success",
+  "final_vertex_count": 8,
+  "final_face_count": 12,
+  "texture_count": 1,
+  "material_count": 1,
+  "all_primitives_have_position": true,
+  "all_primitives_have_normal": true,
+  "all_textured_primitives_have_texcoord_0": true,
+  "primitive_attribute_report": [
+    {
+      "mesh_index": 0,
+      "primitive_index": 0,
+      "attributes": [
+        "POSITION",
+        "TEXCOORD_0",
+        "NORMAL"
+      ],
+      "has_position": true,
+      "has_normal": true,
+      "has_texcoord_0": true,
+      "is_textured": true,
+      "missing_attributes": []
+    }
+  ],
+  "bbox_min": {
+    "x": -0.5,
+    "y": -0.5,
+    "z": -0.5
+  },
+  "bbox_max": {
+    "x": 0.5,
+    "y": 0.5,
+    "z": 0.5
+  },
+  "final_polycount": 12
+}

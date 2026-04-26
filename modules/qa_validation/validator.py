@@ -107,6 +107,9 @@ class AssetValidator:
         elif final_decision == "pass":
             delivery_status = "delivery_ready"
             is_mobile_ready = True
+        elif final_decision == "review":
+            delivery_status = "review"
+            is_mobile_ready = True # Review assets are mobile-ready but need eyes
         elif final_decision == "fail":
             delivery_status = "failed"
             is_mobile_ready = False
