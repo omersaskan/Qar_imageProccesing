@@ -108,6 +108,20 @@ class Settings(BaseSettings):
     recon_stereo_fusion_max_depth_error: float = Field(0.01, validation_alias="RECON_STEREO_FUSION_MAX_DEPTH_ERROR")
     recon_stereo_fusion_max_normal_error: float = Field(10.0, validation_alias="RECON_STEREO_FUSION_MAX_NORMAL_ERROR")
 
+    # Poisson Parameters
+    recon_poisson_depth: int = Field(10, validation_alias="RECON_POISSON_DEPTH")
+    recon_poisson_trim: int = Field(7, validation_alias="RECON_POISSON_TRIM")
+    
+    # Mesh Budget and Decimation Gates
+    # Max faces allowed for direct object isolation (Part 3). If exceeded, use pre-decimation.
+    recon_mesh_budget_faces: int = Field(2_000_000, validation_alias="RECON_MESH_BUDGET_FACES")
+    # Hard limit. If even after pre-decimation it's still too large, fail fast.
+    recon_mesh_hard_limit_faces: int = Field(15_000_000, validation_alias="RECON_MESH_HARD_LIMIT_FACES")
+    
+    # Decimation targets
+    recon_pre_cleanup_target_faces: int = Field(800_000, validation_alias="RECON_PRE_CLEANUP_TARGET_FACES")
+    recon_mobile_target_faces: int = Field(100_000, validation_alias="RECON_MOBILE_TARGET_FACES")
+
     # OpenMVS specific flags
     openmvs_fail_hard: bool = Field(False, validation_alias="OPENMVS_FAIL_HARD")
     openmvs_textured_output: bool = Field(True, validation_alias="OPENMVS_TEXTURED_OUTPUT")

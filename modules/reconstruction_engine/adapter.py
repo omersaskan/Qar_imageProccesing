@@ -265,7 +265,7 @@ class ColmapCommandBuilder:
             cmd += ["--StereoFusion.mask_path", str(mask_path)]
         return cmd
 
-    def poisson_mesher(self, input_path: Path, output_path: Path) -> List[str]:
+    def poisson_mesher(self, input_path: Path, output_path: Path, depth: int = 10, trim: int = 7) -> List[str]:
         return [
             self.bin,
             "poisson_mesher",
@@ -273,6 +273,10 @@ class ColmapCommandBuilder:
             str(input_path),
             "--output_path",
             str(output_path),
+            "--PoissonMeshing.depth",
+            str(depth),
+            "--PoissonMeshing.trim",
+            str(trim),
         ]
 
     def delaunay_mesher(self, workspace_path: Path, output_path: Path) -> List[str]:
@@ -1218,6 +1222,8 @@ class COLMAPAdapter(ReconstructionAdapter):
                     cmd_mesh = self.builder.poisson_mesher(
                         dense_dir / "fused.ply",
                         dense_dir / "meshed-poisson.ply",
+                        depth=settings.recon_poisson_depth,
+                        trim=settings.recon_poisson_trim,
                     )
                     log_file.write(f"Starting Poisson mesher (timeout={mesher_timeout}s)...\n")
                     self._run_command(cmd_mesh, output_dir, log_file, timeout=mesher_timeout)

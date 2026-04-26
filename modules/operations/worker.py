@@ -635,6 +635,14 @@ class IngestionWorker:
                 raw_texture_path=raw_texture_path,
             )
 
+            if metadata is None:
+                if cleanup_stats.get("status") == "failed_oversized_mesh":
+                    return self._mark_session_needs_recapture(
+                        session,
+                        reason=f"Mesh is too large for processing ({cleanup_stats.get('raw_faces')} faces). Capture smaller area or use lower density.",
+                    )
+                raise IrrecoverableError(f"Cleanup failed with no metadata: {cleanup_stats.get('status')}")
+
             if cleanup_stats.get("quality_status") == "quality_fail":
                 cleanup_stats_path = Path(cleaned_mesh_path).parent / "cleanup_stats.json"
                 atomic_write_json(cleanup_stats_path, cleanup_stats)

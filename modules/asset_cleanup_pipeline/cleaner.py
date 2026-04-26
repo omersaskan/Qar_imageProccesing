@@ -11,6 +11,8 @@ from .alignment import AlignmentProcessor
 from .bbox import BBoxExtractor
 from .normalizer import Normalizer, NormalizedMetadata
 from .isolation import MeshIsolator
+from modules.operations.settings import settings
+from modules.utils.mesh_inspection import get_mesh_stats_cheaply
 
 logger = get_component_logger("cleaner")
 
@@ -219,17 +221,59 @@ class AssetCleaner:
         metadata_path = job_cleaned_dir / "normalized_metadata.json"
         pre_aligned_path = job_cleaned_dir / "pre_aligned_mesh.obj"
 
-        mesh = trimesh.load(raw_mesh_path)
+        logger.info("[%s] Entering cleanup stage for %s", job_id, raw_mesh_path)
+        
+        # 1) Pre-cleanup mesh budget gate (Cheap inspection)
+        raw_stats = get_mesh_stats_cheaply(raw_mesh_path)
+        raw_faces = raw_stats["face_count"]
+        raw_verts = raw_stats["vertex_count"]
+        
+        logger.info("[%s] Raw mesh inspection: faces=%d, vertices=%d", job_id, raw_faces, raw_verts)
+        
+        oversized_raw_mesh = False
+        work_mesh_path = raw_mesh_path
+        
+        if raw_faces > settings.recon_mesh_hard_limit_faces:
+            logger.error("[%s] Mesh is far beyond hard limit (%d faces). Failing fast.", job_id, raw_faces)
+            # Return specialized status for the runner/worker to handle
+            return None, {"status": "failed_oversized_mesh", "raw_faces": raw_faces}, ""
+
+        if raw_faces > settings.recon_mesh_budget_faces:
+            logger.warning("[%s] Mesh is oversized (%d faces). Triggering pre-decimation gate.", job_id, raw_faces)
+            oversized_raw_mesh = True
+            
+            pre_decimate_path = job_cleaned_dir / "pre_decimated_raw.ply"
+            logger.info("[%s] Starting pre-decimation (target=%d faces)...", job_id, settings.recon_pre_cleanup_target_faces)
+            
+            pre_dec_stats = self.remesher.pre_decimate(
+                raw_mesh_path, 
+                str(pre_decimate_path), 
+                settings.recon_pre_cleanup_target_faces
+            )
+            
+            logger.info("[%s] Pre-decimation completed: %d -> %d faces", 
+                        job_id, pre_dec_stats["pre_decimation_face_count"], pre_dec_stats["post_decimation_face_count"])
+            work_mesh_path = str(pre_decimate_path)
+
+        # 2) Object Isolation
+        logger.info("[%s] Starting isolation on %s", job_id, work_mesh_path)
+        mesh = trimesh.load(work_mesh_path, process=False)
         if isinstance(mesh, trimesh.Scene): mesh = mesh.dump(concatenate=True)
         if len(mesh.vertices) == 0: raise ValueError("Empty mesh")
 
         isolated_mesh, isolation_stats = self.isolator.isolate_product(mesh)
         if len(isolated_mesh.faces) == 0: raise ValueError(f"Isolation failed: {isolation_stats.get('object_isolation_status')}")
         isolated_mesh.export(str(isolation_debug_path))
+        logger.info("[%s] Isolation completed. Resulting faces: %d", job_id, len(isolated_mesh.faces))
 
+        # 3) Remeshing/Decimation
+        logger.info("[%s] Starting remesher (profile=%s)", job_id, profile.name)
         decimation_stats = self.remesher.process(str(isolation_debug_path), str(pre_aligned_path), profile)
         final_polycount = decimation_stats["post_decimation_face_count"]
+        logger.info("[%s] Remesher completed. Final faces: %d", job_id, final_polycount)
 
+        # 4) Alignment & BBox
+        logger.info("[%s] Starting alignment and normalization", job_id)
         _, pivot_offset = self.alignment.align_to_ground(str(pre_aligned_path), str(cleaned_mesh_path))
         bbox_min, bbox_max = self.bbox_extractor.extract(str(cleaned_mesh_path))
 
@@ -237,6 +281,8 @@ class AssetCleaner:
         self.normalizer.save_metadata(metadata, str(metadata_path))
 
         has_uv, has_material = self._inspect_visuals(str(cleaned_mesh_path))
+        
+        logger.info("[%s] Cleanup pipeline finished. Output: %s", job_id, cleaned_mesh_path)
         
         cleanup_stats = {
             "isolation": isolation_stats,
@@ -255,5 +301,8 @@ class AssetCleaner:
             "has_uv": bool(has_uv),
             "has_material": bool(has_material),
             "texture_input_mesh_path": str(isolation_debug_path),
+            "oversized_raw_mesh": oversized_raw_mesh,
+            "raw_mesh_faces": raw_faces,
+            "raw_mesh_vertices": raw_verts,
         }
         return metadata, cleanup_stats, str(cleaned_mesh_path)

@@ -40,7 +40,7 @@ class Remesher:
         Simplify geometry while trying not to destroy UV/material data.
         Returns detailed decimation stats.
         """
-        mesh = trimesh.load(input_path)
+        mesh = trimesh.load(input_path, process=False)
         if isinstance(mesh, trimesh.Scene):
             mesh = mesh.dump(concatenate=True)
 
@@ -112,4 +112,37 @@ class Remesher:
             "material_preserved": material_preserved,
             "texture_preserved": uv_preserved and material_preserved,
             "decimation_status": decimation_status
+        }
+
+    def pre_decimate(self, input_path: str, output_path: str, target_faces: int) -> Dict[str, Any]:
+        """
+        Fast geometry-only simplification for huge raw meshes.
+        Uses fast_simplification to avoid the overhead of trimesh isolation/processing.
+        """
+        # We still use trimesh to load but with process=False to be as fast as possible
+        mesh = trimesh.load(input_path, process=False)
+        if isinstance(mesh, trimesh.Scene):
+            mesh = mesh.dump(concatenate=True)
+        
+        pre_faces = len(mesh.faces)
+        if pre_faces <= target_faces:
+            mesh.export(output_path)
+            return {
+                "pre_decimation_face_count": pre_faces,
+                "post_decimation_face_count": pre_faces,
+                "status": "skipped_already_small"
+            }
+
+        points = mesh.vertices.astype(np.float32)
+        faces = mesh.faces.astype(np.uint32)
+        ratio = target_faces / max(pre_faces, 1)
+        
+        new_vertices, new_faces = fast_simplification.simplify(points, faces, ratio)
+        new_mesh = trimesh.Trimesh(vertices=new_vertices, faces=new_faces, process=False)
+        new_mesh.export(output_path)
+        
+        return {
+            "pre_decimation_face_count": int(pre_faces),
+            "post_decimation_face_count": int(len(new_faces)),
+            "status": "success"
         }
