@@ -22,12 +22,21 @@ class IntegrationFlow:
             "ground_offset": metadata.pivot_offset.get("z", 0.0),
             "cleanup_stats": cleanup_stats or {},
             "delivery_profile": (export_report or {}).get("profile", "raw_archive"),
-            "material_semantic_status": "diffuse_textured" if (cleanup_stats or {}).get("has_uv") else "geometry_only",
+            "material_semantic_status": "geometry_only", # Default
             "texture_integrity_status": "complete",
+            "has_uv": (cleanup_stats or {}).get("has_uv", False),
+            "has_material": (cleanup_stats or {}).get("has_material", False),
         }
         
         if export_report:
             input_data.update(export_report)
+            
+            # Derive semantic status honestly from export results
+            if export_report.get("texture_applied") and export_report.get("texture_count", 0) > 0:
+                input_data["material_semantic_status"] = "diffuse_textured"
+            elif (cleanup_stats or {}).get("has_uv"):
+                input_data["material_semantic_status"] = "uv_only"
+            
             # Ensure accessor flags are present for rules.py
             input_data["all_primitives_have_position"] = export_report.get("all_primitives_have_position", False)
             input_data["all_primitives_have_normal"] = export_report.get("all_primitives_have_normal", False)

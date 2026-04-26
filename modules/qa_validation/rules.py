@@ -77,19 +77,25 @@ def validate_texture_integrity(asset_data: Dict[str, Any], thresholds: Validatio
     has_uv = bool(asset_data.get("has_uv", False))
     has_material = bool(asset_data.get("has_material", False))
     texture_count = int(asset_data.get("texture_count", 0))
+    texture_applied = bool(asset_data.get("texture_applied", False))
 
     # 1. Core Integrity (did it survive?)
     if status == "complete":
-        results["texture_uv_integrity"] = "pass"
-        results["texture_application"] = "pass"
-        results["material_integrity"] = "pass"
+        if texture_applied and texture_count > 0 and has_uv and has_material:
+            results["uv_integrity"] = "pass"
+            results["application"] = "pass"
+            results["material_integrity"] = "pass"
+        else:
+            results["uv_integrity"] = "pass" if has_uv else "fail"
+            results["application"] = "pass" if (texture_applied and texture_count > 0) else "fail"
+            results["material_integrity"] = "pass" if has_material else "fail"
     elif status == "degraded":
-        results["texture_uv_integrity"] = "pass" if has_uv else "review"
-        results["texture_application"] = "pass" if texture_count > 0 else "review"
+        results["uv_integrity"] = "pass" if has_uv else "review"
+        results["application"] = "pass" if texture_count > 0 else "review"
         results["material_integrity"] = "pass" if has_material else "review"
     else:
-        results["texture_uv_integrity"] = "fail"
-        results["texture_application"] = "fail"
+        results["uv_integrity"] = "fail"
+        results["application"] = "fail"
         results["material_integrity"] = "fail"
         
     # 2. Semantic Richness (how good is it?)
@@ -227,6 +233,33 @@ def validate_delivery_mesh(asset_data: Dict[str, Any], thresholds: ValidationThr
             results["delivery_fragmentation"] = "review"
         else:
             results["delivery_fragmentation"] = "fail"
+    return results
+
+
+def validate_export_delivery_status(asset_data: Dict[str, Any]) -> Dict[str, str]:
+    """
+    Validates export_status and delivery_ready flags from the exporter.
+    """
+    results: Dict[str, str] = {}
+    export_status = str(asset_data.get("export_status", "unknown")).lower()
+    delivery_ready = bool(asset_data.get("delivery_ready", False))
+    profile = str(asset_data.get("delivery_profile", "raw_archive")).lower()
+    
+    if export_status in ["success", "unknown"]:
+        results["export_status"] = "pass"
+    elif export_status == "failed_texture_application":
+        results["export_status"] = "fail"
+    elif export_status == "failed_validation":
+        results["export_status"] = "fail"
+    else:
+        results["export_status"] = "review"
+        
+    # mobile profiles must be delivery_ready
+    if profile in ["mobile_preview", "mobile_high", "desktop_high"]:
+        results["export_delivery_gate"] = "pass" if delivery_ready else "fail"
+    else:
+        results["export_delivery_gate"] = "pass"
+        
     return results
 
 

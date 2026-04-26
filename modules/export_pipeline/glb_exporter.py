@@ -192,8 +192,19 @@ class GLBExporter:
             inspection["all_textured_primitives_have_texcoord_0"]
         )
         
-        delivery_ready = all_accessors
-        export_status = "success" if delivery_ready else "failed_validation"
+        # Texture Gate: If texture was requested but not applied, it's a failure
+        texture_success = True
+        if texture_path and not texture_applied:
+            texture_success = False
+            
+        delivery_ready = all_accessors and texture_success
+        
+        if not all_accessors:
+            export_status = "failed_validation"
+        elif not texture_success:
+            export_status = "failed_texture_application"
+        else:
+            export_status = "success"
 
         result = {
             "format": "GLB",

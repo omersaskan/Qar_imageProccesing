@@ -14,6 +14,7 @@ from .rules import (
     validate_accessors,
     validate_object_filtering,
     validate_decimation,
+    validate_export_delivery_status,
 )
 from .texture_quality import TextureQualityAnalyzer
 
@@ -81,6 +82,9 @@ class AssetValidator:
 
         accessor_decisions = validate_accessors(asset_data)
         for k, v in accessor_decisions.items(): checks[k] = v
+
+        export_decisions = validate_export_delivery_status(asset_data)
+        for k, v in export_decisions.items(): checks[k] = v
 
         blocking_checks = [k for k, v in checks.items() if v == "fail"]
         warning_checks = [k for k, v in checks.items() if v == "review"]

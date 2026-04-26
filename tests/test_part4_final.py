@@ -36,9 +36,15 @@ class TestPart4HardenedFinal(unittest.TestCase):
             "texture_quality_status": "success",
             "filtering_status": "object_isolated",
             "bbox": {"width": 10, "height": 10, "depth": 10},
-            "ground_offset": 0.0
+            "ground_offset": 0.0,
+            "has_material": True,
+            "texture_applied": True,
+            "texture_count": 1,
+            "delivery_ready": True,
+            "has_uv": True
         }, allow_texture_quality_skip=True)
         
+        print(f"\nARCHIVE REPORT: decision={report.final_decision}, blocking={report.blocking_checks}")
         self.assertEqual(report.delivery_status, "archive_only")
         self.assertFalse(report.is_mobile_ready)
         self.assertEqual(report.final_decision, "pass")
@@ -58,7 +64,12 @@ class TestPart4HardenedFinal(unittest.TestCase):
             "texture_quality_status": "success",
             "filtering_status": "object_isolated",
             "bbox": {"width": 10, "height": 10, "depth": 10},
-            "ground_offset": 0.0
+            "ground_offset": 0.0,
+            "has_material": True,
+            "texture_applied": True,
+            "texture_count": 1,
+            "delivery_ready": True,
+            "has_uv": True
         }, allow_texture_quality_skip=True)
         
         self.assertEqual(report.delivery_status, "delivery_ready")
@@ -102,12 +113,15 @@ class TestPart4HardenedFinal(unittest.TestCase):
         
         cleanup_stats = {
             "has_uv": True,
+            "has_material": True,
             "decimation": {"decimation_status": "success", "uv_preserved": True}
         }
         
         export_report = {
             "profile": "mobile_high",
             "delivery_ready": True,
+            "texture_applied": True,
+            "texture_count": 1,
             "all_primitives_have_position": True,
             "all_primitives_have_normal": True,
             "all_textured_primitives_have_texcoord_0": True
