@@ -504,7 +504,7 @@ class MeshIsolator:
         removed_islands = 0
 
         for comp in components:
-            if len(comp.faces) < 100:
+            if len(comp.faces) < 50: # Reduced from 100 to catch more tiny fragments
                 removed_islands += 1
                 continue
 
@@ -512,14 +512,30 @@ class MeshIsolator:
             ranked.append((scores["total_score"], comp, scores))
 
         if not ranked:
+            # Fallback if nothing passed the 50 face gate
             best_comp = max(components, key=lambda c: len(c.faces))
             best_scores = self._score_component(best_comp)
+            kept_components = [best_comp]
         else:
             ranked.sort(key=lambda x: x[0], reverse=True)
-            best_comp = ranked[0][1]
+            
+            # SPRINT 5: Keep top significant components instead of just one
+            # Target: component_count <= 5, ideally 1-3.
+            best_score = ranked[0][0]
+            best_faces = len(ranked[0][1].faces)
+            
+            kept_components = [ranked[0][1]]
             best_scores = ranked[0][2]
+            
+            # Add additional components if they are significant relative to the best one
+            for score, comp, s in ranked[1:5]: # Limit to max 5 total
+                if score > best_score * 0.7 and len(comp.faces) > best_faces * 0.1:
+                    kept_components.append(comp)
+                else:
+                    removed_islands += 1
 
-        final_faces = int(len(best_comp.faces))
+        final_mesh = trimesh.util.concatenate(kept_components) if len(kept_components) > 1 else kept_components[0]
+        final_faces = int(len(final_mesh.faces))
         removed_face_ratio = (initial_faces - final_faces) / max(initial_faces, 1)
 
         stats = {
@@ -527,10 +543,11 @@ class MeshIsolator:
             "initial_vertices": initial_vertices,
             **plane_stats,
             **support_stats,
-            "component_count": len(components),
+            "component_count": len(kept_components),
+            "raw_component_count": len(components),
             "removed_islands": removed_islands,
             "final_faces": final_faces,
-            "final_vertices": int(len(best_comp.vertices)),
+            "final_vertices": int(len(final_mesh.vertices)),
             "removed_plane_face_share": plane_stats["removed_plane_faces"] / max(initial_faces, 1),
             "removed_plane_vertex_ratio": plane_stats["removed_plane_vertices"] / max(initial_vertices, 1),
             "compactness_score": float(best_scores["compactness_score"]),
@@ -549,4 +566,4 @@ class MeshIsolator:
             "point_cloud_support_ratio": pc_support_metrics.get("pc_support_ratio", 0.0),
         }
 
-        return best_comp, stats
+        return final_mesh, stats

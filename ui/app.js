@@ -49,11 +49,11 @@ let activeSessionId = null;
 async function init() {
     await fetchProducts();
     await fetchLogs();
-    
+
     setInterval(fetchLogs, 5000);
     setInterval(pollGuidance, 10000); // Poll guidance every 10s
     setupUploadHandlers();
-    
+
     refreshGuidanceBtn.onclick = () => pollGuidance();
 }
 
@@ -99,9 +99,9 @@ function renderGuidance(guidance) {
     guidanceSection.classList.remove('hidden');
     guidanceStatusBadge.textContent = guidance.status;
     guidanceStatusBadge.className = `badge ${guidance.status.toLowerCase()}`;
-    
+
     nextActionText.textContent = guidance.next_action;
-    
+
     guidanceMessages.innerHTML = (guidance.messages || []).map(msg => `
         <div class="guidance-item ${msg.severity}">
             <span class="symbol">${msg.severity === 'critical' ? '🔴' : msg.severity === 'warning' ? '🟡' : 'ℹ️'}</span>
@@ -121,14 +121,14 @@ function setupUploadHandlers() {
         console.log('Dropzone clicked');
         videoInput.click();
     };
-    
+
     dropZone.ondragover = (e) => {
         e.preventDefault();
         dropZone.classList.add('active');
     };
-    
+
     dropZone.ondragleave = () => dropZone.classList.remove('active');
-    
+
     dropZone.ondrop = (e) => {
         e.preventDefault();
         dropZone.classList.remove('active');
@@ -147,7 +147,7 @@ function setupUploadHandlers() {
         e.preventDefault();
         const productId = document.getElementById('upload-product-id').value;
         const file = videoInput.files[0];
-        
+
         if (!file || !productId) return;
 
         const formData = new FormData();
@@ -156,7 +156,7 @@ function setupUploadHandlers() {
 
         progressContainer.classList.remove('hidden');
         const xhr = new XMLHttpRequest();
-        
+
         xhr.upload.onprogress = (event) => {
             if (event.lengthComputable) {
                 const percent = (event.loaded / event.total) * 100;
@@ -226,16 +226,16 @@ function open3DViewer(assetId, status) {
 
     viewerModal.classList.remove('hidden');
     viewerTitle.textContent = `Asset Preview: ${assetId}`;
-    
+
     // Reset viewer state
     console.log(`Attempting to load asset: ${assetId} (Status: ${status})`);
     mainViewer.src = "";
     viewerStatus.innerHTML = '<span class="status-pulse-yellow"></span> Checking availability...';
-    
+
     // Use timestamp to break any cache during repeated tests
     const timestamp = Date.now();
     const modelUrl = `${API_BASE}/assets/blobs/${assetId}.glb?t=${timestamp}`;
-    
+
     if (status === 'processing' || status === 'CREATED') {
         viewerStatus.innerHTML = '⚙️ <span style="color: #fbbf24">Processing: Reconstruction in progress. Showing demo model.</span>';
         mainViewer.src = "https://modelviewer.dev/shared-assets/models/Astronaut.glb";
@@ -245,16 +245,16 @@ function open3DViewer(assetId, status) {
 
         // More robust load detection
         const onLoad = () => {
-             console.log("Model-viewer: Success loading", modelUrl);
-             viewerStatus.innerHTML = '✅ <span style="color: #4ade80">Asset Produced Successfully.</span>';
-             mainViewer.removeEventListener('load', onLoad);
+            console.log("Model-viewer: Success loading", modelUrl);
+            viewerStatus.innerHTML = '✅ <span style="color: #4ade80">Asset Produced Successfully.</span>';
+            mainViewer.removeEventListener('load', onLoad);
         };
 
         const onError = (error) => {
-             console.error("Model-viewer error:", error);
-             viewerStatus.innerHTML = '⚠️ <span style="color: #fbbf24">Asset was registered but file loading failed. Showing fallback.</span>';
-             mainViewer.src = "https://modelviewer.dev/shared-assets/models/Astronaut.glb";
-             mainViewer.removeEventListener('error', onError);
+            console.error("Model-viewer error:", error);
+            viewerStatus.innerHTML = '⚠️ <span style="color: #fbbf24">Asset was registered but file loading failed. Showing fallback.</span>';
+            mainViewer.src = "https://modelviewer.dev/shared-assets/models/Astronaut.glb";
+            mainViewer.removeEventListener('error', onError);
         };
 
         mainViewer.addEventListener('load', onLoad);
@@ -268,14 +268,14 @@ closeViewerBtn.onclick = () => {
 };
 
 function renderProducts() {
-    const filtered = state.products.filter(p => 
+    const filtered = state.products.filter(p =>
         p.id.toLowerCase().includes(state.searchQuery.toLowerCase())
     );
 
     productGrid.innerHTML = filtered.map(p => {
         const isProcessing = p.status === 'processing';
         const hasActiveUpdate = p.has_active_session ? '<span class="pulse-dot"></span>' : '';
-        
+
         return `
             <div class="product-card glass ${isProcessing ? 'processing' : ''}" onclick="showProductDetails('${p.id}')">
                 <div class="product-id">

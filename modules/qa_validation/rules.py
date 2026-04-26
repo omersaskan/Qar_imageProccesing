@@ -79,6 +79,12 @@ def validate_texture_integrity(asset_data: Dict[str, Any], thresholds: Validatio
     texture_count = int(asset_data.get("texture_count", 0))
     texture_applied = bool(asset_data.get("texture_applied", False))
 
+    # SPRINT 5: Rigid integrity fix
+    # if texture_count=0/material_count=0/has_uv=false, texture_status must not be "complete"
+    if status == "complete":
+        if not (has_uv and has_material and texture_count > 0):
+             status = "geometry_only" if not has_uv else "missing"
+
     # 1. Core Integrity (did it survive?)
     if status == "complete":
         if texture_applied and texture_count > 0 and has_uv and has_material:
@@ -94,12 +100,15 @@ def validate_texture_integrity(asset_data: Dict[str, Any], thresholds: Validatio
         results["application"] = "pass" if texture_count > 0 else "review"
         results["material_integrity"] = "pass" if has_material else "review"
     else:
-        results["uv_integrity"] = "fail"
-        results["application"] = "fail"
-        results["material_integrity"] = "fail"
+        results["uv_integrity"] = "fail" if not has_uv else "pass" # If geometry_only, pass UV check? 
+        # Actually, let's keep it simple:
+        results["uv_integrity"] = "pass" if has_uv else "fail"
+        results["application"] = "pass" if texture_count > 0 else "fail"
+        results["material_integrity"] = "pass" if has_material else "fail"
         
     # 2. Semantic Richness (how good is it?)
     results["material_semantics"] = validate_material_semantics(sem_status)
+    results["final_texture_status"] = status # For reporting
 
     return results
 

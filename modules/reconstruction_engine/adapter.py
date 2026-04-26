@@ -13,6 +13,7 @@ import numpy as np
 import trimesh
 
 from .mesh_selector import MeshSelector
+from .openmvs_texturer import OpenMVSTexturer
 from .failures import (
     ReconstructionError,
     InsufficientInputError,
@@ -405,6 +406,123 @@ class ReconstructionAdapter(ABC):
     def is_stub(self) -> bool:
         raise NotImplementedError
 
+    def _read_image(self, image_path: Path, read_flag: int):
+        """
+        Unicode-safe image read for Windows/Posix.
+        """
+        try:
+            # We use np.fromfile to support Unicode paths on Windows
+            image_bytes = np.fromfile(str(image_path), dtype=np.uint8)
+            if image_bytes.size == 0:
+                return None
+            return cv2.imdecode(image_bytes, read_flag)
+        except Exception:
+            return None
+
+    def _refine_texture_masks(self, prep: Dict[str, Any], input_frames: List[str], log_file) -> None:
+        """
+        Refines masks in the reconstruction workspace.
+        - Erodes masks to avoid edge contamination.
+        - Rejects frames with known quality issues (clipping, support) if enough frames remain.
+        """
+        masks_dir = prep["masks_dir"]
+        if not masks_dir or not masks_dir.exists():
+            return
+
+        from modules.operations.settings import settings
+        erode_px = settings.texture_mask_erode_px
+        reject_support = settings.texture_reject_support_contamination
+        reject_clipped = settings.texture_reject_subject_clipped
+        min_clean = settings.texture_min_clean_frames
+
+        log_file.write(f"Mask refinement: erode={erode_px}px, reject_support={reject_support}, "
+                      f"reject_clipped={reject_clipped}, min_clean={min_clean}\n")
+
+        mask_infos = []
+        for frame_path in input_frames:
+            src = Path(frame_path)
+            mask_path = masks_dir / f"{src.name}.png"
+            if not mask_path.exists():
+                # Fallback to stem-based naming
+                mask_path = masks_dir / f"{src.stem}.png"
+                if not mask_path.exists():
+                    continue
+            
+            # Find metadata in the original capture structure
+            # .../frames/frame_0001.jpg -> .../frames/masks/frame_0001.json
+            meta_path = src.parent / "masks" / f"{src.stem}.json"
+            meta = {}
+            if meta_path.exists():
+                try:
+                    with open(meta_path, "r", encoding="utf-8") as f:
+                        meta = json.load(f)
+                except Exception:
+                    pass
+            
+            reasons = meta.get("reasons", []) or meta.get("failure_reasons", [])
+            is_clipped = (
+                meta.get("is_clipped", False)
+                or meta.get("subject_clipped", False)
+                or "subject_clipped" in reasons
+            )
+            support_suspected = (
+                meta.get("support_suspected", False)
+                or meta.get("support_contamination_detected", False)
+                or "support_contamination_detected" in reasons
+            )
+
+            mask_infos.append({
+                "path": mask_path,
+                "meta": meta,
+                "is_clipped": bool(is_clipped),
+                "support_suspected": bool(support_suspected),
+                "occupancy": float(meta.get("occupancy", 0.0))
+            })
+
+        if not mask_infos:
+            return
+
+        # 1. Filter frames
+        clean_infos = []
+        for info in mask_infos:
+            rejected = False
+            if reject_clipped and info["is_clipped"]:
+                rejected = True
+            if reject_support and info["support_suspected"]:
+                rejected = True
+            
+            if not rejected:
+                clean_infos.append(info)
+
+        # 2. Safe Fallback
+        if len(clean_infos) < min_clean:
+            log_file.write(f"WARNING: texture mask refinement fallback: too few clean frames ({len(clean_infos)} < {min_clean}). Using all available masks.\n")
+            final_selection = mask_infos
+        else:
+            log_file.write(f"Mask refinement: rejected {len(mask_infos) - len(clean_infos)} contaminated/clipped frames. Remaining: {len(clean_infos)}\n")
+            final_selection = clean_infos
+            
+            # Blank out rejected masks to prevent them from being used in OpenMVS
+            clean_paths = {info["path"] for info in final_selection}
+            for info in mask_infos:
+                if info["path"] not in clean_paths:
+                    mask_img = self._read_image(info["path"], cv2.IMREAD_GRAYSCALE)
+                    if mask_img is not None:
+                        blank = np.zeros_like(mask_img)
+                        _, buff = cv2.imencode(".png", blank)
+                        buff.tofile(str(info["path"]))
+
+        # 3. Erosion
+        if erode_px > 0:
+            kernel = np.ones((erode_px, erode_px), np.uint8)
+            for info in final_selection:
+                mask_path = info["path"]
+                mask_img = self._read_image(mask_path, cv2.IMREAD_GRAYSCALE)
+                if mask_img is not None:
+                    eroded = cv2.erode(mask_img, kernel, iterations=1)
+                    _, buff = cv2.imencode(".png", eroded)
+                    buff.tofile(str(mask_path))
+
 
 class COLMAPAdapter(ReconstructionAdapter):
     """
@@ -441,6 +559,7 @@ class COLMAPAdapter(ReconstructionAdapter):
         self._matcher = active_settings.recon_matcher.lower()
         self.mesh_selector = MeshSelector()
         self.builder = ColmapCommandBuilder(self._engine_path, self._use_gpu, self._gpu_index)
+        self.texturer = OpenMVSTexturer(settings.openmvs_path)
 
     @property
     def engine_type(self) -> str:
@@ -727,19 +846,6 @@ class COLMAPAdapter(ReconstructionAdapter):
             return False
 
         return True
-
-    def _read_image(self, image_path: Path, read_flag: int):
-        image = cv2.imread(str(image_path), read_flag)
-        if image is not None:
-            return image
-
-        try:
-            image_bytes = np.fromfile(str(image_path), dtype=np.uint8)
-            if image_bytes.size == 0:
-                return None
-            return cv2.imdecode(image_bytes, read_flag)
-        except Exception:
-            return None
 
     def _frame_is_usable(self, frame_path: Path) -> bool:
         if not frame_path.exists():
@@ -1262,11 +1368,45 @@ class COLMAPAdapter(ReconstructionAdapter):
 
         selected_mesh = self.mesh_selector.select_best_mesh(candidates) or candidates[0]
         selected_stats = self._mesh_stats(selected_mesh)
-        texture_candidate = self._discover_texture_candidate(output_dir)
+        
+        # SPRINT 5: Integrated Real Texturing for COLMAP outputs
+        texture_path = None
+        if settings.openmvs_textured_output and self.texturer.is_available():
+            try:
+                log_file.write("\n--- SPRINT 5: Starting Real Texture Generation Path ---\n")
+                
+                # Ensure we have undistorted images and a valid project for OpenMVS
+                # We need dense_dir to contain images/ and a valid COLMAP project
+                
+                # 1) Refine masks for texturing (erode/reject clipped)
+                if available_masks_dir:
+                    self._refine_texture_masks(prep, input_frames, log_file)
+                
+                # 2) Run OpenMVS Texturing on the COLMAP Poisson mesh
+                tex_results = self.texturer.run_texturing(
+                    colmap_workspace=output_dir,
+                    dense_workspace=dense_dir,
+                    selected_mesh=selected_mesh,
+                    output_dir=dense_dir # Output to dense folder
+                )
+                
+                textured_mesh = tex_results.get("textured_mesh_path")
+                if textured_mesh and os.path.exists(textured_mesh):
+                    log_file.write(f"TextureMesh successful: {textured_mesh}\n")
+                    selected_mesh = textured_mesh # Switch to the textured OBJ
+                    texture_path = tex_results.get("texture_atlas_paths")[0] if tex_results.get("texture_atlas_paths") else None
+                else:
+                    log_file.write("Warning: TextureMesh finished but output mesh missing. Using geometry-only.\n")
+                    
+            except Exception as tex_err:
+                log_file.write(f"Warning: Real texturing failed: {tex_err}. Falling back to geometry.\n")
+
+        if not texture_path:
+            texture_path = self._discover_texture_candidate(output_dir)
 
         return {
             "mesh_path": str(selected_mesh),
-            "texture_path": texture_candidate,
+            "texture_path": texture_path,
             "log_path": str(log_path),
             "vertex_count": selected_stats["vertex_count"],
             "face_count": selected_stats["face_count"],
@@ -1597,110 +1737,6 @@ class OpenMVSAdapter(COLMAPAdapter):
                     raise
                 log_file.write("openmvs_fail_hard is False, bubbling up for COLMAP fallback.\n")
                 raise RuntimeReconstructionError(f"OpenMVS failed: {e}")
-
-    def _refine_texture_masks(self, prep: Dict[str, Any], input_frames: List[str], log_file) -> None:
-        """
-        Refines masks in the reconstruction workspace.
-        - Erodes masks to avoid edge contamination.
-        - Rejects frames with known quality issues (clipping, support) if enough frames remain.
-        """
-        masks_dir = prep["masks_dir"]
-        if not masks_dir or not masks_dir.exists():
-            return
-
-        from modules.operations.settings import settings
-        erode_px = settings.texture_mask_erode_px
-        reject_support = settings.texture_reject_support_contamination
-        reject_clipped = settings.texture_reject_subject_clipped
-        min_clean = settings.texture_min_clean_frames
-
-        log_file.write(f"Mask refinement: erode={erode_px}px, reject_support={reject_support}, "
-                      f"reject_clipped={reject_clipped}, min_clean={min_clean}\n")
-
-        mask_infos = []
-        for frame_path in input_frames:
-            src = Path(frame_path)
-            mask_path = masks_dir / f"{src.name}.png"
-            if not mask_path.exists():
-                continue
-            
-            # Find metadata in the original capture structure
-            # .../frames/frame_0001.jpg -> .../frames/masks/frame_0001.json
-            meta_path = src.parent / "masks" / f"{src.stem}.json"
-            meta = {}
-            if meta_path.exists():
-                try:
-                    with open(meta_path, "r", encoding="utf-8") as f:
-                        meta = json.load(f)
-                except Exception:
-                    pass
-            
-            reasons = meta.get("reasons", []) or meta.get("failure_reasons", [])
-            is_clipped = (
-                meta.get("is_clipped", False)
-                or meta.get("subject_clipped", False)
-                or "subject_clipped" in reasons
-            )
-            support_suspected = (
-                meta.get("support_suspected", False)
-                or meta.get("support_contamination_detected", False)
-                or "support_contamination_detected" in reasons
-            )
-
-            mask_infos.append({
-                "path": mask_path,
-                "meta": meta,
-                "is_clipped": bool(is_clipped),
-                "support_suspected": bool(support_suspected),
-                "occupancy": float(meta.get("occupancy", 0.0))
-            })
-
-        if not mask_infos:
-            return
-
-        # 1. Filter frames
-        clean_infos = []
-        for info in mask_infos:
-            rejected = False
-            if reject_clipped and info["is_clipped"]:
-                rejected = True
-            if reject_support and info["support_suspected"]:
-                rejected = True
-            
-            if not rejected:
-                clean_infos.append(info)
-
-        # 2. Safe Fallback
-        if len(clean_infos) < min_clean:
-            log_file.write(f"WARNING: texture mask refinement fallback: too few clean frames ({len(clean_infos)} < {min_clean}). Using all available masks.\n")
-            final_selection = mask_infos
-        else:
-            log_file.write(f"Mask refinement: rejected {len(mask_infos) - len(clean_infos)} contaminated/clipped frames. Remaining: {len(clean_infos)}\n")
-            final_selection = clean_infos
-            
-            # Blank out rejected masks to prevent them from being used in OpenMVS
-            clean_paths = {info["path"] for info in final_selection}
-            for info in mask_infos:
-                if info["path"] not in clean_paths:
-                    mask_img = cv2.imdecode(np.fromfile(str(info["path"]), dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
-                    if mask_img is not None:
-                        blank = np.zeros_like(mask_img)
-                        _, buff = cv2.imencode(".png", blank)
-                        buff.tofile(str(info["path"]))
-
-        # 3. Erosion
-        if erode_px > 0:
-            kernel = np.ones((erode_px, erode_px), np.uint8)
-            for info in final_selection:
-                mask_path = info["path"]
-                # Unicode-safe read for Windows
-                mask_img = cv2.imdecode(np.fromfile(str(mask_path), dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
-                if mask_img is not None:
-                    eroded = cv2.erode(mask_img, kernel, iterations=1)
-                    # Unicode-safe write for Windows
-                    _, buff = cv2.imencode(".png", eroded)
-                    buff.tofile(str(mask_path))
-
 
 
 class SimulatedAdapter(ReconstructionAdapter):
