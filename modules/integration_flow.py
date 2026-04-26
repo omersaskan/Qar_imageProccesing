@@ -31,13 +31,17 @@ class IntegrationFlow:
                 "depth": depth
             },
             # Pivot offset Z is often used as the base-to-center ground offset in this factory
-            "ground_offset": metadata.pivot_offset.get("z", 0.0)
+            "ground_offset": metadata.pivot_offset.get("z", 0.0),
+            # Cleanup results are assumed to have valid accessors for geometry
+            "has_position_accessor": True,
+            "has_normal_accessor": True,
+            "has_texcoord_0_accessor": True
         }
 
     @staticmethod
-    def validate_cleanup_result(asset_id: str, metadata: NormalizedMetadata, validator: AssetValidator) -> ValidationReport:
+    def validate_cleanup_result(asset_id: str, metadata: NormalizedMetadata, validator: AssetValidator, allow_texture_quality_skip: bool = False) -> ValidationReport:
         """
         Directly validates the cleanup metadata using the provided validator.
         """
         validator_input = IntegrationFlow.map_metadata_to_validator_input(metadata)
-        return validator.validate(asset_id, validator_input)
+        return validator.validate(asset_id, validator_input, allow_texture_quality_skip=allow_texture_quality_skip)

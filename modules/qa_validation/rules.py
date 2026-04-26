@@ -214,23 +214,25 @@ def validate_delivery_mesh(asset_data: Dict[str, Any], thresholds: ValidationThr
 
 def validate_accessors(asset_data: Dict[str, Any]) -> Dict[str, str]:
     """
-    Enforces existence of critical GLB accessors (POSITION, NORMAL, TEXCOORD_0).
+    Enforces existence of critical GLB accessors (POSITION, NORMAL, TEXCOORD_0) per primitive.
     """
     results: Dict[str, str] = {}
     
-    has_pos = bool(asset_data.get("has_position_accessor", True))
-    has_norm = bool(asset_data.get("has_normal_accessor", False))
-    has_uv = bool(asset_data.get("has_texcoord_0_accessor", False))
+    # Use all_* fields if available, otherwise fall back to legacy has_* fields
+    # Default is False for fail-safe behavior
+    all_pos = bool(asset_data.get("all_primitives_have_position", asset_data.get("has_position_accessor", False)))
+    all_norm = bool(asset_data.get("all_primitives_have_normal", asset_data.get("has_normal_accessor", False)))
+    all_uv = bool(asset_data.get("all_textured_primitives_have_texcoord_0", asset_data.get("has_texcoord_0_accessor", False)))
     
-    results["accessor_position"] = "pass" if has_pos else "fail"
+    results["accessor_position"] = "pass" if all_pos else "fail"
     
     # NORMAL is mandatory for all delivered assets
-    results["accessor_normal"] = "pass" if has_norm else "fail"
+    results["accessor_normal"] = "pass" if all_norm else "fail"
     
     # UV is mandatory if textured
     sem_status = str(asset_data.get("material_semantic_status", "geometry_only")).lower()
     if sem_status != "geometry_only":
-        results["accessor_uv"] = "pass" if has_uv else "fail"
+        results["accessor_uv"] = "pass" if all_uv else "fail"
     else:
         results["accessor_uv"] = "pass"
         

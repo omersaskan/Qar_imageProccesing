@@ -54,34 +54,72 @@ def inspect_glb_primitive_attributes(glb_path: str) -> Dict[str, Any]:
                 json_data = f.read(chunk_length).decode("utf-8")
                 gltf = json.loads(json_data)
 
-    has_position = False
-    has_normal = False
-    has_texcoord_0 = False
+    all_primitives_have_position = True
+    all_primitives_have_normal = True
+    all_textured_primitives_have_texcoord_0 = True
     primitive_reports = []
 
     meshes = gltf.get("meshes", [])
+    materials = gltf.get("materials", [])
+
     for mesh_idx, mesh in enumerate(meshes):
         for prim_idx, prim in enumerate(mesh.get("primitives", [])):
             attrs = prim.get("attributes", {})
+            has_pos = "POSITION" in attrs
+            has_norm = "NORMAL" in attrs
+            has_uv = "TEXCOORD_0" in attrs
+
+            # Detect if primitive is textured by checking its material
+            is_textured = False
+            mat_idx = prim.get("material")
+            if mat_idx is not None and isinstance(mat_idx, int) and mat_idx < len(materials):
+                mat = materials[mat_idx]
+                pbr = mat.get("pbrMetallicRoughness", {})
+                if (
+                    "baseColorTexture" in pbr
+                    or "metallicRoughnessTexture" in pbr
+                    or "normalTexture" in mat
+                    or "occlusionTexture" in mat
+                    or "emissiveTexture" in mat
+                ):
+                    is_textured = True
+
+            missing = []
+            if not has_pos:
+                missing.append("POSITION")
+                all_primitives_have_position = False
+            if not has_norm:
+                missing.append("NORMAL")
+                all_primitives_have_normal = False
+            if is_textured and not has_uv:
+                missing.append("TEXCOORD_0")
+                all_textured_primitives_have_texcoord_0 = False
+
             report = {
                 "mesh_index": mesh_idx,
                 "primitive_index": prim_idx,
                 "attributes": list(attrs.keys()),
+                "has_position": has_pos,
+                "has_normal": has_norm,
+                "has_texcoord_0": has_uv,
+                "is_textured": is_textured,
+                "missing_attributes": missing,
             }
             primitive_reports.append(report)
 
-            if "POSITION" in attrs:
-                has_position = True
-            if "NORMAL" in attrs:
-                has_normal = True
-            if "TEXCOORD_0" in attrs:
-                has_texcoord_0 = True
+    if not primitive_reports:
+        all_primitives_have_position = False
+        all_primitives_have_normal = False
 
     return {
-        "has_position_accessor": has_position,
-        "has_normal_accessor": has_normal,
-        "has_texcoord_0_accessor": has_texcoord_0,
+        "all_primitives_have_position": all_primitives_have_position,
+        "all_primitives_have_normal": all_primitives_have_normal,
+        "all_textured_primitives_have_texcoord_0": all_textured_primitives_have_texcoord_0,
         "primitive_attribute_report": primitive_reports,
+        # Legacy mappings for backward compatibility during transition
+        "has_position_accessor": all_primitives_have_position,
+        "has_normal_accessor": all_primitives_have_normal,
+        "has_texcoord_0_accessor": all_textured_primitives_have_texcoord_0,
     }
 
 
@@ -347,6 +385,17 @@ class GLBExporter:
         elif not actual_texture_success and texture_path and not visual_info["has_uv"]:
             texture_warning = "Texture file exists but mesh has no UV coordinates (Geometry-only fallback)"
 
+        # Accessor check (POSITION, NORMAL, TEXCOORD_0)
+        # Acceptance: Textured GLB primitive attributes içinde NORMAL yoksa export result pass olamaz.
+        if actual_texture_success and not inspection_result["all_primitives_have_normal"]:
+            logger.error("One or more textured GLB primitives are missing NORMAL accessor! This is a delivery blocker.")
+            raise ValueError("Export failed: All textured GLB primitives must have NORMAL accessor.")
+            
+        if inspection_result["all_primitives_have_position"] and \
+           inspection_result["all_primitives_have_normal"] and \
+           inspection_result["all_textured_primitives_have_texcoord_0"]:
+            logger.info("GLB EXPORT SUCCESS: POSITION + NORMAL + TEXCOORD_0 (for textured) present on all primitives.")
+
         result = {
             "format": "GLB",
             "filesize": os.path.getsize(output_path),
@@ -359,18 +408,14 @@ class GLBExporter:
             "has_embedded_texture": actual_texture_success,
             "material_semantic_status": inspection_result["material_semantic_status"],
             "texture_integrity_status": inspection_result["texture_integrity_status"],
-            "has_position_accessor": inspection_result["has_position_accessor"],
-            "has_normal_accessor": inspection_result["has_normal_accessor"],
-            "has_texcoord_0_accessor": inspection_result["has_texcoord_0_accessor"],
+            "all_primitives_have_position": inspection_result["all_primitives_have_position"],
+            "all_primitives_have_normal": inspection_result["all_primitives_have_normal"],
+            "all_textured_primitives_have_texcoord_0": inspection_result["all_textured_primitives_have_texcoord_0"],
+            # Legacy fields for backward compat
+            "has_position_accessor": inspection_result["all_primitives_have_position"],
+            "has_normal_accessor": inspection_result["all_primitives_have_normal"],
+            "has_texcoord_0_accessor": inspection_result["all_textured_primitives_have_texcoord_0"],
         }
-
-        # Acceptance: Textured GLB primitive attributes içinde NORMAL yoksa export result pass olamaz.
-        if actual_texture_success and not result["has_normal_accessor"]:
-            logger.error("Textured GLB is missing NORMAL accessor! This is a delivery blocker.")
-            raise ValueError("Export failed: Textured GLB must have NORMAL accessor.")
-            
-        if result["has_position_accessor"] and result["has_normal_accessor"] and result["has_texcoord_0_accessor"]:
-            logger.info("GLB EXPORT SUCCESS: POSITION + NORMAL + TEXCOORD_0 present.")
 
         if texture_warning:
             result["texture_warning"] = texture_warning
@@ -494,9 +539,13 @@ class GLBExporter:
             "normal_present": normal_present,
             "occlusion_present": occlusion_present,
             "emissive_present": emissive_present,
-            "has_position_accessor": bool(has_position_accessor),
-            "has_normal_accessor": bool(has_normal_accessor),
-            "has_texcoord_0_accessor": bool(has_texcoord_0_accessor),
+            "all_primitives_have_position": bool(strict_accessors["all_primitives_have_position"]),
+            "all_primitives_have_normal": bool(strict_accessors["all_primitives_have_normal"]),
+            "all_textured_primitives_have_texcoord_0": bool(strict_accessors["all_textured_primitives_have_texcoord_0"]),
+            # Legacy fields
+            "has_position_accessor": bool(strict_accessors["all_primitives_have_position"]),
+            "has_normal_accessor": bool(strict_accessors["all_primitives_have_normal"]),
+            "has_texcoord_0_accessor": bool(strict_accessors["all_textured_primitives_have_texcoord_0"]),
             "primitive_attribute_report": strict_accessors["primitive_attribute_report"],
             "material_integrity_status": "present" if has_material else "missing",
             "texture_applied_successfully": bool(has_embedded_texture),

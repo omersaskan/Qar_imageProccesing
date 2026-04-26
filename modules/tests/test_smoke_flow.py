@@ -67,7 +67,7 @@ def test_full_factory_smoke_flow(smoke_env):
     assert metadata.final_polycount > 0
     
     # 5. Validation
-    report = IntegrationFlow.validate_cleanup_result(asset_id, metadata, validator)
+    report = IntegrationFlow.validate_cleanup_result(asset_id, metadata, validator, allow_texture_quality_skip=True)
     assert report.final_decision in ["pass", "review"]
     
     # 6. Registry & Publish

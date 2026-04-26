@@ -21,7 +21,7 @@ class AssetValidator:
     def __init__(self, thresholds: ValidationThresholds = None):
         self.thresholds = thresholds or ValidationThresholds()
 
-    def validate(self, asset_id: str, asset_data: Dict[str, Any]) -> ValidationReport:
+    def validate(self, asset_id: str, asset_data: Dict[str, Any], allow_texture_quality_skip: bool = False) -> ValidationReport:
         """
         asset_data expected keys:
         - poly_count: int
@@ -86,13 +86,22 @@ class AssetValidator:
                  quality_decision = validate_texture_quality(asset_data)
                  texture_quality_stats = asset_data
             else:
-                 # Soft fallback for minimal tests or historical data lacking path/status
-                 quality_decision = "pass"
-                 texture_quality_stats = {
-                     "texture_quality_status": "skipped",
-                     "texture_quality_grade": "A",
-                     "texture_quality_reasons": ["INFO: Missing texture path and status (skipped check)"]
-                 }
+                 # If no texture path and no precomputed metrics, check if skip is allowed
+                 if allow_texture_quality_skip:
+                     quality_decision = "pass"
+                     texture_quality_stats = {
+                         "texture_quality_status": "skipped",
+                         "texture_quality_grade": "A",
+                         "texture_quality_reasons": ["INFO: Missing texture path and status (skipped by request)"]
+                     }
+                 else:
+                     # Productionassets must not silently pass without quality check
+                     quality_decision = "pass" if semantic_status == "geometry_only" else "fail"
+                     texture_quality_stats = {
+                         "texture_quality_status": "unknown",
+                         "texture_quality_grade": "F",
+                         "texture_quality_reasons": ["MISSING_TEXTURE_QUALITY_METRICS"]
+                     }
 
         # --- 2. Explainability & Decision Logic ---
         checks = {

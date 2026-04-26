@@ -1069,10 +1069,14 @@ class COLMAPAdapter(ReconstructionAdapter):
                 selected_model_name = "none"
                 db_path = output_dir / "database.db"
 
+                # Hybrid masking: Unmasked pose (SfM), masked object (MVS)
+                # We extract features from the whole image to get better camera poses from the background.
+                pose_masks_dir = None if settings.recon_hybrid_masking else effective_masks_dir
+
                 cmd_extract = self.builder.feature_extractor(
                     db_path,
                     images_dir,
-                    effective_masks_dir,
+                    pose_masks_dir,
                     self._max_image_size,
                 )
                 self._run_command(cmd_extract, output_dir, log_file)
@@ -1386,11 +1390,14 @@ class OpenMVSAdapter(COLMAPAdapter):
             dense_dir.mkdir(exist_ok=True)
 
             try:
+                # Hybrid masking: Unmasked pose (SfM), masked object (MVS)
+                pose_masks_dir = None if settings.recon_hybrid_masking else effective_masks_dir
+
                 self._run_command(
                     self.builder.feature_extractor(
                         db_path,
                         images_dir,
-                        effective_masks_dir,
+                        pose_masks_dir,
                         self._max_image_size,
                     ),
                     output_dir,

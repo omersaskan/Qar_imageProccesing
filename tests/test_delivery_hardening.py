@@ -128,9 +128,10 @@ def test_missing_normal_fails_textured_export(test_dir, dummy_texture, monkeypat
     def mock_inspect(path):
         real_res = orig_inspect(path)
         real_res["has_normal_accessor"] = False
+        real_res["all_primitives_have_normal"] = False
         return real_res
     
-    with pytest.raises(ValueError, match="Textured GLB must have NORMAL accessor"):
+    with pytest.raises(ValueError, match="All textured GLB primitives must have NORMAL accessor"):
         with pytest.MonkeyPatch().context() as mp:
             mp.setattr(exporter, "inspect_exported_asset", mock_inspect)
             exporter.export_to_glb(str(obj_path), dummy_texture, str(glb_path))
