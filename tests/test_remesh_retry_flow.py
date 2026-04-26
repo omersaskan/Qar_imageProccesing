@@ -154,7 +154,7 @@ def test_colmap_adapter_poisson_command_generation(tmp_path):
     adapter._is_valid_mesh_candidate = MagicMock(return_value=True)
     
     log_file = MagicMock()
-    adapter.poisson_remesh_only(output_dir, log_file, depth=9, trim=8)
+    adapter.poisson_remesh_only(output_dir, log_file, depth=8, trim=8)
     
     assert len(captured_cmd) == 1
     cmd = captured_cmd[0]
@@ -170,7 +170,7 @@ def test_colmap_adapter_poisson_command_generation(tmp_path):
     # Find depth value
     for i, part in enumerate(cmd):
         if "--PoissonMeshing.depth" in part:
-            assert cmd[i+1] == "9"
+            assert cmd[i+1] == "8"
         if "--PoissonMeshing.trim" in part:
             assert cmd[i+1] == "8"
 
