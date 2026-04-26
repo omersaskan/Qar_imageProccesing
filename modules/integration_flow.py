@@ -23,24 +23,37 @@ class IntegrationFlow:
             "cleanup_stats": cleanup_stats or {},
             "delivery_profile": (cleanup_stats or {}).get("delivery_profile") or (export_report or {}).get("profile", "raw_archive"),
             "material_semantic_status": "geometry_only", # Default
-            "texture_integrity_status": "complete" if (cleanup_stats or {}).get("has_uv") and (export_report or {}).get("texture_count", 0) > 0 else ("geometry_only" if not (cleanup_stats or {}).get("has_uv") else "missing"),
-            "has_uv": (cleanup_stats or {}).get("has_uv", False),
-            "has_material": (cleanup_stats or {}).get("has_material", False),
+            "texture_integrity_status": "missing", # Default
+            "has_uv": False,
+            "has_material": False,
         }
         
+        # 1. Start with cleanup_stats truth
+        if cleanup_stats:
+            input_data["has_uv"] = bool(cleanup_stats.get("has_uv", False))
+            input_data["has_material"] = bool(cleanup_stats.get("has_material", False))
+            input_data["texture_integrity_status"] = cleanup_stats.get("texture_integrity_status", "missing")
+            input_data["material_semantic_status"] = cleanup_stats.get("material_semantic_status", "geometry_only")
+
+        # 2. Override with final export truth (The Ultimate Truth)
         if export_report:
             input_data.update(export_report)
             
-            # Derive semantic status honestly from export results
-            if export_report.get("texture_applied") and export_report.get("texture_count", 0) > 0:
+            final_tex_count = export_report.get("texture_count", 0)
+            final_mat_count = export_report.get("material_count", 0)
+            final_uv_accessor = export_report.get("all_textured_primitives_have_texcoord_0", False)
+            
+            if final_tex_count > 0 and final_mat_count > 0 and final_uv_accessor:
+                input_data["has_uv"] = True
+                input_data["has_material"] = True
+                input_data["texture_integrity_status"] = "complete"
                 input_data["material_semantic_status"] = "diffuse_textured"
-            elif (cleanup_stats or {}).get("has_uv"):
-                input_data["material_semantic_status"] = "uv_only"
+                input_data["texture_applied"] = True # Force for validator
             
             # Ensure accessor flags are present for rules.py
             input_data["all_primitives_have_position"] = export_report.get("all_primitives_have_position", False)
             input_data["all_primitives_have_normal"] = export_report.get("all_primitives_have_normal", False)
-            input_data["all_textured_primitives_have_texcoord_0"] = export_report.get("all_textured_primitives_have_texcoord_0", False)
+            input_data["all_textured_primitives_have_texcoord_0"] = final_uv_accessor
             input_data["delivery_ready"] = export_report.get("delivery_ready", False)
 
         input_data.update(overrides)

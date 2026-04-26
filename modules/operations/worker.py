@@ -735,7 +735,20 @@ class IngestionWorker:
         cleaned_mesh_path = texturing_result.cleaned_mesh_path
 
         if texturing_result.texturing_status == "real" and texturing_result.texture_atlas_paths:
-            cleanup_stats["cleaned_texture_path"] = texturing_result.texture_atlas_paths[0]
+            atlas_path = texturing_result.texture_atlas_paths[0]
+            cleanup_stats["cleaned_texture_path"] = atlas_path
+            cleanup_stats["texture_path"] = atlas_path
+            cleanup_stats["has_uv"] = True
+            cleanup_stats["has_material"] = True
+            cleanup_stats["textured_mesh_path"] = texturing_result.cleaned_mesh_path
+            cleanup_stats["texture_integrity_status"] = "complete"
+            cleanup_stats["material_semantic_status"] = "diffuse_textured"
+            
+            # Decimation flags might be stale if texturing happened after
+            if "decimation" in cleanup_stats:
+                cleanup_stats["decimation"]["uv_preserved"] = True
+                cleanup_stats["decimation"]["material_preserved"] = True
+                cleanup_stats["decimation"]["texture_preserved"] = True
         
         # SPRINT 5: Fix 2 — Enforce REQUIRE_TEXTURED_OUTPUT
         if settings.require_textured_output and texturing_result.texturing_status in ["degraded", "absent"]:

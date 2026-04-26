@@ -176,6 +176,9 @@ class GLBExporter:
         else:
             glb_bytes = meshes[0].export(file_type="glb")
 
+        # SPRINT 5: Fix 7 — GLB Compliance (bufferView targets)
+        glb_bytes = self._fix_glb_compliance(glb_bytes)
+
         with open(output_path, "wb") as f:
             f.write(glb_bytes)
 
@@ -226,6 +229,82 @@ class GLBExporter:
             })
 
         return result
+
+    def _fix_glb_compliance(self, glb_bytes: bytes) -> bytes:
+        """
+        Manually injects bufferView.target into the GLB JSON chunk.
+        - POSITION/NORMAL/TEXCOORD_0 => 34962 (ARRAY_BUFFER)
+        - indices => 34963 (ELEMENT_ARRAY_BUFFER)
+        """
+        if len(glb_bytes) < 20: return glb_bytes
+        
+        # Read header
+        magic = glb_bytes[:4]
+        if magic != b"glTF": return glb_bytes
+        
+        # Read JSON chunk
+        json_len = struct.unpack("<I", glb_bytes[12:16])[0]
+        json_type = glb_bytes[16:20]
+        if json_type != b"JSON": return glb_bytes
+        
+        json_data = json.loads(glb_bytes[20:20+json_len].decode("utf-8"))
+        
+        # Map accessors to bufferViews
+        bv_targets = {}
+        
+        # Attributes targets
+        meshes = json_data.get("meshes", [])
+        for m in meshes:
+            for p in m.get("primitives", []):
+                for attr, acc_idx in p.get("attributes", {}).items():
+                    if attr in ["POSITION", "NORMAL", "TEXCOORD_0"]:
+                        acc = json_data.get("accessors", [])[acc_idx]
+                        bv_idx = acc.get("bufferView")
+                        if bv_idx is not None:
+                            bv_targets[bv_idx] = 34962 # ARRAY_BUFFER
+                
+                # Indices target
+                indices_idx = p.get("indices")
+                if indices_idx is not None:
+                    acc = json_data.get("accessors", [])[indices_idx]
+                    bv_idx = acc.get("bufferView")
+                    if bv_idx is not None:
+                        bv_targets[bv_idx] = 34963 # ELEMENT_ARRAY_BUFFER
+
+        # Apply targets to bufferViews
+        bvs = json_data.get("bufferViews", [])
+        for i, target in bv_targets.items():
+            if i < len(bvs):
+                bvs[i]["target"] = target
+        
+        # Re-encode JSON
+        new_json_bytes = json.dumps(json_data, separators=(",", ":")).encode("utf-8")
+        # GLB requires JSON chunk to be 4-byte aligned
+        while len(new_json_bytes) % 4 != 0:
+            new_json_bytes += b" "
+        
+        new_json_len = len(new_json_bytes)
+        
+        # Assemble new GLB
+        new_glb = bytearray()
+        new_glb.extend(glb_bytes[:8]) # magic + version
+        # placeholder for total length
+        new_glb.extend(struct.pack("<I", 0)) 
+        
+        # JSON chunk header
+        new_glb.extend(struct.pack("<I", new_json_len))
+        new_glb.extend(b"JSON")
+        new_glb.extend(new_json_bytes)
+        
+        # Append remaining chunks (binary chunk)
+        pos = 20 + json_len
+        new_glb.extend(glb_bytes[pos:])
+        
+        # Update total length
+        total_len = len(new_glb)
+        new_glb[8:12] = struct.pack("<I", total_len)
+        
+        return bytes(new_glb)
 
     def _apply_optional_optimizations(self, glb_path: str) -> Dict[str, str]:
         """

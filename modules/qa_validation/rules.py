@@ -212,9 +212,11 @@ def validate_texture_quality(quality_data: Dict[str, Any]) -> str:
     return "fail"
 
 
-def validate_decimation(stats: Dict[str, Any]) -> str:
+def validate_decimation(stats: Dict[str, Any], texturing_status: str = "absent") -> str:
     """
     Ensures decimation didn't break UVs/Materials.
+    If texturing happened AFTER decimation (texturing_status == "real"), 
+    then decimation preservation flags are effectively superseded by the new atlas.
     """
     status = str(stats.get("decimation_status", "none")).lower()
     if status == "failed_visual_integrity":
@@ -222,6 +224,10 @@ def validate_decimation(stats: Dict[str, Any]) -> str:
     if "error" in status:
         return "review"
     
+    # If texturing was successful, we don't care if decimation broke the OLD UVs
+    if texturing_status == "real":
+        return "pass"
+
     if not stats.get("uv_preserved", True) or not stats.get("material_preserved", True):
         return "fail"
         

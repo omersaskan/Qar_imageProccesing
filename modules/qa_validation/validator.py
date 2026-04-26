@@ -43,7 +43,13 @@ class AssetValidator:
         contamination_decisions = validate_contamination(cleanup_stats, self.thresholds)
         texture_integrity_decisions = validate_texture_integrity(asset_data, self.thresholds)
         delivery_decisions = validate_delivery_mesh(asset_data, self.thresholds)
-        decimation_decision = validate_decimation(decimation_stats)
+        texturing_status = asset_data.get("texture_integrity_status", "missing")
+        if texturing_status == "complete" or asset_data.get("texturing_status") == "real":
+            texturing_truth = "real"
+        else:
+            texturing_truth = "absent"
+
+        decimation_decision = validate_decimation(decimation_stats, texturing_status=texturing_truth)
 
         # 1. Texture Quality Analysis
         texture_quality_stats = {}

@@ -14,6 +14,7 @@ class TextureQualityAnalyzer:
         """
         Loads image from path and analyzes its quality.
         """
+        self._current_image_path = image_path
         if not image_path or not Path(image_path).exists():
             return self._error_result(f"Texture file missing: {image_path}")
 
@@ -103,6 +104,24 @@ class TextureQualityAnalyzer:
         # H) Alpha Empty Ratio
         alpha_empty_ratio = np.count_nonzero(alpha == 0) / total_pixels if has_alpha else 0.0
 
+        # I) Neon Artifact Ratio (Very high saturation, High value)
+        neon_pixels = np.count_nonzero((s_visible > 230) & (v_visible > 150))
+        neon_ratio = neon_pixels / visible_pixels
+
+        # J) Average Luminance
+        # Rec. 709 luminance
+        luminance = (0.2126 * rgb[:,:,2] + 0.7152 * rgb[:,:,1] + 0.0722 * rgb[:,:,0])
+        avg_luminance = np.mean(luminance[mask]) / 255.0
+
+        # K) Expected Product Color Match Score
+        match_score = 1.0
+        if expected_product_color == "white_cream":
+            # Cream/White should have high luminance and low saturation
+            # Penalty for too much dark or too much saturation
+            match_score = max(0.0, 1.0 - (near_black_ratio * 1.5) - (non_neutral_ratio * 0.5))
+            if avg_luminance < 0.4:
+                match_score *= (avg_luminance / 0.4)
+
         # 3. Decision Logic (Hard Gates)
         reasons = []
         status = "success"
@@ -111,8 +130,8 @@ class TextureQualityAnalyzer:
         thr_black = getattr(self.thresholds, "max_black_pixel_ratio", 0.4)
         thr_near_black = getattr(self.thresholds, "max_near_black_ratio", 0.6)
         thr_flat = getattr(self.thresholds, "max_flat_color_ratio", 0.7)
-        thr_coverage = getattr(self.thresholds, "min_atlas_coverage_ratio", 0.05)
-        thr_bg = getattr(self.thresholds, "max_dominant_background_ratio", 0.5)
+        thr_coverage = getattr(self.thresholds, "min_atlas_coverage_ratio", 0.30)
+        thr_bg = getattr(self.thresholds, "max_dominant_background_ratio", 0.50)
 
         if black_pixel_ratio > thr_black and expected_product_color != "dark":
             reasons.append(f"High black pixel ratio: {black_pixel_ratio:.2f} > {thr_black}")
@@ -133,6 +152,38 @@ class TextureQualityAnalyzer:
         if dominant_background_ratio > thr_bg:
             reasons.append(f"Excessive background color contamination: {dominant_background_ratio:.2f} > {thr_bg}")
             status = "fail"
+            
+        if neon_ratio > 0.05:
+            reasons.append(f"Neon artifacts detected: {neon_ratio:.2f}")
+            status = "fail"
+
+        if expected_product_color == "white_cream" and match_score < 0.5:
+            reasons.append(f"Expected color match failed (white_cream): {match_score:.2f}")
+            status = "fail"
+
+        # 4. Visual Debug Outputs
+        debug_info = {}
+        try:
+             # Generate debug artifacts in the same folder as the image
+             if hasattr(self, "_current_image_path") and self._current_image_path:
+                 img_path = Path(self._current_image_path)
+                 
+                 # Preview (downsampled)
+                 preview_path = img_path.parent / "texture_atlas_preview.png"
+                 cv2.imwrite(str(preview_path), cv2.resize(rgb, (512, 512)))
+                 debug_info["preview_path"] = str(preview_path)
+                 
+                 # Histogram
+                 hist_path = img_path.parent / "texture_atlas_histogram.json"
+                 import json
+                 with open(hist_path, "w") as f:
+                     json.dump({
+                         "hue": hue_hist.flatten().tolist(),
+                         "luminance_avg": float(avg_luminance)
+                     }, f)
+                 debug_info["histogram_path"] = str(hist_path)
+        except Exception:
+             pass
 
         return {
             "black_pixel_ratio": float(black_pixel_ratio),
@@ -143,8 +194,12 @@ class TextureQualityAnalyzer:
             "atlas_coverage_ratio": float(atlas_coverage_ratio),
             "default_fill_or_flat_color_ratio": float(default_fill_ratio),
             "alpha_empty_ratio": float(alpha_empty_ratio),
+            "neon_artifact_ratio": float(neon_ratio),
+            "average_luminance": float(avg_luminance),
+            "expected_product_color_match_score": float(match_score),
             "texture_quality_status": status,
-            "texture_quality_reasons": reasons
+            "texture_quality_reasons": reasons,
+            **debug_info
         }
 
     def _error_result(self, message: str) -> Dict[str, Any]:
