@@ -244,15 +244,26 @@ class ReconstructionRunner:
         mesh_path = results.get("mesh_path")
         if mesh_path and Path(mesh_path).exists():
             try:
-                mesh = trimesh.load(mesh_path, force="mesh")
-                if isinstance(mesh, trimesh.Scene):
-                    mesh = mesh.dump(concatenate=True)
-                if isinstance(mesh, trimesh.Trimesh):
-                    mesh_load_probe_ok = True
-                    mesh_probe_vertex_count = len(mesh.vertices)
-                    mesh_probe_face_count = len(mesh.faces)
-                    if hasattr(mesh.visual, "uv") and mesh.visual.uv is not None and len(mesh.visual.uv) > 0:
-                        mesh_probe_has_uv = True
+                from modules.utils.mesh_inspection import get_mesh_stats_cheaply
+                stats = get_mesh_stats_cheaply(mesh_path)
+                mesh_probe_face_count = stats["face_count"]
+                mesh_probe_vertex_count = stats["vertex_count"]
+                mesh_load_probe_ok = True # Stats extracted successfully
+                
+                # Only attempt full load for UV probing if mesh is small enough and likely textured
+                safe_limit = settings.max_faces_python_decimation
+                is_obj = str(mesh_path).lower().endswith(".obj")
+                
+                if mesh_probe_face_count < safe_limit and (is_obj or has_texture):
+                    try:
+                        mesh = trimesh.load(mesh_path, process=False)
+                        if isinstance(mesh, trimesh.Scene):
+                            mesh = mesh.dump(concatenate=True)
+                        if isinstance(mesh, trimesh.Trimesh):
+                            if hasattr(mesh.visual, "uv") and mesh.visual.uv is not None and len(mesh.visual.uv) > 0:
+                                mesh_probe_has_uv = True
+                    except Exception:
+                        pass
             except Exception:
                 pass
 
@@ -593,6 +604,7 @@ class ReconstructionRunner:
         log_path = target_attempt / "reconstruction.log"
         with open(log_path, "a", encoding="utf-8") as log_file:
             log_file.write(f"\n--- PROCESSING BUDGET EXCEEDED: Retrying with lower density ---")
+            log_file.write(f"\nRecommended Settings: depth={depth}, trim={trim}\n")
             
             # We use COLMAPAdapter specifically for Poisson
             adapter = COLMAPAdapter()

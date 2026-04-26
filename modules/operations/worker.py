@@ -697,9 +697,12 @@ class IngestionWorker:
 
             if metadata is None:
                 status = cleanup_stats.get("status")
-                if status in {"failed_oversized_mesh", "failed_memory_limit"}:
+                failure_type = cleanup_stats.get("cleanup_failure_type")
+                is_retryable = cleanup_stats.get("retryable_from_fused_ply", False)
+                
+                if status in {"failed_oversized_mesh", "failed_memory_limit"} or is_retryable or failure_type == "pre_decimation_avoided_oversized":
                     reason = cleanup_stats.get("reason") or f"Processing budget exceeded ({cleanup_stats.get('raw_faces')} faces)."
-                    logger.warning("[%s] %s. Moving to PROCESSING_BUDGET_EXCEEDED.", session.session_id, reason)
+                    logger.warning("[%s] %s. Moving to PROCESSING_BUDGET_EXCEEDED (retryable=%s).", session.session_id, reason, is_retryable)
                     return self._persist_session(
                         session,
                         new_status=AssetStatus.PROCESSING_BUDGET_EXCEEDED,
