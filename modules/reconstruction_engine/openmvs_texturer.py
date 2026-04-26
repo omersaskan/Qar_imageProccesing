@@ -86,7 +86,17 @@ class OpenMVSTexturer:
             if not image_folder.exists():
                 image_folder = dense_workspace.parent / "images"
 
-            log_file.write(f"OpenMVS image-folder selected: {image_folder}\n")
+            log_file.write(f"OpenMVS raw image-folder: {image_folder}\n")
+            
+            # SPRINT 5C: Filter images before texturing
+            from .texture_frame_filter import TextureFrameFilter
+            filter = TextureFrameFilter()
+            # We don't have expected_color here easily, but we can pass it if we update signature
+            # For now, use "unknown" or look for it in settings if we can
+            filter_results = filter.filter_session_images(image_folder, output_dir)
+            selected_image_folder = filter_results["selected_images_dir"]
+            
+            log_file.write(f"Filtered image-folder: {selected_image_folder} ({filter_results['selected_count']} images selected)\n")
             log_file.write(f"COLMAP workspace: {colmap_workspace}\n")
             log_file.write(f"Dense workspace: {dense_workspace}\n")
 
@@ -99,7 +109,7 @@ class OpenMVSTexturer:
                 "--working-folder",
                 str(dense_workspace),
                 "--image-folder",
-                str(image_folder),
+                str(selected_image_folder),
             ]
 
             try:
@@ -221,34 +231,9 @@ class OpenMVSTexturer:
 
             log_file.write(f"Texturing completed successfully. Used stem: {used_output_stem}, Atlas count: {len(generated_textures)}\n")
 
-        # Generate contact sheet for visual debug
-        contact_sheet_path = output_dir / "selected_texture_frames_contact_sheet.png"
-        try:
-             import cv2
-             import numpy as np
-             imgs = list(image_folder.glob("*.jpg")) + list(image_folder.glob("*.png"))
-             if imgs:
-                 selected = imgs[::max(1, len(imgs)//16)][:16]
-                 thumbnails = []
-                 for imp in selected:
-                     ti = cv2.imread(str(imp))
-                     if ti is not None:
-                         thumbnails.append(cv2.resize(ti, (256, 256)))
-                 if thumbnails:
-                     grid_size = int(np.ceil(np.sqrt(len(thumbnails))))
-                     h, w = 256, 256
-                     sheet = np.zeros((grid_size * h, grid_size * w, 3), dtype=np.uint8)
-                     for idx, thumb in enumerate(thumbnails):
-                         r, c = divmod(idx, grid_size)
-                         sheet[r*h:(r+1)*h, c*w:(c+1)*w] = thumb
-                     cv2.imwrite(str(contact_sheet_path), sheet)
-        except Exception:
-             pass
-
         return {
             "textured_mesh_path": str(textured_obj),
             "texture_atlas_paths": [str(p) for p in generated_textures],
             "texturing_engine": "openmvs",
-            "log_path": str(log_path),
-            "contact_sheet_path": str(contact_sheet_path) if contact_sheet_path.exists() else None
+            "log_path": str(log_path)
         }

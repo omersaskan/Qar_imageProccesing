@@ -71,6 +71,7 @@ class TexturingService:
         cleanup_stats: Dict[str, Any],
         pivot_offset: Dict[str, float],
         cleaned_mesh_path: str,
+        expected_color: str = "unknown",
     ) -> TexturingResult:
         """
         Execute texturing if the manifest indicates a COLMAP reconstruction.
@@ -139,6 +140,7 @@ class TexturingService:
             cleanup_stats=cleanup_stats,
             pivot_offset=pivot_offset,
             cleaned_mesh_path=cleaned_mesh_path,
+            expected_color=expected_color,
         )
 
     # ------------------------------------------------------------------
@@ -152,6 +154,7 @@ class TexturingService:
         cleanup_stats: Dict[str, Any],
         pivot_offset: Dict[str, float],
         cleaned_mesh_path: str,
+        expected_color: str = "unknown",
     ) -> TexturingResult:
         from modules.reconstruction_engine.openmvs_texturer import OpenMVSTexturer
         from modules.utils.file_persistence import calculate_checksum
@@ -178,6 +181,29 @@ class TexturingService:
             )
 
         textured_path = texture_results["textured_mesh_path"]
+        generated_textures = texture_results.get("texture_atlas_paths", [])
+
+        # SPRINT 5C: Atlas Repair Service
+        if generated_textures:
+            from modules.operations.atlas_repair_service import AtlasRepairService
+            repair_service = AtlasRepairService()
+            primary_atlas = generated_textures[0]
+            repair_results = repair_service.repair_atlas(primary_atlas, expected_color=expected_color)
+            
+            if repair_results["status"] == "repaired":
+                logger.info(f"Using repaired atlas: {repair_results['repaired_path']}")
+                # Replace the primary atlas in the results
+                generated_textures[0] = repair_results["repaired_path"]
+                texture_results["texture_atlas_paths"] = generated_textures
+                final_texture_stats = repair_results["repaired_stats"]
+            else:
+                final_texture_stats = repair_results.get("stats")
+
+            # Save texture quality report
+            if final_texture_stats:
+                from modules.utils.file_persistence import atomic_write_json
+                report_path = texturing_dir / "texture_quality_report.json"
+                atomic_write_json(report_path, final_texture_stats)
 
         # Verify UV presence before committing to "real" status.
         has_uv = self._check_uv(textured_path, trimesh)

@@ -127,11 +127,17 @@ class TextureQualityAnalyzer:
         status = "success"
         
         # Thresholds (using safe defaults if settings missing)
-        thr_black = getattr(self.thresholds, "max_black_pixel_ratio", 0.4)
-        thr_near_black = getattr(self.thresholds, "max_near_black_ratio", 0.6)
-        thr_flat = getattr(self.thresholds, "max_flat_color_ratio", 0.7)
+        thr_black = getattr(self.thresholds, "max_black_pixel_ratio", 0.40)
+        thr_near_black = getattr(self.thresholds, "max_near_black_ratio", 0.60)
+        thr_flat = getattr(self.thresholds, "max_flat_color_ratio", 0.70)
         thr_coverage = getattr(self.thresholds, "min_atlas_coverage_ratio", 0.30)
         thr_bg = getattr(self.thresholds, "max_dominant_background_ratio", 0.50)
+
+        # SPRINT 5C: Stricter Hard Acceptance for white_cream
+        if expected_product_color == "white_cream":
+            thr_black = 0.20 # much lower than 0.38
+            thr_bg = 0.25    # much lower than 0.39
+            thr_near_black = 0.35
 
         if black_pixel_ratio > thr_black and expected_product_color != "dark":
             reasons.append(f"High black pixel ratio: {black_pixel_ratio:.2f} > {thr_black}")

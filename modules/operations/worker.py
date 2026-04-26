@@ -730,6 +730,7 @@ class IngestionWorker:
             cleanup_stats=cleanup_stats,
             pivot_offset=metadata.pivot_offset,
             cleaned_mesh_path=cleaned_mesh_path,
+            expected_color=settings.expected_product_color,
         )
         manifest = texturing_result.manifest
         cleaned_mesh_path = texturing_result.cleaned_mesh_path
