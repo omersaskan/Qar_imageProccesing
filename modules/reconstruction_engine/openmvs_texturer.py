@@ -5,6 +5,8 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 
 import trimesh
+import cv2
+import numpy as np
 from .failures import TexturingFailed
 
 
@@ -50,9 +52,93 @@ class OpenMVSTexturer:
 
         process.wait()
         if process.returncode != 0:
+            # Fix 8: Improve failure diagnostics
+            log_file.write(f"\nERROR: Command failed with exit code {process.returncode}\n")
+            log_file.write(f"Check output above for errors.\n")
             raise RuntimeError(
                 f"OpenMVS command failed with exit code {process.returncode}: {' '.join(cmd)}"
             )
+
+    def _create_compatible_image_folder(
+        self, 
+        original_images_dir: Path, 
+        target_dir: Path, 
+        selected_names: List[str], 
+        masked_images_dir: Optional[Path] = None,
+        use_masks: bool = False,
+        log_file = None
+    ) -> None:
+        """
+        Creates a folder containing all original filenames.
+        - Selected frames: copied from original or masked_images_dir.
+        - Rejected frames: neutralized (solid cream).
+        """
+        if target_dir.exists():
+            shutil.rmtree(target_dir)
+        target_dir.mkdir(parents=True, exist_ok=True)
+        
+        selected_names_set = set(selected_names)
+        original_images = list(original_images_dir.glob("*.jpg")) + list(original_images_dir.glob("*.png"))
+        
+        if log_file:
+            log_file.write(f"Creating compatible image folder at {target_dir}\n")
+            log_file.write(f"Original images count: {len(original_images)}\n")
+            log_file.write(f"Selected images count: {len(selected_names_set)}\n")
+            log_file.write(f"Using masks: {use_masks}\n")
+
+        # Cream color: (220, 245, 245) in BGR
+        CREAM_COLOR = (220, 245, 245)
+
+        for img_path in original_images:
+            dest_path = target_dir / img_path.name
+            if img_path.name in selected_names_set:
+                # Use high-quality version
+                source = img_path
+                if use_masks and masked_images_dir:
+                    m_source = masked_images_dir / img_path.name
+                    if m_source.exists():
+                        source = m_source
+                
+                shutil.copy2(source, dest_path)
+            else:
+                # Create neutralized version
+                try:
+                    img = cv2.imread(str(img_path))
+                    if img is not None:
+                        h, w = img.shape[:2]
+                        cream = np.full((h, w, 3), CREAM_COLOR, dtype=np.uint8)
+                        cv2.imwrite(str(dest_path), cream)
+                    else:
+                        shutil.copy2(img_path, dest_path) # Fallback
+                except Exception as e:
+                    if log_file:
+                        log_file.write(f"Warning: Failed to neutralize {img_path.name}: {e}\n")
+                    shutil.copy2(img_path, dest_path)
+
+    def _check_image_folder_completeness(self, dense_workspace: Path, image_folder: Path, log_file) -> None:
+        """
+        Verifies that image_folder contains all images referenced in dense_workspace/images.
+        """
+        original_images_dir = dense_workspace / "images"
+        if not original_images_dir.exists():
+             original_images_dir = dense_workspace.parent / "images"
+        
+        if not original_images_dir.exists():
+            log_file.write("Preflight check: Warning, original images dir not found, skipping completeness check.\n")
+            return
+            
+        referenced_images = list(original_images_dir.glob("*.jpg")) + list(original_images_dir.glob("*.png"))
+        provided_images = {p.name for p in (list(image_folder.glob("*.jpg")) + list(image_folder.glob("*.png")))}
+        
+        missing = []
+        for ref in referenced_images:
+            if ref.name not in provided_images:
+                missing.append(ref.name)
+        
+        log_file.write(f"Preflight check: referenced={len(referenced_images)}, provided={len(provided_images)}\n")
+        if missing:
+            log_file.write(f"ERROR: TEXTURE_IMAGE_FOLDER_INCOMPLETE. Missing filenames: {', '.join(missing[:10])}{'...' if len(missing)>10 else ''}\n")
+            raise RuntimeError(f"TEXTURE_IMAGE_FOLDER_INCOMPLETE: {len(missing)} images missing from {image_folder}")
 
     def run_texturing(
         self,
@@ -86,40 +172,64 @@ class OpenMVSTexturer:
 
             log_file.write(f"OpenMVS raw image-folder: {image_folder}\n")
             
+            compatible_image_folder = output_dir / "compatible_images"
+            
             if image_folder_override:
-                selected_image_folder = image_folder_override
-                log_file.write(f"Using image folder override: {selected_image_folder}\n")
+                log_file.write(f"Using image folder override: {image_folder_override}\n")
+                # Even with override, we must ensure compatibility
+                selected_names = [p.name for p in (list(image_folder_override.glob("*.jpg")) + list(image_folder_override.glob("*.png")))]
+                
+                # Check if it's already masked (by looking at path or content - heuristic)
+                is_masked = "masked" in str(image_folder_override).lower()
+                
+                self._create_compatible_image_folder(
+                    original_images_dir=image_folder,
+                    target_dir=compatible_image_folder,
+                    selected_names=selected_names,
+                    masked_images_dir=image_folder_override if is_masked else None,
+                    use_masks=is_masked,
+                    log_file=log_file
+                )
             else:
                 # SPRINT 5C: Filter images before texturing
                 from .texture_frame_filter import TextureFrameFilter
                 filter = TextureFrameFilter()
                 filter_results = filter.filter_session_images(image_folder, output_dir, expected_color=expected_color)
                 
-                selected_image_folder = Path(filter_results["selected_images_dir"])
+                selected_frames = filter_results.get("selected_frames", [])
+                selected_count = filter_results.get("selected_count", 0)
                 
-                if top_n and filter_results["selected_count"] > top_n:
-                    # Create a new sub-folder for top N
-                    top_n_dir = output_dir / f"selected_images_top_{top_n}"
-                    if top_n_dir.exists(): shutil.rmtree(top_n_dir)
-                    top_n_dir.mkdir(parents=True, exist_ok=True)
-                    
-                    selected_frames = filter_results.get("selected_frames", [])
-                    # Frames are already ranked in filter_results["selected_frames"]
-                    for s in selected_frames[:top_n]:
-                        shutil.copy2(Path(s["path"]), top_n_dir / s["name"])
-                    
-                    selected_image_folder = top_n_dir
-                    log_file.write(f"Limited to top {top_n} frames: {selected_image_folder}\n")
+                if top_n and selected_count > top_n:
+                    log_file.write(f"Limiting to top {top_n} frames for compatible folder.\n")
+                    selected_names = [s["name"] for s in selected_frames[:top_n]]
+                    compatible_image_folder = output_dir / f"compatible_images_top{top_n}"
+                else:
+                    selected_names = [s["name"] for s in selected_frames]
+                
+                self._create_compatible_image_folder(
+                    original_images_dir=image_folder,
+                    target_dir=compatible_image_folder,
+                    selected_names=selected_names,
+                    masked_images_dir=Path(filter_results["masked_images_dir"]) if filter_results.get("masked_images_dir") else None,
+                    use_masks=False, # Use original selected unless masked retry is requested
+                    log_file=log_file
+                )
 
-                log_file.write(f"Filtered image-folder: {selected_image_folder}\n")
-                original_images = list(image_folder.glob('*.jpg')) + list(image_folder.glob('*.png'))
-                log_file.write(f"Original image count: {len(original_images)}\n")
-                log_file.write(f"Selected image count: {len(list(selected_image_folder.glob('*.jpg')))}\n")
+                log_file.write(f"Selected image count: {len(selected_names)}\n")
                 log_file.write(f"Fallback used: {filter_results['fallback_used']}\n")
                 
                 rejected_names = [s["name"] for s in filter_results.get("rejected_frames", [])]
                 if rejected_names:
-                    log_file.write(f"Rejected image names: {', '.join(rejected_names)}\n")
+                    log_file.write(f"Rejected image names: {', '.join(rejected_names[:10])}{'...' if len(rejected_names)>10 else ''}\n")
+
+            log_file.write(f"Final compatible image-folder for InterfaceCOLMAP: {compatible_image_folder}\n")
+            
+            # Fix 6: Preflight check before InterfaceCOLMAP
+            try:
+                self._check_image_folder_completeness(dense_workspace, compatible_image_folder, log_file)
+            except Exception as pre_err:
+                log_file.write(f"CRITICAL PREFLIGHT FAILURE: {pre_err}\n")
+                raise
 
             log_file.write(f"COLMAP workspace: {colmap_workspace}\n")
             log_file.write(f"Dense workspace: {dense_workspace}\n")
@@ -133,7 +243,7 @@ class OpenMVSTexturer:
                 "--working-folder",
                 str(dense_workspace),
                 "--image-folder",
-                str(selected_image_folder),
+                str(compatible_image_folder),
             ]
 
             try:
@@ -210,6 +320,10 @@ class OpenMVSTexturer:
                     textured_obj = output_dir / f"{used_output_stem}.obj"
                 except Exception as e2:
                     log_file.write(f"ERROR: TextureMesh failed even with safe profile: {e2}\n")
+                    
+                    # Fix 8: List files even after failure
+                    log_file.write(f"Diagnostics: Files in output_dir after failure: {os.listdir(str(output_dir))}\n")
+                    
                     raise TexturingFailed(f"TextureMesh failed even with safe profile: {e2}", log_path=str(log_path))
 
             # Fix 1: TextureMesh output must be verified immediately after command

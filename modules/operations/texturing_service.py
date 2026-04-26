@@ -174,6 +174,15 @@ class TexturingService:
             )
         except Exception as exc:
             logger.warning(f"OpenMVS texturing failed (degraded): {exc}")
+            
+            # Fix 7: Fix log path propagation even on failure
+            log_path = texturing_dir / "texturing.log"
+            manifest.texturing_log_path = str(log_path)
+            
+            from modules.reconstruction_engine.failures import TexturingFailed
+            if isinstance(exc, TexturingFailed) and exc.log_path:
+                manifest.texturing_log_path = exc.log_path
+
             return TexturingResult(
                 texturing_status="degraded",
                 cleaned_mesh_path=cleaned_mesh_path,
