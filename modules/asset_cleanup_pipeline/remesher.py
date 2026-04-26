@@ -119,30 +119,45 @@ class Remesher:
         Fast geometry-only simplification for huge raw meshes.
         Uses fast_simplification to avoid the overhead of trimesh isolation/processing.
         """
-        # We still use trimesh to load but with process=False to be as fast as possible
-        mesh = trimesh.load(input_path, process=False)
-        if isinstance(mesh, trimesh.Scene):
-            mesh = mesh.dump(concatenate=True)
-        
-        pre_faces = len(mesh.faces)
-        if pre_faces <= target_faces:
-            mesh.export(output_path)
-            return {
-                "pre_decimation_face_count": pre_faces,
-                "post_decimation_face_count": pre_faces,
-                "status": "skipped_already_small"
-            }
+        try:
+            # We still use trimesh to load but with process=False to be as fast as possible
+            mesh = trimesh.load(input_path, process=False)
+            if isinstance(mesh, trimesh.Scene):
+                mesh = mesh.dump(concatenate=True)
+            
+            pre_faces = len(mesh.faces)
+            if pre_faces <= target_faces:
+                mesh.export(output_path)
+                return {
+                    "pre_decimation_face_count": pre_faces,
+                    "post_decimation_face_count": pre_faces,
+                    "status": "skipped_already_small"
+                }
 
-        points = mesh.vertices.astype(np.float32)
-        faces = mesh.faces.astype(np.uint32)
-        ratio = target_faces / max(pre_faces, 1)
-        
-        new_vertices, new_faces = fast_simplification.simplify(points, faces, ratio)
-        new_mesh = trimesh.Trimesh(vertices=new_vertices, faces=new_faces, process=False)
-        new_mesh.export(output_path)
-        
-        return {
-            "pre_decimation_face_count": int(pre_faces),
-            "post_decimation_face_count": int(len(new_faces)),
-            "status": "success"
-        }
+            points = mesh.vertices.astype(np.float32)
+            faces = mesh.faces.astype(np.uint32)
+            ratio = target_faces / max(pre_faces, 1)
+            
+            new_vertices, new_faces = fast_simplification.simplify(points, faces, ratio)
+            new_mesh = trimesh.Trimesh(vertices=new_vertices, faces=new_faces, process=False)
+            new_mesh.export(output_path)
+            
+            return {
+                "pre_decimation_face_count": int(pre_faces),
+                "post_decimation_face_count": int(len(new_faces)),
+                "status": "success"
+            }
+        except MemoryError:
+            return {
+                "pre_decimation_face_count": 0,
+                "post_decimation_face_count": 0,
+                "status": "failed_memory_limit",
+                "error": "System ran out of memory while loading huge raw mesh."
+            }
+        except Exception as e:
+            return {
+                "pre_decimation_face_count": 0,
+                "post_decimation_face_count": 0,
+                "status": "failed_error",
+                "error": str(e)
+            }

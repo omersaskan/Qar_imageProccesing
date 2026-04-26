@@ -236,7 +236,11 @@ class AssetCleaner:
         if raw_faces > settings.recon_mesh_hard_limit_faces:
             logger.error("[%s] Mesh is far beyond hard limit (%d faces). Failing fast.", job_id, raw_faces)
             # Return specialized status for the runner/worker to handle
-            return None, {"status": "failed_oversized_mesh", "raw_faces": raw_faces}, ""
+            return None, {
+                "status": "failed_oversized_mesh", 
+                "raw_faces": raw_faces,
+                "reason": f"Mesh exceeds hard limit of {settings.recon_mesh_hard_limit_faces} faces. Lower RECON_POISSON_DEPTH or capture a smaller area."
+            }, ""
 
         if raw_faces > settings.recon_mesh_budget_faces:
             logger.warning("[%s] Mesh is oversized (%d faces). Triggering pre-decimation gate.", job_id, raw_faces)
@@ -251,6 +255,14 @@ class AssetCleaner:
                 settings.recon_pre_cleanup_target_faces
             )
             
+            if pre_dec_stats["status"] != "success" and pre_dec_stats["status"] != "skipped_already_small":
+                logger.error("[%s] Pre-decimation failed: %s", job_id, pre_dec_stats.get("error"))
+                return None, {
+                    "status": "failed_oversized_mesh",
+                    "raw_faces": raw_faces,
+                    "reason": f"Pre-decimation failed: {pre_dec_stats.get('error')}. Lower RECON_POISSON_DEPTH."
+                }, ""
+
             logger.info("[%s] Pre-decimation completed: %d -> %d faces", 
                         job_id, pre_dec_stats["pre_decimation_face_count"], pre_dec_stats["post_decimation_face_count"])
             work_mesh_path = str(pre_decimate_path)

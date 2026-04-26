@@ -68,6 +68,7 @@ from modules.operations.settings import settings
 from modules.operations.retention import RetentionService
 from modules.operations.texturing_service import TexturingService
 from modules.qa_validation.validator import AssetValidator
+from modules.integration_flow import IntegrationFlow
 from modules.reconstruction_engine.output_manifest import OutputManifest
 from modules.shared_contracts.lifecycle import AssetStatus, ReconstructionStatus
 from modules.shared_contracts.models import AssetMetadata, CaptureSession, ValidationReport
@@ -637,9 +638,10 @@ class IngestionWorker:
 
             if metadata is None:
                 if cleanup_stats.get("status") == "failed_oversized_mesh":
+                    reason = cleanup_stats.get("reason") or f"Mesh is too large for processing ({cleanup_stats.get('raw_faces')} faces)."
                     return self._mark_session_needs_recapture(
                         session,
-                        reason=f"Mesh is too large for processing ({cleanup_stats.get('raw_faces')} faces). Capture smaller area or use lower density.",
+                        reason=reason,
                     )
                 raise IrrecoverableError(f"Cleanup failed with no metadata: {cleanup_stats.get('status')}")
 
@@ -778,32 +780,14 @@ class IngestionWorker:
         has_embedded_texture = bool(export_metrics["has_embedded_texture"])
         texture_status = export_metrics.get("texture_integrity_status", "missing")
 
-        validation_input = {
-            "poly_count": int(export_metrics["face_count"]),
-            "texture_status": texture_status,
-            "bbox": export_metrics["bbox"],
-            "ground_offset": float(export_metrics["ground_offset"]),
-            "cleanup_stats": cleanup_stats,
-            "texture_path_exists": bool(texture_path_exists or has_embedded_texture),
-            "has_uv": has_uv,
-            "has_material": has_material,
-            "has_embedded_texture": has_embedded_texture,
-            "texture_count": export_metrics.get("texture_count", 0),
-            "material_count": export_metrics.get("material_count", 0),
-            "texture_integrity_status": texture_status,
-            "material_semantic_status": export_metrics.get("material_semantic_status", "geometry_only"),
-            "basecolor_present": bool(export_metrics.get("basecolor_present", False)),
-            "normal_present": bool(export_metrics.get("normal_present", False)),
-            "texture_applied_successfully": bool(export_metrics.get("texture_applied_successfully", False)),
-            "metallic_roughness_present": bool(export_metrics.get("metallic_roughness_present", False)),
-            "occlusion_present": bool(export_metrics.get("occlusion_present", False)),
-            "emissive_present": bool(export_metrics.get("emissive_present", False)),
-            "material_integrity_status": export_metrics.get("material_integrity_status", "missing"),
-            "delivery_geometry_count": int(export_metrics["geometry_count"]),
-            "delivery_component_count": int(export_metrics["component_count"]),
-            "texture_path": texture_path if texture_path and Path(texture_path).exists() else None,
-            "expected_product_color": settings.expected_product_color,
-        }
+        # ── TICKET-005/007: Use IntegrationFlow for validation input assembly ──
+        validation_input = IntegrationFlow.map_metadata_to_validator_input(
+            metadata=metadata,
+            cleanup_stats=cleanup_stats,
+            export_report=export_metrics,
+            texture_path_exists=bool(texture_path_exists or export_metrics.get("has_embedded_texture")),
+            expected_product_color=settings.expected_product_color,
+        )
 
         report = self.validator.validate(asset_id, validation_input)
         validation_report_path = reports_dir / "validation_report.json"

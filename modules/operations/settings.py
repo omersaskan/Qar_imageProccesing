@@ -116,7 +116,7 @@ class Settings(BaseSettings):
     # Max faces allowed for direct object isolation (Part 3). If exceeded, use pre-decimation.
     recon_mesh_budget_faces: int = Field(2_000_000, validation_alias="RECON_MESH_BUDGET_FACES")
     # Hard limit. If even after pre-decimation it's still too large, fail fast.
-    recon_mesh_hard_limit_faces: int = Field(15_000_000, validation_alias="RECON_MESH_HARD_LIMIT_FACES")
+    recon_mesh_hard_limit_faces: int = Field(8_000_000, validation_alias="RECON_MESH_HARD_LIMIT_FACES")
     
     # Decimation targets
     recon_pre_cleanup_target_faces: int = Field(800_000, validation_alias="RECON_PRE_CLEANUP_TARGET_FACES")

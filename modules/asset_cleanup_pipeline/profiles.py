@@ -8,6 +8,7 @@ class CleanupProfileType(str, Enum):
     DESKTOP_HIGH = "desktop_high"
     RAW_ARCHIVE = "raw_archive"
     TEXTURE_SAFE_COPY = "texture_safe_copy"
+    MOBILE_DEFAULT = "mobile_high"
 
 class CleanupProfile(BaseModel):
     name: CleanupProfileType
