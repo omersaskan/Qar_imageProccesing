@@ -1,0 +1,1182 @@
+﻿--- SESSION SUMMARY ---
+
+
+status                 : failed
+last_pipeline_stage    : failed
+failure_reason         : Validation
+                          Failed: {
+                         'component
+                         _share': '
+                         review', '
+                         component_
+                         count': 'p
+                         ass', 'pla
+                         ne_contami
+                         nation': '
+                         pass', 'co
+                         mpactness'
+                         : 'pass', 
+                         'selection
+                         _quality':
+                          'pass', '
+                         uv_integri
+                         ty': 'pass
+                         ', 'applic
+                         ation': 'p
+                         ass', 'mat
+                         erial_inte
+                         grity': 'p
+                         ass', 'mat
+                         erial_sema
+                         ntics': 'p
+                         ass', 'fin
+                         al_texture
+                         _status': 
+                         'complete'
+                         , 'accesso
+                         r_position
+                         ': 'pass',
+                          'accessor
+                         _normal': 
+                         'pass', 'a
+                         ccessor_uv
+                         ': 'pass',
+                          'decimati
+                         on': 'pass
+                         '}
+retry_count            : 0
+reconstruction_job_id  : job_cap_61
+                         ca2229
+cleanup_mesh_path      : C:\Users\L
+                         enovo\.gem
+                         ini\antigr
+                         avity\scra
+                         tch\Qar_im
+                         ageProcces
+                         ing\data\c
+                         leaned\job
+                         _cap_61ca2
+                         229\textur
+                         ed_aligned
+                         _mesh.obj
+export_blob_path       : C:\Users\L
+                         enovo\.gem
+                         ini\antigr
+                         avity\scra
+                         tch\Qar_im
+                         ageProcces
+                         ing\data\r
+                         egistry\bl
+                         obs\asset_
+                         cap_61ca22
+                         29.glb
+cleanup_stats_path     : C:\Users\L
+                         enovo\.gem
+                         ini\antigr
+                         avity\scra
+                         tch\Qar_im
+                         ageProcces
+                         ing\data\c
+                         leaned\job
+                         _cap_61ca2
+                         229\cleanu
+                         p_stats.js
+                         on
+export_metrics_path    : C:\Users\L
+                         enovo\.gem
+                         ini\antigr
+                         avity\scra
+                         tch\Qar_im
+                         ageProcces
+                         ing\data\c
+                         aptures\ca
+                         p_61ca2229
+                         \reports\e
+                         xport_metr
+                         ics.json
+validation_report_path : C:\Users\L
+                         enovo\.gem
+                         ini\antigr
+                         avity\scra
+                         tch\Qar_im
+                         ageProcces
+                         ing\data\c
+                         aptures\ca
+                         p_61ca2229
+                         \reports\v
+                         alidation_
+                         report.jso
+                         n
+
+
+
+
+--- EXPORT METRICS ---
+{
+  "final_vertex_count": 161706,
+  "final_face_count": 193989,
+  "texture_count": 1,
+  "material_count": 1,
+  "all_primitives_have_position": true,
+  "all_primitives_have_normal": true,
+  "all_textured_primitives_have_texcoord_0": true,
+  "primitive_attribute_report": [
+    {
+      "mesh_index": 0,
+      "primitive_index": 0,
+      "attributes": [
+        "POSITION",
+        "TEXCOORD_0",
+        "NORMAL"
+      ],
+      "has_position": true,
+      "has_normal": true,
+      "has_texcoord_0": true,
+      "is_textured": true,
+      "missing_attributes": []
+    }
+  ]
+}
+
+--- VALIDATION REPORT ---
+{
+  "asset_id": "asset_cap_61ca2229",
+  "poly_count": 193989,
+  "texture_status": "complete",
+  "bbox_reasonable": true,
+  "ground_aligned": false,
+  "mobile_performance_grade": "D",
+  "component_count": 1,
+  "largest_component_share": 0.805154201800186,
+  "contamination_score": 0.08768060918991628,
+  "contamination_report": {
+    "component_share": "review",
+    "component_count": "pass",
+    "plane_contamination": "pass",
+    "compactness": "pass",
+    "selection_quality": "pass",
+    "uv_integrity": "pass",
+    "application": "pass",
+    "material_integrity": "pass",
+    "material_semantics": "pass",
+    "final_texture_status": "complete",
+    "accessor_position": "pass",
+    "accessor_normal": "pass",
+    "accessor_uv": "pass",
+    "decimation": "pass"
+  },
+  "blocking_checks": [
+    "polycount",
+    "texture_quality",
+    "export_delivery_gate"
+  ],
+  "warning_checks": [
+    "ground_alignment",
+    "object_filtering",
+    "contamination_component_share"
+  ],
+  "passed_checks": [
+    "bbox",
+    "material_semantics",
+    "decimation",
+    "contamination_component_count",
+    "contamination_plane_contamination",
+    "contamination_compactness",
+    "contamination_selection_quality",
+    "texture_uv_integrity",
+    "texture_application",
+    "texture_material_integrity",
+    "texture_material_semantics",
+    "accessor_position",
+    "accessor_normal",
+    "accessor_uv",
+    "export_status"
+  ],
+  "raw_metrics": {
+    "poly_count": 193989,
+    "bbox": {
+      "width": 3.0921832399999998,
+      "height": 3.1104841199999997,
+      "depth": 1.28268112
+    },
+    "ground_offset": -4.42085797,
+    "cleanup_stats": {
+      "isolation": {
+        "initial_faces": 414846,
+        "initial_vertices": 210669,
+        "removed_planes": 0,
+        "removed_plane_faces": 0,
+        "removed_plane_vertices": 0,
+        "plane_candidate_count": 1,
+        "removed_support_bands": 0,
+        "removed_support_faces": 0,
+        "removed_support_vertices": 0,
+        "component_count": 1,
+        "raw_component_count": 319,
+        "removed_islands": 156,
+        "final_faces": 334015,
+        "final_vertices": 167563,
+        "removed_plane_face_share": 0.0,
+        "removed_plane_vertex_ratio": 0.0,
+        "compactness_score": 0.3177706923212492,
+        "flatness_score": 0.41216218520748465,
+        "selected_component_score": 0.9036990313890987,
+        "aspect_ratio": 2.426229372538373,
+        "footprint_dominance": 7.502656126297555,
+        "object_isolation_status": "success",
+        "object_isolation_method": "geometric_only",
+        "raw_mesh_faces": 414846,
+        "isolated_mesh_faces": 334015,
+        "removed_face_ratio": 0.1948457981998139,
+        "mask_support_ratio": 0.0,
+        "point_cloud_support_ratio": 0.0
+      },
+      "decimation": {
+        "pre_decimation_face_count": 334015,
+        "post_decimation_face_count": 193989,
+        "decimation_ratio": 0.5807793063185785,
+        "uv_preserved": true,
+        "material_preserved": true,
+        "texture_preserved": true,
+        "decimation_status": "success"
+      },
+      "final_polycount": 193989,
+      "poly_count": 193989,
+      "bbox_min": {
+        "x": -1.65127976,
+        "y": -1.6260702,
+        "z": 0.0
+      },
+      "bbox_max": {
+        "x": 1.44090348,
+        "y": 1.48441392,
+        "z": 1.28268112
+      },
+      "bbox": {
+        "x": 3.0921832399999998,
+        "y": 3.1104841199999997,
+        "z": 1.28268112
+      },
+      "ground_offset": 4.42085797,
+      "cleaned_mesh_path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\cleaned\\job_cap_61ca2229\\cleaned_mesh.obj",
+      "metadata_path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\cleaned\\job_cap_61ca2229\\normalized_metadata.json",
+      "cleaned_texture_path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\cleaned\\job_cap_61ca2229\\textured_model_material_00_map_Kd.jpg",
+      "texture_path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\cleaned\\job_cap_61ca2229\\textured_model_material_00_map_Kd.jpg",
+      "delivery_profile": "mobile_high",
+      "has_uv": true,
+      "has_material": true,
+      "texture_input_mesh_path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\cleaned\\job_cap_61ca2229\\debug_isolated_mesh.obj",
+      "pre_aligned_mesh_path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\cleaned\\job_cap_61ca2229\\pre_aligned_mesh.obj",
+      "oversized_raw_mesh": false,
+      "raw_mesh_faces": 414846,
+      "raw_mesh_vertices": 210669,
+      "textured_mesh_path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\cleaned\\job_cap_61ca2229\\textured_aligned_mesh.obj",
+      "texture_integrity_status": "complete",
+      "material_semantic_status": "diffuse_textured"
+    },
+    "delivery_profile": "mobile_high",
+    "material_semantic_status": "diffuse_textured",
+    "texture_integrity_status": "complete",
+    "has_uv": true,
+    "has_material": true,
+    "final_vertex_count": 161706,
+    "final_face_count": 193989,
+    "texture_count": 1,
+    "material_count": 1,
+    "all_primitives_have_position": true,
+    "all_primitives_have_normal": true,
+    "all_textured_primitives_have_texcoord_0": true,
+    "primitive_attribute_report": [
+      {
+        "mesh_index": 0,
+        "primitive_index": 0,
+        "attributes": [
+          "POSITION",
+          "TEXCOORD_0",
+          "NORMAL"
+        ],
+        "has_position": true,
+        "has_normal": true,
+        "has_texcoord_0": true,
+        "is_textured": true,
+        "missing_attributes": []
+      }
+    ],
+    "texture_applied": true,
+    "delivery_ready": false,
+    "texture_path_exists": true,
+    "expected_product_color": "white_cream"
+  },
+  "final_decision": "fail",
+  "flatness_score": 1.0,
+  "compactness_score": 1.0,
+  "selected_component_score": 1.0,
+  "material_quality_grade": "B",
+  "material_semantic_status": "diffuse_textured",
+  "texture_quality_status": "fail",
+  "texture_quality_grade": "F",
+  "texture_quality_reasons": [
+    "MISSING_TEXTURE_QUALITY_METRICS"
+  ],
+  "black_pixel_ratio": 0.0,
+  "near_black_ratio": 0.0,
+  "near_white_ratio": 0.0,
+  "dominant_color_ratio": 0.0,
+  "dominant_background_color_ratio": 0.0,
+  "atlas_coverage_ratio": 0.0,
+  "default_fill_or_flat_color_ratio": 0.0,
+  "alpha_empty_ratio": 0.0,
+  "is_mobile_ready": false,
+  "delivery_status": "failed",
+  "created_at": "2026-04-26T18:20:25.216278Z"
+}
+
+--- CLEANUP STATS ---
+{
+  "isolation": {
+    "initial_faces": 414846,
+    "initial_vertices": 210669,
+    "removed_planes": 0,
+    "removed_plane_faces": 0,
+    "removed_plane_vertices": 0,
+    "plane_candidate_count": 1,
+    "removed_support_bands": 0,
+    "removed_support_faces": 0,
+    "removed_support_vertices": 0,
+    "component_count": 1,
+    "raw_component_count": 319,
+    "removed_islands": 156,
+    "final_faces": 334015,
+    "final_vertices": 167563,
+    "removed_plane_face_share": 0.0,
+    "removed_plane_vertex_ratio": 0.0,
+    "compactness_score": 0.3177706923212492,
+    "flatness_score": 0.41216218520748465,
+    "selected_component_score": 0.9036990313890987,
+    "aspect_ratio": 2.426229372538373,
+    "footprint_dominance": 7.502656126297555,
+    "object_isolation_status": "success",
+    "object_isolation_method": "geometric_only",
+    "raw_mesh_faces": 414846,
+    "isolated_mesh_faces": 334015,
+    "removed_face_ratio": 0.1948457981998139,
+    "mask_support_ratio": 0.0,
+    "point_cloud_support_ratio": 0.0
+  },
+  "decimation": {
+    "pre_decimation_face_count": 334015,
+    "post_decimation_face_count": 193989,
+    "decimation_ratio": 0.5807793063185785,
+    "uv_preserved": true,
+    "material_preserved": true,
+    "texture_preserved": true,
+    "decimation_status": "success"
+  },
+  "final_polycount": 193989,
+  "poly_count": 193989,
+  "bbox_min": {
+    "x": -1.65127976,
+    "y": -1.6260702,
+    "z": 0.0
+  },
+  "bbox_max": {
+    "x": 1.44090348,
+    "y": 1.48441392,
+    "z": 1.28268112
+  },
+  "bbox": {
+    "x": 3.0921832399999998,
+    "y": 3.1104841199999997,
+    "z": 1.28268112
+  },
+  "ground_offset": 4.42085797,
+  "cleaned_mesh_path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\cleaned\\job_cap_61ca2229\\cleaned_mesh.obj",
+  "metadata_path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\cleaned\\job_cap_61ca2229\\normalized_metadata.json",
+  "cleaned_texture_path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\cleaned\\job_cap_61ca2229\\textured_model_material_00_map_Kd.jpg",
+  "texture_path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\cleaned\\job_cap_61ca2229\\textured_model_material_00_map_Kd.jpg",
+  "delivery_profile": "mobile_high",
+  "has_uv": true,
+  "has_material": true,
+  "texture_input_mesh_path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\cleaned\\job_cap_61ca2229\\debug_isolated_mesh.obj",
+  "pre_aligned_mesh_path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\cleaned\\job_cap_61ca2229\\pre_aligned_mesh.obj",
+  "oversized_raw_mesh": false,
+  "raw_mesh_faces": 414846,
+  "raw_mesh_vertices": 210669,
+  "textured_mesh_path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\cleaned\\job_cap_61ca2229\\textured_aligned_mesh.obj",
+  "texture_integrity_status": "complete",
+  "material_semantic_status": "diffuse_textured"
+}
+
+--- TEXTURING LOG ---
+Starting OpenMVS Texturing using mesh: C:\Users\Lenovo\.gemini\antigravity\scratch\Qar_imageProccesing\data\cleaned\job_cap_61ca2229\pre_aligned_mesh.obj
+OpenMVS raw image-folder: C:\Users\Lenovo\.gemini\antigravity\scratch\Qar_imageProccesing\data\reconstructions\job_cap_61ca2229\attempt_1_denser_frames\dense\images
+Filtered image-folder: C:\Users\Lenovo\.gemini\antigravity\scratch\Qar_imageProccesing\data\cleaned\job_cap_61ca2229\texturing\selected_images
+Original image count: 46
+Selected image count: 46
+Fallback used: False
+COLMAP workspace: C:\Users\Lenovo\.gemini\antigravity\scratch\Qar_imageProccesing\data\reconstructions\job_cap_61ca2229\attempt_1_denser_frames
+Dense workspace: C:\Users\Lenovo\.gemini\antigravity\scratch\Qar_imageProccesing\data\reconstructions\job_cap_61ca2229\attempt_1_denser_frames\dense
+
+--- Running: C:\openmvs\vc17\x64\Release\InterfaceCOLMAP.exe -i C:\Users\Lenovo\.gemini\antigravity\scratch\Qar_imageProccesing\data\reconstructions\job_cap_61ca2229\attempt_1_denser_frames\dense -o C:\Users\Lenovo\.gemini\antigravity\scratch\Qar_imageProccesing\data\cleaned\job_cap_61ca2229\texturing\scene.mvs --working-folder C:\Users\Lenovo\.gemini\antigravity\scratch\Qar_imageProccesing\data\reconstructions\job_cap_61ca2229\attempt_1_denser_frames\dense --image-folder C:\Users\Lenovo\.gemini\antigravity\scratch\Qar_imageProccesing\data\cleaned\job_cap_61ca2229\texturing\selected_images ---
+Converting OBJ to PLY for TextureMesh: C:\Users\Lenovo\.gemini\antigravity\scratch\Qar_imageProccesing\data\cleaned\job_cap_61ca2229\pre_aligned_mesh.obj -> C:\Users\Lenovo\.gemini\antigravity\scratch\Qar_imageProccesing\data\cleaned\job_cap_61ca2229\texturing\pre_aligned_mesh_for_texture.ply
+selected_mesh path: C:\Users\Lenovo\.gemini\antigravity\scratch\Qar_imageProccesing\data\cleaned\job_cap_61ca2229\pre_aligned_mesh.obj
+texture_input_mesh path: C:\Users\Lenovo\.gemini\antigravity\scratch\Qar_imageProccesing\data\cleaned\job_cap_61ca2229\texturing\pre_aligned_mesh_for_texture.ply
+scene.mvs exists: True
+scene.mvs size: 613088 bytes
+TextureMesh Command: C:\openmvs\vc17\x64\Release\TextureMesh.exe -i C:\Users\Lenovo\.gemini\antigravity\scratch\Qar_imageProccesing\data\cleaned\job_cap_61ca2229\texturing\scene.mvs --mesh-file C:\Users\Lenovo\.gemini\antigravity\scratch\Qar_imageProccesing\data\cleaned\job_cap_61ca2229\texturing\pre_aligned_mesh_for_texture.ply --export-type obj -o C:\Users\Lenovo\.gemini\antigravity\scratch\Qar_imageProccesing\data\cleaned\job_cap_61ca2229\texturing\textured_model.obj --working-folder C:\Users\Lenovo\.gemini\antigravity\scratch\Qar_imageProccesing\data\cleaned\job_cap_61ca2229\texturing
+
+--- Running: C:\openmvs\vc17\x64\Release\TextureMesh.exe -i C:\Users\Lenovo\.gemini\antigravity\scratch\Qar_imageProccesing\data\cleaned\job_cap_61ca2229\texturing\scene.mvs --mesh-file C:\Users\Lenovo\.gemini\antigravity\scratch\Qar_imageProccesing\data\cleaned\job_cap_61ca2229\texturing\pre_aligned_mesh_for_texture.ply --export-type obj -o C:\Users\Lenovo\.gemini\antigravity\scratch\Qar_imageProccesing\data\cleaned\job_cap_61ca2229\texturing\textured_model.obj --working-folder C:\Users\Lenovo\.gemini\antigravity\scratch\Qar_imageProccesing\data\cleaned\job_cap_61ca2229\texturing ---
+TextureMesh returned exit code 0
+Verifying outputs in C:\Users\Lenovo\.gemini\antigravity\scratch\Qar_imageProccesing\data\cleaned\job_cap_61ca2229\texturing...
+Files in output_dir: ['depth0001.dmap', 'depth0002.dmap', 'depth0003.dmap', 'depth0004.dmap', 'depth0005.dmap', 'depth0006.dmap', 'depth0007.dmap', 'depth0008.dmap', 'depth0009.dmap', 'depth0010.dmap', 'depth0011.dmap', 'depth0012.dmap', 'depth0013.dmap', 'depth0014.dmap', 'depth0015.dmap', 'depth0016.dmap', 'depth0017.dmap', 'depth0018.dmap', 'depth0019.dmap', 'depth0020.dmap', 'depth0021.dmap', 'depth0022.dmap', 'depth0023.dmap', 'depth0024.dmap', 'depth0025.dmap', 'depth0026.dmap', 'depth0027.dmap', 'depth0028.dmap', 'depth0029.dmap', 'depth0030.dmap', 'depth0031.dmap', 'depth0032.dmap', 'depth0033.dmap', 'depth0034.dmap', 'depth0035.dmap', 'depth0037.dmap', 'depth0038.dmap', 'depth0039.dmap', 'depth0040.dmap', 'depth0041.dmap', 'depth0042.dmap', 'depth0043.dmap', 'depth0044.dmap', 'depth0045.dmap', 'depth0046.dmap', 'depth0047.dmap', 'pre_aligned_mesh_for_texture.ply', 'rejected_texture_frames.json', 'scene.mvs', 'scene.ply', 'selected_images', 'selected_texture_frames.json', 'selected_texture_frames_contact_sheet.png', 'textured_model.mtl', 'textured_model.obj', 'textured_model_material_00_map_Kd.jpg', 'TextureMesh-260426211946005EFD.log', 'texturing.log']
+Texturing completed successfully. Used stem: textured_model, Atlas count: 1
+
+--- SELECTED TEXTURE FRAMES ---
+{
+  "selected_count": 46,
+  "rejected_count": 0,
+  "fallback_used": false,
+  "selected_images_dir": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\cleaned\\job_cap_61ca2229\\texturing\\selected_images",
+  "selected_frames": [
+    {
+      "name": "frame_0000.jpg",
+      "path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_61ca2229\\attempt_1_denser_frames\\dense\\images\\frame_0000.jpg",
+      "sharpness": 96.97788955870541,
+      "luminance": 124.06835587188613,
+      "center_variance": 3687.1671997652506,
+      "clipping_score": 0.014084507042253521,
+      "color_match_score": 0.18731806049822064,
+      "resolution": [
+        2000,
+        1124
+      ],
+      "is_accepted": true
+    },
+    {
+      "name": "frame_0001.jpg",
+      "path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_61ca2229\\attempt_1_denser_frames\\dense\\images\\frame_0001.jpg",
+      "sharpness": 57.41311445100884,
+      "luminance": 122.44970017793594,
+      "center_variance": 3365.821759931662,
+      "clipping_score": 0.008002560819462228,
+      "color_match_score": 0.18231806049822064,
+      "resolution": [
+        2000,
+        1124
+      ],
+      "is_accepted": true
+    },
+    {
+      "name": "frame_0002.jpg",
+      "path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_61ca2229\\attempt_1_denser_frames\\dense\\images\\frame_0002.jpg",
+      "sharpness": 43.200308055440146,
+      "luminance": 120.59844172597865,
+      "center_variance": 3767.317870140826,
+      "clipping_score": 0.004001280409731114,
+      "color_match_score": 0.20050489323843415,
+      "resolution": [
+        2000,
+        1124
+      ],
+      "is_accepted": true
+    },
+    {
+      "name": "frame_0003.jpg",
+      "path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_61ca2229\\attempt_1_denser_frames\\dense\\images\\frame_0003.jpg",
+      "sharpness": 53.44442437008065,
+      "luminance": 117.11219128113879,
+      "center_variance": 4254.386367785359,
+      "clipping_score": 0.0046414852752880926,
+      "color_match_score": 0.18820774021352313,
+      "resolution": [
+        2000,
+        1124
+      ],
+      "is_accepted": true
+    },
+    {
+      "name": "frame_0004.jpg",
+      "path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_61ca2229\\attempt_1_denser_frames\\dense\\images\\frame_0004.jpg",
+      "sharpness": 45.86145965224605,
+      "luminance": 115.6336943950178,
+      "center_variance": 4302.421750557161,
+      "clipping_score": 0.001440460947503201,
+      "color_match_score": 0.19146352313167259,
+      "resolution": [
+        2000,
+        1124
+      ],
+      "is_accepted": true
+    },
+    {
+      "name": "frame_0005.jpg",
+      "path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_61ca2229\\attempt_1_denser_frames\\dense\\images\\frame_0005.jpg",
+      "sharpness": 45.20800975123716,
+      "luminance": 118.21785676156584,
+      "center_variance": 4407.9593116960405,
+      "clipping_score": 0.005121638924455826,
+      "color_match_score": 0.2094470640569395,
+      "resolution": [
+        2000,
+        1124
+      ],
+      "is_accepted": true
+    },
+    {
+      "name": "frame_0006.jpg",
+      "path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_61ca2229\\attempt_1_denser_frames\\dense\\images\\frame_0006.jpg",
+      "sharpness": 49.657126719717446,
+      "luminance": 123.20861610320284,
+      "center_variance": 4744.867054087585,
+      "clipping_score": 0.007202304737516005,
+      "color_match_score": 0.26420640569395015,
+      "resolution": [
+        2000,
+        1124
+      ],
+      "is_accepted": true
+    },
+    {
+      "name": "frame_0007.jpg",
+      "path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_61ca2229\\attempt_1_denser_frames\\dense\\images\\frame_0007.jpg",
+      "sharpness": 45.85382066946005,
+      "luminance": 126.75574243772242,
+      "center_variance": 4953.422915344761,
+      "clipping_score": 0.004001280409731114,
+      "color_match_score": 0.2748914590747331,
+      "resolution": [
+        2000,
+        1124
+      ],
+      "is_accepted": true
+    },
+    {
+      "name": "frame_0008.jpg",
+      "path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_61ca2229\\attempt_1_denser_frames\\dense\\images\\frame_0008.jpg",
+      "sharpness": 52.21081805823267,
+      "luminance": 128.35951823843416,
+      "center_variance": 5172.306946149365,
+      "clipping_score": 0.00560179257362356,
+      "color_match_score": 0.27912766903914593,
+      "resolution": [
+        2000,
+        1124
+      ],
+      "is_accepted": true
+    },
+    {
+      "name": "frame_0009.jpg",
+      "path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_61ca2229\\attempt_1_denser_frames\\dense\\images\\frame_0009.jpg",
+      "sharpness": 33.07258317467622,
+      "luminance": 132.30967882562277,
+      "center_variance": 5473.428961144351,
+      "clipping_score": 0.004481434058898848,
+      "color_match_score": 0.3038638790035587,
+      "resolution": [
+        2000,
+        1124
+      ],
+      "is_accepted": true
+    },
+    {
+      "name": "frame_0010.jpg",
+      "path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_61ca2229\\attempt_1_denser_frames\\dense\\images\\frame_0010.jpg",
+      "sharpness": 50.38631510399101,
+      "luminance": 133.57646352313168,
+      "center_variance": 5788.797397492987,
+      "clipping_score": 0.0016005121638924455,
+      "color_match_score": 0.3033122775800712,
+      "resolution": [
+        2000,
+        1124
+      ],
+      "is_accepted": true
+    },
+    {
+      "name": "frame_0011.jpg",
+      "path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_61ca2229\\attempt_1_denser_frames\\dense\\images\\frame_0011.jpg",
+      "sharpness": 50.64277393252286,
+      "luminance": 129.1665409252669,
+      "center_variance": 5597.124122730449,
+      "clipping_score": 0.0009603072983354673,
+      "color_match_score": 0.273914590747331,
+      "resolution": [
+        2000,
+        1124
+      ],
+      "is_accepted": true
+    },
+    {
+      "name": "frame_0012.jpg",
+      "path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_61ca2229\\attempt_1_denser_frames\\dense\\images\\frame_0012.jpg",
+      "sharpness": 48.182193838507104,
+      "luminance": 134.71640169039145,
+      "center_variance": 4733.400465226425,
+      "clipping_score": 0.004321382842509603,
+      "color_match_score": 0.29726334519572956,
+      "resolution": [
+        2000,
+        1124
+      ],
+      "is_accepted": true
+    },
+    {
+      "name": "frame_0013.jpg",
+      "path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_61ca2229\\attempt_1_denser_frames\\dense\\images\\frame_0013.jpg",
+      "sharpness": 37.738855830739226,
+      "luminance": 134.41879270462633,
+      "center_variance": 4619.35054714669,
+      "clipping_score": 0.004321382842509603,
+      "color_match_score": 0.28780160142348754,
+      "resolution": [
+        2000,
+        1124
+      ],
+      "is_accepted": true
+    },
+    {
+      "name": "frame_0014.jpg",
+      "path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_61ca2229\\attempt_1_denser_frames\\dense\\images\\frame_0014.jpg",
+      "sharpness": 38.43432072949284,
+      "luminance": 135.86531227758007,
+      "center_variance": 4451.850437864756,
+      "clipping_score": 0.0076824583866837385,
+      "color_match_score": 0.27773042704626333,
+      "resolution": [
+        2000,
+        1124
+      ],
+      "is_accepted": true
+    },
+    {
+      "name": "frame_0015.jpg",
+      "path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_61ca2229\\attempt_1_denser_frames\\dense\\images\\frame_0015.jpg",
+      "sharpness": 27.314320725930962,
+      "luminance": 131.15419572953738,
+      "center_variance": 4498.258812611289,
+      "clipping_score": 0.008962868117797696,
+      "color_match_score": 0.23886610320284699,
+      "resolution": [
+        2000,
+        1124
+      ],
+      "is_accepted": true
+    },
+    {
+      "name": "frame_0016.jpg",
+      "path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_61ca2229\\attempt_1_denser_frames\\dense\\images\\frame_0016.jpg",
+      "sharpness": 28.843475681215253,
+      "luminance": 127.15181183274021,
+      "center_variance": 3258.842560694406,
+      "clipping_score": 0.0008002560819462228,
+      "color_match_score": 0.20026868327402136,
+      "resolution": [
+        2000,
+        1124
+      ],
+      "is_accepted": true
+    },
+    {
+      "name": "frame_0017.jpg",
+      "path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_61ca2229\\attempt_1_denser_frames\\dense\\images\\frame_0017.jpg",
+      "sharpness": 29.885482995205702,
+      "luminance": 132.31105560498222,
+      "center_variance": 3035.5089512067952,
+      "clipping_score": 0.002240717029449424,
+      "color_match_score": 0.2530200177935943,
+      "resolution": [
+        2000,
+        1124
+      ],
+      "is_accepted": true
+    },
+    {
+      "name": "frame_0018.jpg",
+      "path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_61ca2229\\attempt_1_denser_frames\\dense\\images\\frame_0018.jpg",
+      "sharpness": 32.56819883034643,
+      "luminance": 134.01316147686833,
+      "center_variance": 3057.441518465774,
+      "clipping_score": 0.002400768245838668,
+      "color_match_score": 0.27003781138790034,
+      "resolution": [
+        2000,
+        1124
+      ],
+      "is_accepted": true
+    },
+    {
+      "name": "frame_0019.jpg",
+      "path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_61ca2229\\attempt_1_denser_frames\\dense\\images\\frame_0019.jpg",
+      "sharpness": 27.233026131555253,
+      "luminance": 133.5369096975089,
+      "center_variance": 3601.8032865193704,
+      "clipping_score": 0.0019206145966709346,
+      "color_match_score": 0.25891592526690393,
+      "resolution": [
+        2000,
+        1124
+      ],
+      "is_accepted": true
+    },
+    {
+      "name": "frame_0020.jpg",
+      "path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_61ca2229\\attempt_1_denser_frames\\dense\\images\\frame_0020.jpg",
+      "sharpness": 36.941579889564935,
+      "luminance": 133.1840271352313,
+      "center_variance": 3378.0183430412358,
+      "clipping_score": 0.0038412291933418692,
+      "color_match_score": 0.2677682384341637,
+      "resolution": [
+        2000,
+        1124
+      ],
+      "is_accepted": true
+    },
+    {
+      "name": "frame_0021.jpg",
+      "path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_61ca2229\\attempt_1_denser_frames\\dense\\images\\frame_0021.jpg",
+      "sharpness": 41.353023575514925,
+      "luminance": 134.36081138790036,
+      "center_variance": 5095.967859968643,
+      "clipping_score": 0.00048015364916773366,
+      "color_match_score": 0.25475,
+      "resolution": [
+        2000,
+        1124
+      ],
+      "is_accepted": true
+    },
+    {
+      "name": "frame_0022.jpg",
+      "path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_61ca2229\\attempt_1_denser_frames\\dense\\images\\frame_0022.jpg",
+      "sharpness": 33.30643455966217,
+      "luminance": 133.68316948398578,
+      "center_variance": 4548.4383968724305,
+      "clipping_score": 0.002880921895006402,
+      "color_match_score": 0.19588567615658364,
+      "resolution": [
+        2000,
+        1124
+      ],
+      "is_accepted": true
+    },
+    {
+      "name": "frame_0023.jpg",
+      "path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_61ca2229\\attempt_1_denser_frames\\dense\\images\\frame_0023.jpg",
+      "sharpness": 43.44115962603354,
+      "luminance": 133.05007072953737,
+      "center_variance": 3774.1819175511837,
+      "clipping_score": 0.004481434058898848,
+      "color_match_score": 0.19365480427046264,
+      "resolution": [
+        2000,
+        1124
+      ],
+      "is_accepted": true
+    },
+    {
+      "name": "frame_0024.jpg",
+      "path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_61ca2229\\attempt_1_denser_frames\\dense\\images\\frame_0024.jpg",
+      "sharpness": 43.12369549443317,
+      "luminance": 133.514493772242,
+      "center_variance": 3460.5285069609554,
+      "clipping_score": 0.010403329065300896,
+      "color_match_score": 0.20001290035587188,
+      "resolution": [
+        2000,
+        1124
+      ],
+      "is_accepted": true
+    },
+    {
+      "name": "frame_0025.jpg",
+      "path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_61ca2229\\attempt_1_denser_frames\\dense\\images\\frame_0025.jpg",
+      "sharpness": 40.169124352033755,
+      "luminance": 134.06268994661923,
+      "center_variance": 3525.865209637213,
+      "clipping_score": 0.006562099871959027,
+      "color_match_score": 0.2070894128113879,
+      "resolution": [
+        2000,
+        1124
+      ],
+      "is_accepted": true
+    },
+    {
+      "name": "frame_0026.jpg",
+      "path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_61ca2229\\attempt_1_denser_frames\\dense\\images\\frame_0026.jpg",
+      "sharpness": 56.46262316143234,
+      "luminance": 136.2061058718861,
+      "center_variance": 3549.1900389350562,
+      "clipping_score": 0.00528169014084507,
+      "color_match_score": 0.2412041814946619,
+      "resolution": [
+        2000,
+        1124
+      ],
+      "is_accepted": true
+    },
+    {
+      "name": "frame_0027.jpg",
+      "path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_61ca2229\\attempt_1_denser_frames\\dense\\images\\frame_0027.jpg",
+      "sharpness": 48.557055549187055,
+      "luminance": 134.38764679715302,
+      "center_variance": 3628.9694893576548,
+      "clipping_score": 0.005921895006402049,
+      "color_match_score": 0.2509443950177936,
+      "resolution": [
+        2000,
+        1124
+      ],
+      "is_accepted": true
+    },
+    {
+      "name": "frame_0028.jpg",
+      "path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_61ca2229\\attempt_1_denser_frames\\dense\\images\\frame_0028.jpg",
+      "sharpness": 66.33316806841353,
+      "luminance": 126.49424466192171,
+      "center_variance": 4004.558427417304,
+      "clipping_score": 0.005761843790012804,
+      "color_match_score": 0.24006983985765123,
+      "resolution": [
+        2000,
+        1124
+      ],
+      "is_accepted": true
+    },
+    {
+      "name": "frame_0029.jpg",
+      "path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_61ca2229\\attempt_1_denser_frames\\dense\\images\\frame_0029.jpg",
+      "sharpness": 49.313007111984874,
+      "luminance": 118.51919884341638,
+      "center_variance": 4087.836576229265,
+      "clipping_score": 0.005121638924455826,
+      "color_match_score": 0.2383532028469751,
+      "resolution": [
+        2000,
+        1124
+      ],
+      "is_accepted": true
+    },
+    {
+      "name": "frame_0030.jpg",
+      "path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_61ca2229\\attempt_1_denser_frames\\dense\\images\\frame_0030.jpg",
+      "sharpness": 59.704331389166605,
+      "luminance": 116.20269928825623,
+      "center_variance": 4047.833359784893,
+      "clipping_score": 0.0033610755441741357,
+      "color_match_score": 0.2441570284697509,
+      "resolution": [
+        2000,
+        1124
+      ],
+      "is_accepted": true
+    },
+    {
+      "name": "frame_0031.jpg",
+      "path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_61ca2229\\attempt_1_denser_frames\\dense\\images\\frame_0031.jpg",
+      "sharpness": 63.06782382186697,
+      "luminance": 112.55990747330961,
+      "center_variance": 4044.913629039117,
+      "clipping_score": 0.002560819462227913,
+      "color_match_score": 0.23712989323843417,
+      "resolution": [
+        2000,
+        1124
+      ],
+      "is_accepted": true
+    },
+    {
+      "name": "frame_0032.jpg",
+      "path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_61ca2229\\attempt_1_denser_frames\\dense\\images\\frame_0032.jpg",
+      "sharpness": 64.6951694415659,
+      "luminance": 111.30947464412812,
+      "center_variance": 4411.933828615596,
+      "clipping_score": 0.0033610755441741357,
+      "color_match_score": 0.23234830960854091,
+      "resolution": [
+        2000,
+        1124
+      ],
+      "is_accepted": true
+    },
+    {
+      "name": "frame_0033.jpg",
+      "path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_61ca2229\\attempt_1_denser_frames\\dense\\images\\frame_0033.jpg",
+      "sharpness": 60.618694299984924,
+      "luminance": 119.41437366548043,
+      "center_variance": 4503.152834918555,
+      "clipping_score": 0.001440460947503201,
+      "color_match_score": 0.25875311387900357,
+      "resolution": [
+        2000,
+        1124
+      ],
+      "is_accepted": true
+    },
+    {
+      "name": "frame_0034.jpg",
+      "path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_61ca2229\\attempt_1_denser_frames\\dense\\images\\frame_0034.jpg",
+      "sharpness": 51.10016236428249,
+      "luminance": 133.0637931494662,
+      "center_variance": 4680.031270481374,
+      "clipping_score": 0.003040973111395647,
+      "color_match_score": 0.2918861209964413,
+      "resolution": [
+        2000,
+        1124
+      ],
+      "is_accepted": true
+    },
+    {
+      "name": "frame_0036.jpg",
+      "path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_61ca2229\\attempt_1_denser_frames\\dense\\images\\frame_0036.jpg",
+      "sharpness": 30.343844711704,
+      "luminance": 107.01152046263346,
+      "center_variance": 5680.810688521663,
+      "clipping_score": 0.0027208706786171575,
+      "color_match_score": 0.13306138790035588,
+      "resolution": [
+        2000,
+        1124
+      ],
+      "is_accepted": true
+    },
+    {
+      "name": "frame_0037.jpg",
+      "path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_61ca2229\\attempt_1_denser_frames\\dense\\images\\frame_0037.jpg",
+      "sharpness": 38.747036406577294,
+      "luminance": 116.01368416370107,
+      "center_variance": 5530.17108031205,
+      "clipping_score": 0.00944302176696543,
+      "color_match_score": 0.16570996441281138,
+      "resolution": [
+        2000,
+        1124
+      ],
+      "is_accepted": true
+    },
+    {
+      "name": "frame_0038.jpg",
+      "path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_61ca2229\\attempt_1_denser_frames\\dense\\images\\frame_0038.jpg",
+      "sharpness": 33.77147373143842,
+      "luminance": 119.56323620996442,
+      "center_variance": 5233.378546317752,
+      "clipping_score": 0.006722151088348271,
+      "color_match_score": 0.15866814946619218,
+      "resolution": [
+        2000,
+        1124
+      ],
+      "is_accepted": true
+    },
+    {
+      "name": "frame_0039.jpg",
+      "path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_61ca2229\\attempt_1_denser_frames\\dense\\images\\frame_0039.jpg",
+      "sharpness": 29.29320668195197,
+      "luminance": 120.82825355871886,
+      "center_variance": 5171.679418449535,
+      "clipping_score": 0.008482714468629962,
+      "color_match_score": 0.14681539145907474,
+      "resolution": [
+        2000,
+        1124
+      ],
+      "is_accepted": true
+    },
+    {
+      "name": "frame_0040.jpg",
+      "path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_61ca2229\\attempt_1_denser_frames\\dense\\images\\frame_0040.jpg",
+      "sharpness": 43.430213009642216,
+      "luminance": 124.29478692170818,
+      "center_variance": 5435.892064241078,
+      "clipping_score": 0.006081946222791294,
+      "color_match_score": 0.14269217081850533,
+      "resolution": [
+        2000,
+        1124
+      ],
+      "is_accepted": true
+    },
+    {
+      "name": "frame_0041.jpg",
+      "path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_61ca2229\\attempt_1_denser_frames\\dense\\images\\frame_0041.jpg",
+      "sharpness": 40.820276320069404,
+      "luminance": 126.93873887900357,
+      "center_variance": 5420.965172043211,
+      "clipping_score": 0.003040973111395647,
+      "color_match_score": 0.13572775800711745,
+      "resolution": [
+        2000,
+        1124
+      ],
+      "is_accepted": true
+    },
+    {
+      "name": "frame_0042.jpg",
+      "path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_61ca2229\\attempt_1_denser_frames\\dense\\images\\frame_0042.jpg",
+      "sharpness": 31.36681316680387,
+      "luminance": 131.10018638790035,
+      "center_variance": 5445.018690773645,
+      "clipping_score": 0.002400768245838668,
+      "color_match_score": 0.143298487544484,
+      "resolution": [
+        2000,
+        1124
+      ],
+      "is_accepted": true
+    },
+    {
+      "name": "frame_0043.jpg",
+      "path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_61ca2229\\attempt_1_denser_frames\\dense\\images\\frame_0043.jpg",
+      "sharpness": 34.34709606922325,
+      "luminance": 133.9843078291815,
+      "center_variance": 5514.665103828469,
+      "clipping_score": 0.0006402048655569782,
+      "color_match_score": 0.14801023131672597,
+      "resolution": [
+        2000,
+        1124
+      ],
+      "is_accepted": true
+    },
+    {
+      "name": "frame_0044.jpg",
+      "path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_61ca2229\\attempt_1_denser_frames\\dense\\images\\frame_0044.jpg",
+      "sharpness": 37.74369668993534,
+      "luminance": 134.04510676156585,
+      "center_variance": 5088.957181869075,
+      "clipping_score": 0.0046414852752880926,
+      "color_match_score": 0.14663967971530248,
+      "resolution": [
+        2000,
+        1124
+      ],
+      "is_accepted": true
+    },
+    {
+      "name": "frame_0045.jpg",
+      "path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_61ca2229\\attempt_1_denser_frames\\dense\\images\\frame_0045.jpg",
+      "sharpness": 39.63424892719111,
+      "luminance": 134.84582829181494,
+      "center_variance": 5341.724996808233,
+      "clipping_score": 0.006241997439180537,
+      "color_match_score": 0.1595137900355872,
+      "resolution": [
+        2000,
+        1124
+      ],
+      "is_accepted": true
+    },
+    {
+      "name": "frame_0046.jpg",
+      "path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_61ca2229\\attempt_1_denser_frames\\dense\\images\\frame_0046.jpg",
+      "sharpness": 64.11708709275466,
+      "luminance": 135.01137455516013,
+      "center_variance": 5488.864655866516,
+      "clipping_score": 0.007522407170294494,
+      "color_match_score": 0.16757651245551602,
+      "resolution": [
+        2000,
+        1124
+      ],
+      "is_accepted": true
+    }
+  ],
+  "rejected_frames": []
+}
+
+--- REJECTED TEXTURE FRAMES ---
+[]
+
+--- TEXTURE QUALITY REPORT ---
+{
+  "black_pixel_ratio": 0.12503504753112793,
+  "near_black_ratio": 0.14139187335968018,
+  "near_white_ratio": 0.029489994049072266,
+  "dominant_color_ratio": 0.7717306613922119,
+  "dominant_background_color_ratio": 0.7953796982765198,
+  "atlas_coverage_ratio": 1.0,
+  "default_fill_or_flat_color_ratio": 0.006785452365875244,
+  "alpha_empty_ratio": 0.0,
+  "neon_artifact_ratio": 0.0007157325744628906,
+  "average_luminance": 0.49938751141566845,
+  "expected_product_color_match_score": 0.7650753557682037,
+  "texture_quality_status": "fail",
+  "texture_quality_grade": "F",
+  "texture_quality_reasons": [
+    "Excessive background color contamination: 0.80 > 0.25"
+  ],
+  "preview_path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\cleaned\\job_cap_61ca2229\\texturing\\texture_atlas_preview.png",
+  "histogram_path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\cleaned\\job_cap_61ca2229\\texturing\\texture_atlas_histogram.json"
+}
+
+--- TEXTURE DEBUG FILES ---
+
+FullName                           
+--------                           
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+C:\Users\Lenovo\.gemini\antigrav...
+
+
