@@ -134,7 +134,16 @@ def atomic_write_json(file_path: str | Path, data: Any, indent: int = 2):
         temp_name = tf.name
 
     try:
-        os.replace(temp_name, str(path))
+        # Retry logic for Windows file system lag/locks
+        max_retries = 5
+        for i in range(max_retries):
+            try:
+                os.replace(temp_name, str(path))
+                break
+            except PermissionError:
+                if i == max_retries - 1:
+                    raise
+                time.sleep(0.1 * (i + 1))
     except Exception:
         if os.path.exists(temp_name):
             os.remove(temp_name)

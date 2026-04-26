@@ -288,54 +288,67 @@ class AssetCleaner:
                         job_id, pre_dec_stats["pre_decimation_face_count"], pre_dec_stats["post_decimation_face_count"])
             work_mesh_path = str(pre_decimate_path)
 
-        # 2) Object Isolation
-        logger.info("[%s] Starting isolation on %s", job_id, work_mesh_path)
-        mesh = trimesh.load(work_mesh_path, process=False)
-        if isinstance(mesh, trimesh.Scene): mesh = mesh.dump(concatenate=True)
-        if len(mesh.vertices) == 0: raise ValueError("Empty mesh")
+        try:
+            # 2) Object Isolation
+            logger.info("[%s] Starting isolation on %s", job_id, work_mesh_path)
+            mesh = trimesh.load(work_mesh_path, process=False)
+            if isinstance(mesh, trimesh.Scene): mesh = mesh.dump(concatenate=True)
+            if len(mesh.vertices) == 0: raise ValueError("Empty mesh")
 
-        isolated_mesh, isolation_stats = self.isolator.isolate_product(mesh)
-        if len(isolated_mesh.faces) == 0: raise ValueError(f"Isolation failed: {isolation_stats.get('object_isolation_status')}")
-        isolated_mesh.export(str(isolation_debug_path))
-        logger.info("[%s] Isolation completed. Resulting faces: %d", job_id, len(isolated_mesh.faces))
+            isolated_mesh, isolation_stats = self.isolator.isolate_product(mesh)
+            if len(isolated_mesh.faces) == 0: raise ValueError(f"Isolation failed: {isolation_stats.get('object_isolation_status')}")
+            isolated_mesh.export(str(isolation_debug_path))
+            logger.info("[%s] Isolation completed. Resulting faces: %d", job_id, len(isolated_mesh.faces))
 
-        # 3) Remeshing/Decimation
-        logger.info("[%s] Starting remesher (profile=%s)", job_id, profile.name)
-        decimation_stats = self.remesher.process(str(isolation_debug_path), str(pre_aligned_path), profile)
-        final_polycount = decimation_stats["post_decimation_face_count"]
-        logger.info("[%s] Remesher completed. Final faces: %d", job_id, final_polycount)
+            # 3) Remeshing/Decimation
+            logger.info("[%s] Starting remesher (profile=%s)", job_id, profile.name)
+            decimation_stats = self.remesher.process(str(isolation_debug_path), str(pre_aligned_path), profile)
+            final_polycount = decimation_stats["post_decimation_face_count"]
+            logger.info("[%s] Remesher completed. Final faces: %d", job_id, final_polycount)
 
-        # 4) Alignment & BBox
-        logger.info("[%s] Starting alignment and normalization", job_id)
-        _, pivot_offset = self.alignment.align_to_ground(str(pre_aligned_path), str(cleaned_mesh_path))
-        bbox_min, bbox_max = self.bbox_extractor.extract(str(cleaned_mesh_path))
+            # 4) Alignment & BBox
+            logger.info("[%s] Starting alignment and normalization", job_id)
+            _, pivot_offset = self.alignment.align_to_ground(str(pre_aligned_path), str(cleaned_mesh_path))
+            bbox_min, bbox_max = self.bbox_extractor.extract(str(cleaned_mesh_path))
 
-        metadata = self.normalizer.generate_metadata(bbox_min, bbox_max, pivot_offset, final_polycount)
-        self.normalizer.save_metadata(metadata, str(metadata_path))
+            metadata = self.normalizer.generate_metadata(bbox_min, bbox_max, pivot_offset, final_polycount)
+            self.normalizer.save_metadata(metadata, str(metadata_path))
 
-        has_uv, has_material = self._inspect_visuals(str(cleaned_mesh_path))
-        
-        logger.info("[%s] Cleanup pipeline finished. Output: %s", job_id, cleaned_mesh_path)
-        
-        cleanup_stats = {
-            "isolation": isolation_stats,
-            "decimation": decimation_stats,
-            "final_polycount": int(final_polycount),
-            "poly_count": int(final_polycount), # Alias for validator
-            "bbox_min": bbox_min,
-            "bbox_max": bbox_max,
-            "bbox": {"x": bbox_max["x"]-bbox_min["x"], "y": bbox_max["y"]-bbox_min["y"], "z": bbox_max["z"]-bbox_min["z"]},
-            "ground_offset": abs(pivot_offset["z"]),
-            "cleaned_mesh_path": str(cleaned_mesh_path),
-            "metadata_path": str(metadata_path),
-            "cleaned_texture_path": str(raw_texture_path) if raw_texture_path else None,
-            "texture_path": str(raw_texture_path) if raw_texture_path else None, # Alias
-            "delivery_profile": profile.name,
-            "has_uv": bool(has_uv),
-            "has_material": bool(has_material),
-            "texture_input_mesh_path": str(isolation_debug_path),
-            "oversized_raw_mesh": oversized_raw_mesh,
-            "raw_mesh_faces": raw_faces,
-            "raw_mesh_vertices": raw_verts,
-        }
-        return metadata, cleanup_stats, str(cleaned_mesh_path)
+            has_uv, has_material = self._inspect_visuals(str(cleaned_mesh_path))
+            
+            logger.info("[%s] Cleanup pipeline finished. Output: %s", job_id, cleaned_mesh_path)
+            
+            cleanup_stats = {
+                "isolation": isolation_stats,
+                "decimation": decimation_stats,
+                "final_polycount": int(final_polycount),
+                "poly_count": int(final_polycount), # Alias for validator
+                "bbox_min": bbox_min,
+                "bbox_max": bbox_max,
+                "bbox": {"x": bbox_max["x"]-bbox_min["x"], "y": bbox_max["y"]-bbox_min["y"], "z": bbox_max["z"]-bbox_min["z"]},
+                "ground_offset": abs(pivot_offset["z"]),
+                "cleaned_mesh_path": str(cleaned_mesh_path),
+                "metadata_path": str(metadata_path),
+                "cleaned_texture_path": str(raw_texture_path) if raw_texture_path else None,
+                "texture_path": str(raw_texture_path) if raw_texture_path else None, # Alias
+                "delivery_profile": profile.name,
+                "has_uv": bool(has_uv),
+                "has_material": bool(has_material),
+                "texture_input_mesh_path": str(isolation_debug_path),
+                "oversized_raw_mesh": oversized_raw_mesh,
+                "raw_mesh_faces": raw_faces,
+                "raw_mesh_vertices": raw_verts,
+            }
+            return metadata, cleanup_stats, str(cleaned_mesh_path)
+
+        except MemoryError:
+            logger.error("[%s] Cleanup failed with MemoryError (OOM) during part isolation or remeshing.", job_id)
+            return None, {
+                "status": "failed_memory_limit",
+                "cleanup_failure_type": "post_decimation_oom",
+                "raw_mesh_faces": raw_faces,
+                "raw_mesh_vertices": raw_verts,
+                "recommended_poisson_depth": settings.recon_poisson_depth_retry if raw_faces > 1000000 else 8,
+                "retryable_from_fused_ply": True,
+                "reason": "System ran out of memory during mesh cleanup. Lowering Poisson density is recommended."
+            }, ""

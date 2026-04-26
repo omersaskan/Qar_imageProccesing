@@ -135,5 +135,44 @@ def test_remesh_retry_from_fused_ply(mock_remesh, tmp_path):
         assert "PROCESSING BUDGET EXCEEDED" in log_content
         assert "depth=8, trim=8" in log_content
 
+def test_colmap_adapter_poisson_command_generation(tmp_path):
+    """Verify that poisson_remesh_only generates the correct COLMAP command."""
+    adapter = COLMAPAdapter()
+    output_dir = tmp_path / "recon"
+    dense_dir = output_dir / "dense"
+    dense_dir.mkdir(parents=True)
+    fused_ply = dense_dir / "fused.ply"
+    fused_ply.write_text("dummy")
+    
+    # Mock _run_command to capture the command
+    captured_cmd = []
+    def mock_run_command(cmd, cwd, log, timeout=None):
+        captured_cmd.append(cmd)
+    
+    adapter._run_command = mock_run_command
+    # Mock _is_valid_mesh_candidate to return True
+    adapter._is_valid_mesh_candidate = MagicMock(return_value=True)
+    
+    log_file = MagicMock()
+    adapter.poisson_remesh_only(output_dir, log_file, depth=9, trim=8)
+    
+    assert len(captured_cmd) == 1
+    cmd = captured_cmd[0]
+    
+    # Check flags
+    # Use find to check if substrings exist in the command list
+    assert any("--input_path" in part for part in cmd)
+    assert any(str(fused_ply) in part for part in cmd)
+    assert any("--output_path" in part for part in cmd)
+    assert any(str(dense_dir / "meshed-poisson.ply") in part for part in cmd)
+    assert any("--PoissonMeshing.depth" in part for part in cmd)
+    
+    # Find depth value
+    for i, part in enumerate(cmd):
+        if "--PoissonMeshing.depth" in part:
+            assert cmd[i+1] == "9"
+        if "--PoissonMeshing.trim" in part:
+            assert cmd[i+1] == "8"
+
 if __name__ == "__main__":
     pytest.main([__file__])
