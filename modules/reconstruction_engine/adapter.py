@@ -1369,40 +1369,7 @@ class COLMAPAdapter(ReconstructionAdapter):
         selected_mesh = self.mesh_selector.select_best_mesh(candidates) or candidates[0]
         selected_stats = self._mesh_stats(selected_mesh)
         
-        # SPRINT 5: Integrated Real Texturing for COLMAP outputs
-        texture_path = None
-        if settings.openmvs_textured_output and self.texturer.is_available():
-            try:
-                log_file.write("\n--- SPRINT 5: Starting Real Texture Generation Path ---\n")
-                
-                # Ensure we have undistorted images and a valid project for OpenMVS
-                # We need dense_dir to contain images/ and a valid COLMAP project
-                
-                # 1) Refine masks for texturing (erode/reject clipped)
-                if available_masks_dir:
-                    self._refine_texture_masks(prep, input_frames, log_file)
-                
-                # 2) Run OpenMVS Texturing on the COLMAP Poisson mesh
-                tex_results = self.texturer.run_texturing(
-                    colmap_workspace=output_dir,
-                    dense_workspace=dense_dir,
-                    selected_mesh=selected_mesh,
-                    output_dir=dense_dir # Output to dense folder
-                )
-                
-                textured_mesh = tex_results.get("textured_mesh_path")
-                if textured_mesh and os.path.exists(textured_mesh):
-                    log_file.write(f"TextureMesh successful: {textured_mesh}\n")
-                    selected_mesh = textured_mesh # Switch to the textured OBJ
-                    texture_path = tex_results.get("texture_atlas_paths")[0] if tex_results.get("texture_atlas_paths") else None
-                else:
-                    log_file.write("Warning: TextureMesh finished but output mesh missing. Using geometry-only.\n")
-                    
-            except Exception as tex_err:
-                log_file.write(f"Warning: Real texturing failed: {tex_err}. Falling back to geometry.\n")
-
-        if not texture_path:
-            texture_path = self._discover_texture_candidate(output_dir)
+        texture_path = self._discover_texture_candidate(output_dir)
 
         return {
             "mesh_path": str(selected_mesh),

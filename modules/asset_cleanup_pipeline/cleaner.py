@@ -335,6 +335,7 @@ class AssetCleaner:
                 "has_uv": bool(has_uv),
                 "has_material": bool(has_material),
                 "texture_input_mesh_path": str(isolation_debug_path),
+                "pre_aligned_mesh_path": str(pre_aligned_path),
                 "oversized_raw_mesh": oversized_raw_mesh,
                 "raw_mesh_faces": raw_faces,
                 "raw_mesh_vertices": raw_verts,
