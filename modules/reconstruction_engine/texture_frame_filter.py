@@ -29,7 +29,16 @@ class TextureFrameFilter:
              shutil.rmtree(selected_dir)
         selected_dir.mkdir(parents=True, exist_ok=True)
         
-        selected_stats = []
+        # SPRINT 5C: Mask-aware source improvement
+        masked_dir = output_dir / "selected_images_masked"
+        if masked_dir.exists():
+            shutil.rmtree(masked_dir)
+        masked_dir.mkdir(parents=True, exist_ok=True)
+        
+        mask_folder = image_folder.parent / "masks"
+        has_masks = mask_folder.exists()
+
+        analyzed_stats = []
         rejected_stats = []
         
         for img_path in images:
@@ -47,33 +56,83 @@ class TextureFrameFilter:
             rejection_reasons = self._get_rejection_reasons(stats, expected_color)
             if not rejection_reasons:
                 stats["is_accepted"] = True
-                selected_stats.append(stats)
-                # Copy to filtered dir
-                shutil.copy2(img_path, selected_dir / img_path.name)
+                # Calculate ranking score
+                # Normalized components: 
+                # sharpness (capped at 500), luminance (centered at 128), color_match (0-1)
+                s_norm = min(stats["sharpness"] / 500.0, 1.0)
+                l_norm = 1.0 - abs(stats["luminance"] - 128) / 128.0
+                c_norm = stats["color_match_score"]
+                
+                stats["ranking_score"] = (s_norm * 0.4) + (l_norm * 0.2) + (c_norm * 0.4)
+                analyzed_stats.append(stats)
             else:
                 stats["is_accepted"] = False
                 stats["rejection_reasons"] = rejection_reasons
                 rejected_stats.append(stats)
                 
+        # SPRINT 5C: Rank and select top N
+        analyzed_stats.sort(key=lambda x: x.get("ranking_score", 0.0), reverse=True)
+        
+        # Hard limit: top 20 frames to avoid over-sampling background
+        target_count = 20
+        selected_stats = analyzed_stats[:target_count]
+        
+        # If we selected some, the rest of analyzed are effectively rejected for "budget"
+        for s in analyzed_stats[target_count:]:
+            s["is_accepted"] = False
+            s["rejection_reasons"] = ["below_top_n_threshold"]
+            rejected_stats.append(s)
+
         # Ensure we have at least SOME images. If too restrictive, fallback to best of bad.
         fallback_used = False
         if not selected_stats and images:
              logger.warning("All images rejected by filter. Falling back to top 10 by sharpness.")
              fallback_used = True
-             # Simple fallback to prevent complete failure
              all_analyzed = sorted([s for s in rejected_stats if "sharpness" in s], key=lambda x: x["sharpness"], reverse=True)
              for s in all_analyzed[:10]:
                  s["is_accepted"] = True
                  s["fallback"] = True
                  selected_stats.append(s)
-                 shutil.copy2(Path(s["path"]), selected_dir / s["name"])
+
+        # Final copy and masking
+        for s in selected_stats:
+            img_path = Path(s["path"])
+            dest_path = selected_dir / img_path.name
+            shutil.copy2(img_path, dest_path)
+            
+            # Masking logic
+            if has_masks:
+                mask_path = mask_folder / (img_path.stem + ".png")
+                if mask_path.exists():
+                    try:
+                        img = cv2.imread(str(img_path))
+                        mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
+                        if img is not None and mask is not None:
+                            # Resize mask if needed
+                            if mask.shape[:2] != img.shape[:2]:
+                                mask = cv2.resize(mask, (img.shape[1], img.shape[0]), interpolation=cv2.INTER_NEAREST)
+                            
+                            # Neutralize background to white/cream (approx #F5F5DC)
+                            # Using BGR: (220, 245, 245) for cream
+                            img[mask == 0] = [220, 245, 245]
+                            cv2.imwrite(str(masked_dir / img_path.name), img)
+                            s["masked_source_generated"] = True
+                        else:
+                            s["masked_source_generated"] = False
+                    except Exception as e:
+                        logger.warning(f"Failed to generate masked image for {img_path.name}: {e}")
+                        s["masked_source_generated"] = False
+                else:
+                    s["masked_source_generated"] = False
 
         # Diagnostics
         report = {
             "selected_count": len(selected_stats),
             "rejected_count": len(rejected_stats),
             "fallback_used": fallback_used,
+            "has_masks_available": has_masks,
             "selected_images_dir": str(selected_dir),
+            "masked_images_dir": str(masked_dir) if has_masks else None,
             "selected_frames": selected_stats,
             "rejected_frames": rejected_stats
         }
@@ -103,7 +162,6 @@ class TextureFrameFilter:
         
         # 3. Subject Detection (Heuristic if no mask)
         # We look for non-neutral pixels or edges in the center
-        # For now, let's use a simple saliency or center-weighted variance
         center_h, center_w = h // 4, w // 4
         center_roi = gray[center_h:3*center_h, center_w:3*center_w]
         center_variance = np.var(center_roi)
@@ -118,10 +176,10 @@ class TextureFrameFilter:
         color_match = 1.0
         if expected_color == "white_cream":
             hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-            s = hsv[:,:,1]
-            v = hsv[:,:,2]
+            s_chan = hsv[:,:,1]
+            v_chan = hsv[:,:,2]
             # White/Cream should be high value, low saturation
-            white_mask = (v > 180) & (s < 50)
+            white_mask = (v_chan > 180) & (s_chan < 50)
             color_match = np.count_nonzero(white_mask) / (h * w)
 
         return {
@@ -139,16 +197,17 @@ class TextureFrameFilter:
         reasons = []
         if "error" in stats: return ["load_failed"]
         
-        if stats["sharpness"] < self.min_sharpness:
+        # Stricter thresholds for SPRINT 5C
+        if stats["sharpness"] < 25.0:
             reasons.append(f"too_blurry({stats['sharpness']:.1f})")
-        if stats["luminance"] < self.min_luminance:
+        if stats["luminance"] < 40.0:
             reasons.append(f"too_dark({stats['luminance']:.1f})")
-        if stats["luminance"] > self.max_luminance:
+        if stats["luminance"] > 250.0:
             reasons.append(f"too_bright({stats['luminance']:.1f})")
-        if stats["clipping_score"] > 0.1:
+        if stats["clipping_score"] > 0.15:
             reasons.append(f"subject_clipped({stats['clipping_score']:.2f})")
             
-        if expected_color == "white_cream" and stats["color_match_score"] < 0.1:
+        if expected_color == "white_cream" and stats["color_match_score"] < 0.22:
             reasons.append(f"color_mismatch_white_cream({stats['color_match_score']:.2f})")
             
         return reasons
@@ -158,7 +217,7 @@ class TextureFrameFilter:
         
         thumbnails = []
         # Limit to 16 best frames for the sheet
-        top_frames = sorted(selected_stats, key=lambda x: x["sharpness"], reverse=True)[:16]
+        top_frames = sorted(selected_stats, key=lambda x: x.get("ranking_score", 0.0), reverse=True)[:16]
         
         for s in top_frames:
             img = cv2.imread(s["path"])

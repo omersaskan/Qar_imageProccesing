@@ -184,13 +184,69 @@ class TexturingService:
         textured_path = texture_results["textured_mesh_path"]
         generated_textures = texture_results.get("texture_atlas_paths", [])
 
-        # SPRINT 5C: Atlas Repair Service
+        # SPRINT 5C: Atlas Repair Service + Retry Loop
         if generated_textures:
             from modules.operations.atlas_repair_service import AtlasRepairService
             repair_service = AtlasRepairService()
             primary_atlas = generated_textures[0]
             repair_results = repair_service.repair_atlas(primary_atlas, expected_color=expected_color)
             
+            # Check for background contamination failure
+            stats = repair_results.get("repaired_stats") or repair_results.get("stats") or {}
+            bg_ratio = stats.get("dominant_background_color_ratio", 0.0)
+            
+            # If fail due to background contamination, try stricter retry
+            if bg_ratio > 0.25: # Hard limit for white_cream
+                logger.warning(f"Excessive background contamination ({bg_ratio:.3f} > 0.25). Retrying with stricter frames...")
+                
+                # Retry 1: Top 12 frames
+                try:
+                    retry_results = texturer.run_texturing(
+                        colmap_workspace=colmap_dir,
+                        dense_workspace=colmap_dir / "dense",
+                        selected_mesh=cleanup_stats["pre_aligned_mesh_path"],
+                        output_dir=texturing_dir / "retry_top12",
+                        expected_color=expected_color,
+                        top_n=12
+                    )
+                    if retry_results.get("texture_atlas_paths"):
+                        primary_atlas = retry_results["texture_atlas_paths"][0]
+                        repair_results = repair_service.repair_atlas(primary_atlas, expected_color=expected_color)
+                        stats = repair_results.get("repaired_stats") or repair_results.get("stats") or {}
+                        bg_ratio = stats.get("dominant_background_color_ratio", 0.0)
+                        
+                        if bg_ratio <= 0.25:
+                            logger.info("Retry with Top 12 frames successful.")
+                            texture_results = retry_results
+                            generated_textures = retry_results["texture_atlas_paths"]
+                        else:
+                            logger.warning(f"Retry with Top 12 frames still contaminated ({bg_ratio:.3f}). Trying masked sources...")
+                            
+                            # Retry 2: Masked sources
+                            # We need to find the masked_images_dir from previous run if possible
+                            # Actually, we can just point to it if it exists
+                            masked_images_dir = texturing_dir / "selected_images_masked"
+                            if masked_images_dir.exists() and any(masked_images_dir.glob("*.jpg")):
+                                retry_masked_results = texturer.run_texturing(
+                                    colmap_workspace=colmap_dir,
+                                    dense_workspace=colmap_dir / "dense",
+                                    selected_mesh=cleanup_stats["pre_aligned_mesh_path"],
+                                    output_dir=texturing_dir / "retry_masked",
+                                    expected_color=expected_color,
+                                    image_folder_override=masked_images_dir
+                                )
+                                if retry_masked_results.get("texture_atlas_paths"):
+                                    primary_atlas = retry_masked_results["texture_atlas_paths"][0]
+                                    repair_results = repair_service.repair_atlas(primary_atlas, expected_color=expected_color)
+                                    stats = repair_results.get("repaired_stats") or repair_results.get("stats") or {}
+                                    bg_ratio = stats.get("dominant_background_color_ratio", 0.0)
+                                    
+                                    logger.info(f"Retry with masked sources: bg_ratio={bg_ratio:.3f}")
+                                    texture_results = retry_masked_results
+                                    generated_textures = retry_masked_results["texture_atlas_paths"]
+                except Exception as retry_exc:
+                    logger.warning(f"Texturing retry failed: {retry_exc}")
+
             if repair_results["status"] == "repaired":
                 logger.info(f"Using repaired atlas: {repair_results['repaired_path']}")
                 # Replace the primary atlas in the results
@@ -206,6 +262,7 @@ class TexturingService:
                 from modules.utils.file_persistence import atomic_write_json
                 report_path = texturing_dir / "texture_quality_report.json"
                 atomic_write_json(report_path, final_texture_stats)
+                cleanup_stats["texture_quality_report_path"] = str(report_path)
 
         # Verify UV presence before committing to "real" status.
         has_uv = self._check_uv(textured_path, trimesh)

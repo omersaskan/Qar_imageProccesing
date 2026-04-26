@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Dict, Any
 from modules.asset_cleanup_pipeline.normalizer import NormalizedMetadata
 from modules.qa_validation.validator import AssetValidator
@@ -34,6 +35,24 @@ class IntegrationFlow:
             input_data["has_material"] = bool(cleanup_stats.get("has_material", False))
             input_data["texture_integrity_status"] = cleanup_stats.get("texture_integrity_status", "missing")
             input_data["material_semantic_status"] = cleanup_stats.get("material_semantic_status", "geometry_only")
+            
+            # SPRINT 5C: Load and merge texture quality metrics
+            report_path = cleanup_stats.get("texture_quality_report_path")
+            if report_path and Path(report_path).exists():
+                import json
+                try:
+                    with open(report_path, "r", encoding="utf-8") as f:
+                        report_data = json.load(f)
+                        input_data.update(report_data)
+                        # Ensure the validator sees the status
+                        if "status" in report_data and "texture_quality_status" not in input_data:
+                            input_data["texture_quality_status"] = report_data["status"]
+                except Exception:
+                    pass
+
+            # Map texture path for analysis fallback
+            if "texture_path" not in input_data:
+                input_data["texture_path"] = cleanup_stats.get("cleaned_texture_path") or cleanup_stats.get("texture_path")
 
         # 2. Override with final export truth (The Ultimate Truth)
         if export_report:
@@ -57,6 +76,11 @@ class IntegrationFlow:
             input_data["delivery_ready"] = export_report.get("delivery_ready", False)
 
         input_data.update(overrides)
+        
+        # Final cleanup for texture_path
+        if not input_data.get("texture_path") and (cleanup_stats or {}).get("cleaned_texture_path"):
+            input_data["texture_path"] = cleanup_stats["cleaned_texture_path"]
+
         return input_data
 
     @staticmethod

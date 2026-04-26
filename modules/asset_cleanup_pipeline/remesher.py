@@ -73,8 +73,9 @@ class Remesher:
             try:
                 if has_uv_init:
                     # For textured meshes, we use trimesh simplify which attempts to preserve UVs
-                    # We use a conservative target if it's very high
+                    # We use a conservative target if it's very high, but MUST stay below hard limit
                     actual_target = max(target_faces, int(pre_faces * 0.5)) if profile.name == "mobile_high" else target_faces
+                    actual_target = min(actual_target, profile.face_count_limit)
                     
                     candidate = mesh.simplify_quadric_decimation(actual_target)
                     has_uv_post, has_mat_post = self._inspect_visuals(candidate)

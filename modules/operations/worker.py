@@ -807,10 +807,10 @@ class IngestionWorker:
         )
 
         try:
-            self.exporter.export(
+            export_metrics = self.exporter.export(
                 mesh_path=session.cleanup_mesh_path,
                 output_path=str(blob_path),
-                profile_name="standard",
+                profile_name=cleanup_stats.get("delivery_profile", "mobile_high"), # Use actual profile
                 texture_path=texture_path if texture_path_exists else None,
                 metadata=metadata,
             )
@@ -821,11 +821,18 @@ class IngestionWorker:
                 f"GLB Export failed: {type(e).__name__}: {e}\n{traceback.format_exc()[-4000:]}"
             )
 
+        # Persist metrics immediately after export
+        reports_dir = self.session_manager.get_capture_path(session.session_id) / "reports"
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        export_metrics_path = reports_dir / "export_metrics.json"
+        atomic_write_json(export_metrics_path, export_metrics)
+
         return self._persist_session(
             session,
             new_status=AssetStatus.EXPORTED,
             asset_id=asset_id,
             export_blob_path=str(blob_path),
+            export_metrics_path=str(export_metrics_path),
             last_pipeline_stage=AssetStatus.EXPORTED.value,
             failure_reason=None,
         )
@@ -847,16 +854,21 @@ class IngestionWorker:
         if not session.export_blob_path:
             raise IrrecoverableError(f"Exported GLB path missing for {session.session_id}")
 
-        try:
-            export_metrics = self.exporter.inspect_exported_asset(session.export_blob_path)
-        except Exception as e:
-            raise IrrecoverableError(f"Exported GLB inspection failed: {e}")
+        # ── TICKET-005: Use persisted metrics if available, else re-inspect ──
+        if session.export_metrics_path and Path(session.export_metrics_path).exists():
+            export_metrics = self._load_export_metrics(session)
+        else:
+            try:
+                export_metrics = self.exporter.inspect_exported_asset(session.export_blob_path)
+            except Exception as e:
+                raise IrrecoverableError(f"Exported GLB inspection failed: {e}")
 
-        # ── TICKET-005: Persist metrics as session artifact ────────────────
-        reports_dir = self.session_manager.get_capture_path(session.session_id) / "reports"
-        reports_dir.mkdir(parents=True, exist_ok=True)
-        export_metrics_path = reports_dir / "export_metrics.json"
-        atomic_write_json(export_metrics_path, export_metrics)
+            # Persist if it was missing
+            reports_dir = self.session_manager.get_capture_path(session.session_id) / "reports"
+            reports_dir.mkdir(parents=True, exist_ok=True)
+            export_metrics_path = reports_dir / "export_metrics.json"
+            atomic_write_json(export_metrics_path, export_metrics)
+            session.export_metrics_path = str(export_metrics_path)
 
         primary_texture = (
             manifest.texture_atlas_paths[0] if manifest.texture_atlas_paths else manifest.texture_path

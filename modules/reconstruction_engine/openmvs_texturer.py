@@ -61,6 +61,8 @@ class OpenMVSTexturer:
         selected_mesh: str,
         output_dir: Path,
         expected_color: str = "unknown",
+        image_folder_override: Optional[Path] = None,
+        top_n: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Runs InterfaceCOLMAP and then TextureMesh.
@@ -84,21 +86,40 @@ class OpenMVSTexturer:
 
             log_file.write(f"OpenMVS raw image-folder: {image_folder}\n")
             
-            # SPRINT 5C: Filter images before texturing
-            from .texture_frame_filter import TextureFrameFilter
-            filter = TextureFrameFilter()
-            filter_results = filter.filter_session_images(image_folder, output_dir, expected_color=expected_color)
-            selected_image_folder = filter_results["selected_images_dir"]
-            
-            log_file.write(f"Filtered image-folder: {selected_image_folder}\n")
-            original_images = list(image_folder.glob('*.jpg')) + list(image_folder.glob('*.png'))
-            log_file.write(f"Original image count: {len(original_images)}\n")
-            log_file.write(f"Selected image count: {filter_results['selected_count']}\n")
-            log_file.write(f"Fallback used: {filter_results['fallback_used']}\n")
-            
-            rejected_names = [s["name"] for s in filter_results.get("rejected_frames", [])]
-            if rejected_names:
-                log_file.write(f"Rejected image names: {', '.join(rejected_names)}\n")
+            if image_folder_override:
+                selected_image_folder = image_folder_override
+                log_file.write(f"Using image folder override: {selected_image_folder}\n")
+            else:
+                # SPRINT 5C: Filter images before texturing
+                from .texture_frame_filter import TextureFrameFilter
+                filter = TextureFrameFilter()
+                filter_results = filter.filter_session_images(image_folder, output_dir, expected_color=expected_color)
+                
+                selected_image_folder = Path(filter_results["selected_images_dir"])
+                
+                if top_n and filter_results["selected_count"] > top_n:
+                    # Create a new sub-folder for top N
+                    top_n_dir = output_dir / f"selected_images_top_{top_n}"
+                    if top_n_dir.exists(): shutil.rmtree(top_n_dir)
+                    top_n_dir.mkdir(parents=True, exist_ok=True)
+                    
+                    selected_frames = filter_results.get("selected_frames", [])
+                    # Frames are already ranked in filter_results["selected_frames"]
+                    for s in selected_frames[:top_n]:
+                        shutil.copy2(Path(s["path"]), top_n_dir / s["name"])
+                    
+                    selected_image_folder = top_n_dir
+                    log_file.write(f"Limited to top {top_n} frames: {selected_image_folder}\n")
+
+                log_file.write(f"Filtered image-folder: {selected_image_folder}\n")
+                original_images = list(image_folder.glob('*.jpg')) + list(image_folder.glob('*.png'))
+                log_file.write(f"Original image count: {len(original_images)}\n")
+                log_file.write(f"Selected image count: {len(list(selected_image_folder.glob('*.jpg')))}\n")
+                log_file.write(f"Fallback used: {filter_results['fallback_used']}\n")
+                
+                rejected_names = [s["name"] for s in filter_results.get("rejected_frames", [])]
+                if rejected_names:
+                    log_file.write(f"Rejected image names: {', '.join(rejected_names)}\n")
 
             log_file.write(f"COLMAP workspace: {colmap_workspace}\n")
             log_file.write(f"Dense workspace: {dense_workspace}\n")
