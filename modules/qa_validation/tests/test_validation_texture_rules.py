@@ -80,6 +80,10 @@ def test_validator_overall_decision_for_texture_states():
         "texture_count": 0,
         "delivery_geometry_count": 1,
         "delivery_component_count": 1,
+        "has_position_accessor": True,
+        "has_normal_accessor": True,
+        "has_texcoord_0_accessor": True,
+        "texture_quality_status": "clean",
     }
     rep_degraded = v.validate("asset_1", data_degraded)
     assert rep_degraded.final_decision == "review"
@@ -127,6 +131,10 @@ def test_validator_diffuse_grading():
         "texture_count": 1,
         "delivery_geometry_count": 1,
         "delivery_component_count": 1,
+        "has_position_accessor": True,
+        "has_normal_accessor": True,
+        "has_texcoord_0_accessor": True,
+        "texture_quality_status": "clean",
     }
     rep = v.validate("asset_diffuse", data)
     assert rep.final_decision == "pass"

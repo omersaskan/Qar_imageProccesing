@@ -1,8 +1,88 @@
 import os
+import struct
+import json
 from typing import Dict, Any, Optional
-
 import trimesh
 from modules.asset_cleanup_pipeline.normalizer import NormalizedMetadata
+
+
+def inspect_glb_primitive_attributes(glb_path: str) -> Dict[str, Any]:
+    """
+    STRICT GLB inspector that reads the raw JSON chunk to verify accessors.
+    This avoids trimesh false positives where normals are computed on the fly.
+    """
+    if not os.path.exists(glb_path):
+        raise FileNotFoundError(f"GLB file not found for inspection: {glb_path}")
+
+    with open(glb_path, "rb") as f:
+        # Header (12 bytes): magic (4), version (4), length (4)
+        magic = f.read(4)
+        if magic != b"glTF":
+            # Fallback for plain .gltf files (JSON)
+            f.seek(0)
+            try:
+                gltf = json.load(f)
+            except Exception:
+                raise ValueError(f"Not a valid glTF/GLB file: {glb_path}")
+        else:
+            _version = struct.unpack("<I", f.read(4))[0]
+            _length = struct.unpack("<I", f.read(4))[0]
+
+            # First chunk must be JSON
+            chunk_length = struct.unpack("<I", f.read(4))[0]
+            chunk_type = f.read(4)
+            if chunk_type != b"JSON":
+                # Some GLBs might have padding or different order, but spec says JSON is first.
+                # We'll try to find the JSON chunk.
+                found_json = False
+                f.seek(12)
+                while True:
+                    c_len_raw = f.read(4)
+                    if not c_len_raw: break
+                    c_len = struct.unpack("<I", c_len_raw)[0]
+                    c_type = f.read(4)
+                    if c_type == b"JSON":
+                        json_data = f.read(c_len).decode("utf-8")
+                        gltf = json.loads(json_data)
+                        found_json = True
+                        break
+                    else:
+                        f.seek(c_len, 1)
+                if not found_json:
+                    raise ValueError("Could not find JSON chunk in GLB")
+            else:
+                json_data = f.read(chunk_length).decode("utf-8")
+                gltf = json.loads(json_data)
+
+    has_position = False
+    has_normal = False
+    has_texcoord_0 = False
+    primitive_reports = []
+
+    meshes = gltf.get("meshes", [])
+    for mesh_idx, mesh in enumerate(meshes):
+        for prim_idx, prim in enumerate(mesh.get("primitives", [])):
+            attrs = prim.get("attributes", {})
+            report = {
+                "mesh_index": mesh_idx,
+                "primitive_index": prim_idx,
+                "attributes": list(attrs.keys()),
+            }
+            primitive_reports.append(report)
+
+            if "POSITION" in attrs:
+                has_position = True
+            if "NORMAL" in attrs:
+                has_normal = True
+            if "TEXCOORD_0" in attrs:
+                has_texcoord_0 = True
+
+    return {
+        "has_position_accessor": has_position,
+        "has_normal_accessor": has_normal,
+        "has_texcoord_0_accessor": has_texcoord_0,
+        "primitive_attribute_report": primitive_reports,
+    }
 
 
 class GLBExporter:
@@ -359,24 +439,11 @@ class GLBExporter:
                     texture_count += 1
         
         # Accessor check (POSITION, NORMAL, TEXCOORD_0)
-        # In trimesh, these are derived from the GLTF accessors during load.
-        # We check if they were actually present in the file by looking at what was loaded.
-        # Note: trimesh.load(glb) populates these if they are in the GLB.
-        has_position_accessor = True # Always True if we have vertices
-        has_normal_accessor = False
-        has_texcoord_0_accessor = False
-        
-        for mesh in meshes:
-            # Check if normals were in the file. 
-            # trimesh often calculates them if missing, but we want to know if they were in the BLOB.
-            # However, for our validation logic, we check if they are materialized.
-            if hasattr(mesh, 'vertex_normals') and mesh.vertex_normals is not None and len(mesh.vertex_normals) > 0:
-                 # To be strictly sure they were in the file, we'd need to check the GLTF structure.
-                 # But our export forces them, so inspection should find them.
-                 has_normal_accessor = True
-            
-            if hasattr(mesh.visual, 'uv') and mesh.visual.uv is not None and len(mesh.visual.uv) > 0:
-                 has_texcoord_0_accessor = True
+        # STRICT: Read from raw GLB JSON, not trimesh properties.
+        strict_accessors = inspect_glb_primitive_attributes(glb_path)
+        has_position_accessor = strict_accessors["has_position_accessor"]
+        has_normal_accessor = strict_accessors["has_normal_accessor"]
+        has_texcoord_0_accessor = strict_accessors["has_texcoord_0_accessor"]
                     
         # NOTE: mesh.split() runs connected-component analysis which is O(faces).
         # For very high polycount meshes (>500k faces) this can be slow.
@@ -422,10 +489,15 @@ class GLBExporter:
             "material_count": material_count,
             "texture_integrity_status": integrity_status,
             "material_semantic_status": semantic_status,
+            "basecolor_present": basecolor_present,
+            "metallic_roughness_present": metallic_roughness_present,
+            "normal_present": normal_present,
+            "occlusion_present": occlusion_present,
             "emissive_present": emissive_present,
             "has_position_accessor": bool(has_position_accessor),
             "has_normal_accessor": bool(has_normal_accessor),
             "has_texcoord_0_accessor": bool(has_texcoord_0_accessor),
+            "primitive_attribute_report": strict_accessors["primitive_attribute_report"],
             "material_integrity_status": "present" if has_material else "missing",
             "texture_applied_successfully": bool(has_embedded_texture),
             "bounds_min": {

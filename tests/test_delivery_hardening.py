@@ -2,9 +2,11 @@ import pytest
 import trimesh
 import numpy as np
 import os
+import struct
+import json
 from pathlib import Path
 from PIL import Image
-from modules.export_pipeline.glb_exporter import GLBExporter
+from modules.export_pipeline.glb_exporter import GLBExporter, inspect_glb_primitive_attributes
 from modules.qa_validation.validator import AssetValidator
 from modules.qa_validation.rules import ValidationThresholds
 from modules.qa_validation.texture_quality import TextureQualityAnalyzer
@@ -30,6 +32,55 @@ def create_uv_only_obj(path):
     mesh.visual = trimesh.visual.TextureVisuals(uv=[[0,0], [1,0], [0,1]])
     mesh.export(str(path))
 
+def create_glb_without_normals(source_glb, target_glb):
+    with open(source_glb, "rb") as f:
+        f.read(12)  # skip header
+        chunk_len = struct.unpack("<I", f.read(4))[0]
+        chunk_type = f.read(4)
+        json_data = f.read(chunk_len).decode("utf-8")
+        rest = f.read()
+
+    gltf = json.loads(json_data)
+    for mesh in gltf.get("meshes", []):
+        for prim in mesh.get("primitives", []):
+            if "NORMAL" in prim.get("attributes", {}):
+                del prim["attributes"]["NORMAL"]
+
+    new_json = json.dumps(gltf).encode("utf-8")
+    while len(new_json) % 4 != 0:
+        new_json += b" "
+
+    with open(target_glb, "wb") as f:
+        f.write(b"glTF")
+        f.write(struct.pack("<I", 2))
+        f.write(struct.pack("<I", 12 + 8 + len(new_json) + len(rest)))
+        f.write(struct.pack("<I", len(new_json)))
+        f.write(b"JSON")
+        f.write(new_json)
+        f.write(rest)
+
+def test_strict_glb_inspector(test_dir, dummy_texture):
+    obj_path = test_dir / "base.obj"
+    glb_path = test_dir / "base.glb"
+    no_norm_glb = test_dir / "no_norm.glb"
+    create_uv_only_obj(obj_path)
+    
+    exporter = GLBExporter()
+    exporter.export_to_glb(str(obj_path), dummy_texture, str(glb_path))
+    
+    # 1. Normal GLB should have all accessors
+    res = inspect_glb_primitive_attributes(str(glb_path))
+    assert res["has_position_accessor"] is True
+    assert res["has_normal_accessor"] is True
+    assert res["has_texcoord_0_accessor"] is True
+    
+    # 2. Manipulated GLB should lack NORMAL
+    create_glb_without_normals(str(glb_path), str(no_norm_glb))
+    res_bad = inspect_glb_primitive_attributes(str(no_norm_glb))
+    assert res_bad["has_position_accessor"] is True
+    assert res_bad["has_normal_accessor"] is False
+    assert res_bad["has_texcoord_0_accessor"] is True
+
 def test_glb_normals_and_accessors_fix(test_dir, dummy_texture):
     obj_path = test_dir / "test.obj"
     glb_path = test_dir / "test.glb"
@@ -42,14 +93,9 @@ def test_glb_normals_and_accessors_fix(test_dir, dummy_texture):
     assert res["has_normal_accessor"] is True
     assert res["has_texcoord_0_accessor"] is True
     
-    # Reload and check strictly
-    loaded = trimesh.load(str(glb_path), force="scene")
-    mesh = list(loaded.geometry.values())[0]
-    # In trimesh, if they were in the file, they are available.
-    assert hasattr(mesh, "vertex_normals")
-    assert len(mesh.vertex_normals) > 0
-    assert hasattr(mesh.visual, "uv")
-    assert len(mesh.visual.uv) > 0
+    # Reload and check strictly via JSON
+    strict = inspect_glb_primitive_attributes(str(glb_path))
+    assert strict["has_normal_accessor"] is True
 
 def test_missing_normal_fails_textured_export(test_dir, dummy_texture, monkeypatch):
     obj_path = test_dir / "test_fail.obj"
@@ -58,24 +104,36 @@ def test_missing_normal_fails_textured_export(test_dir, dummy_texture, monkeypat
     
     exporter = GLBExporter()
     
-    # Monkeypatch fix_normals to do nothing to simulate failure to generate normals
-    monkeypatch.setattr(trimesh.Trimesh, "fix_normals", lambda x, **kwargs: None)
-    # Also need to prevent trimesh from automatically calculating them on export if possible, 
-    # but our explicit check is after export logic or during inspection.
+    # Test 1: High-level rejection logic
+    # We create a bad GLB and verify that inspection catches it.
+    exporter.export_to_glb(str(obj_path), dummy_texture, str(glb_path))
+    create_glb_without_normals(str(glb_path), str(glb_path))
     
-    # Actually, our exporter explicitly materializes them. 
-    # To test the failure, we can mock inspection_result["has_normal_accessor"] = False
+    res = exporter.inspect_exported_asset(str(glb_path))
+    assert res["has_normal_accessor"] is False
     
+    # Test 2: Verify the gate raises ValueError if Normal is missing on a textured asset
+    # To trigger the gate inside export_to_glb without deep monkeypatching, 
+    # we can mock the internal trimesh export to produce a bad file.
+    
+    # But since we've already verified inspect_exported_asset is strict, 
+    # and the code in export_to_glb is:
+    #   inspection_result = self.inspect_exported_asset(output_path)
+    #   if actual_texture_success and not inspection_result["has_normal_accessor"]:
+    #       raise ValueError(...)
+    
+    # We'll do a focused test for this gate by mocking inspect_exported_asset.
+    # This is a unit test for the gate itself.
     orig_inspect = exporter.inspect_exported_asset
     def mock_inspect(path):
-        res = orig_inspect(path)
-        res["has_normal_accessor"] = False
-        return res
-    
-    monkeypatch.setattr(exporter, "inspect_exported_asset", mock_inspect)
+        real_res = orig_inspect(path)
+        real_res["has_normal_accessor"] = False
+        return real_res
     
     with pytest.raises(ValueError, match="Textured GLB must have NORMAL accessor"):
-        exporter.export_to_glb(str(obj_path), dummy_texture, str(glb_path))
+        with pytest.MonkeyPatch().context() as mp:
+            mp.setattr(exporter, "inspect_exported_asset", mock_inspect)
+            exporter.export_to_glb(str(obj_path), dummy_texture, str(glb_path))
 
 def test_high_polycount_delivery_gate():
     validator = AssetValidator()
@@ -87,7 +145,10 @@ def test_high_polycount_delivery_gate():
         "material_semantic_status": "pbr_complete",
         "texture_quality_status": "clean",
         "bbox": {"x": 10, "y": 10, "z": 10},
-        "ground_offset": 0.0
+        "ground_offset": 0.0,
+        "has_position_accessor": True,
+        "has_normal_accessor": True,
+        "has_texcoord_0_accessor": True,
     }
     report_pass = validator.validate("id1", data_pass)
     assert report_pass.final_decision == "pass"
@@ -99,7 +160,10 @@ def test_high_polycount_delivery_gate():
         "material_semantic_status": "pbr_complete",
         "texture_quality_status": "clean",
         "bbox": {"x": 10, "y": 10, "z": 10},
-        "ground_offset": 0.0
+        "ground_offset": 0.0,
+        "has_position_accessor": True,
+        "has_normal_accessor": True,
+        "has_texcoord_0_accessor": True,
     }
     report_review = validator.validate("id2", data_review)
     assert report_review.final_decision == "review"
@@ -112,7 +176,10 @@ def test_high_polycount_delivery_gate():
         "material_semantic_status": "pbr_complete",
         "texture_quality_status": "clean",
         "bbox": {"x": 10, "y": 10, "z": 10},
-        "ground_offset": 0.0
+        "ground_offset": 0.0,
+        "has_position_accessor": True,
+        "has_normal_accessor": True,
+        "has_texcoord_0_accessor": True,
     }
     report_fail = validator.validate("id3", data_fail)
     assert report_fail.final_decision == "fail"
@@ -128,7 +195,10 @@ def test_validation_explainability_consistency():
         "material_semantic_status": "geometry_only",
         "texture_quality_status": "clean",
         "bbox": {"x": 10, "y": 10, "z": 10},
-        "ground_offset": 0.0
+        "ground_offset": 0.0,
+        "has_position_accessor": True,
+        "has_normal_accessor": True,
+        "has_texcoord_0_accessor": True,
     }
     report = validator.validate("id_fail", data_fail)
     assert report.final_decision == "fail"
@@ -142,7 +212,10 @@ def test_validation_explainability_consistency():
         "material_semantic_status": "pbr_complete",
         "bbox": {"x": 10, "y": 10, "z": 10},
         "ground_offset": 0.0,
-        "texture_quality_status": "clean"
+        "texture_quality_status": "clean",
+        "has_position_accessor": True,
+        "has_normal_accessor": True,
+        "has_texcoord_0_accessor": True,
     }
     report_p = validator.validate("id_pass", data_pass)
     assert report_p.final_decision == "pass"

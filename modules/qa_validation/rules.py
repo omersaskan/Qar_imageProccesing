@@ -212,6 +212,30 @@ def validate_delivery_mesh(asset_data: Dict[str, Any], thresholds: ValidationThr
 
     return results
 
+def validate_accessors(asset_data: Dict[str, Any]) -> Dict[str, str]:
+    """
+    Enforces existence of critical GLB accessors (POSITION, NORMAL, TEXCOORD_0).
+    """
+    results: Dict[str, str] = {}
+    
+    has_pos = bool(asset_data.get("has_position_accessor", True))
+    has_norm = bool(asset_data.get("has_normal_accessor", False))
+    has_uv = bool(asset_data.get("has_texcoord_0_accessor", False))
+    
+    results["accessor_position"] = "pass" if has_pos else "fail"
+    
+    # NORMAL is mandatory for all delivered assets
+    results["accessor_normal"] = "pass" if has_norm else "fail"
+    
+    # UV is mandatory if textured
+    sem_status = str(asset_data.get("material_semantic_status", "geometry_only")).lower()
+    if sem_status != "geometry_only":
+        results["accessor_uv"] = "pass" if has_uv else "fail"
+    else:
+        results["accessor_uv"] = "pass"
+        
+    return results
+
 def validate_texture_quality(quality_data: Dict[str, Any]) -> str:
     """
     Assesses quality status from TextureQualityAnalyzer.

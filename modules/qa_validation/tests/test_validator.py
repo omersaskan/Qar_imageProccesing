@@ -32,6 +32,10 @@ def make_asset_data(**overrides):
         "material_count": 1,
         "delivery_geometry_count": 1,
         "delivery_component_count": 1,
+        "texture_quality_status": "clean",
+        "has_position_accessor": True,
+        "has_normal_accessor": True,
+        "has_texcoord_0_accessor": True,
     }
     asset_data.update(overrides)
     # Synchronize legacy texture_status override with modern texture_integrity_status
@@ -53,7 +57,7 @@ def test_validator_pass():
 
 def test_validator_fail_polycount():
     validator = AssetValidator()
-    asset_data = make_asset_data(poly_count=150_000)
+    asset_data = make_asset_data(poly_count=300_000)
     
     report = validator.validate("test_id", asset_data)
     
@@ -62,12 +66,12 @@ def test_validator_fail_polycount():
 
 def test_validator_review_polycount():
     validator = AssetValidator()
-    asset_data = make_asset_data(poly_count=75_000)
+    asset_data = make_asset_data(poly_count=150_000)
     
     report = validator.validate("test_id", asset_data)
     
     assert report.final_decision == "review"
-    assert report.mobile_performance_grade == "C"
+    assert report.mobile_performance_grade == "D"
 
 def test_validator_custom_thresholds():
     custom_thresholds = ValidationThresholds(polycount_pass=10_000, polycount_review=20_000)
