@@ -246,6 +246,21 @@ class AssetCleaner:
             logger.warning("[%s] Mesh is oversized (%d faces). Triggering pre-decimation gate.", job_id, raw_faces)
             oversized_raw_mesh = True
             
+            # SPRINT 5: Safe threshold check for Python load
+            if raw_faces > settings.max_faces_python_decimation:
+                logger.error("[%s] Mesh faces (%d) exceed safe Python load limit (%d). Skipping pre-decimation to avoid OOM.", 
+                             job_id, raw_faces, settings.max_faces_python_decimation)
+                return None, {
+                    "status": "failed_memory_limit",
+                    "cleanup_failure_type": "pre_decimation_avoided_oversized",
+                    "raw_mesh_faces": raw_faces,
+                    "raw_mesh_vertices": raw_verts,
+                    "recommended_poisson_depth": settings.recon_poisson_depth - 1,
+                    "recommended_poisson_trim": settings.recon_poisson_trim + 1,
+                    "retryable_from_fused_ply": True,
+                    "reason": f"Mesh faces ({raw_faces}) exceed safe Python load limit. Lower Poisson depth to reduce raw mesh density."
+                }, ""
+
             pre_decimate_path = job_cleaned_dir / "pre_decimated_raw.ply"
             logger.info("[%s] Starting pre-decimation (target=%d faces)...", job_id, settings.recon_pre_cleanup_target_faces)
             
@@ -257,10 +272,16 @@ class AssetCleaner:
             
             if pre_dec_stats["status"] != "success" and pre_dec_stats["status"] != "skipped_already_small":
                 logger.error("[%s] Pre-decimation failed: %s", job_id, pre_dec_stats.get("error"))
+                failure_type = "pre_decimation_oom" if pre_dec_stats["status"] == "failed_memory_limit" else "pre_decimation_error"
                 return None, {
-                    "status": "failed_oversized_mesh",
-                    "raw_faces": raw_faces,
-                    "reason": f"Pre-decimation failed: {pre_dec_stats.get('error')}. Lower RECON_POISSON_DEPTH."
+                    "status": "failed_memory_limit" if pre_dec_stats["status"] == "failed_memory_limit" else "failed_oversized_mesh",
+                    "cleanup_failure_type": failure_type,
+                    "raw_mesh_faces": raw_faces,
+                    "raw_mesh_vertices": raw_verts,
+                    "recommended_poisson_depth": settings.recon_poisson_depth - 1,
+                    "recommended_poisson_trim": settings.recon_poisson_trim + 1,
+                    "retryable_from_fused_ply": True,
+                    "reason": f"Pre-decimation failed: {pre_dec_stats.get('error')}. Lower Poisson depth to reduce raw mesh density."
                 }, ""
 
             logger.info("[%s] Pre-decimation completed: %d -> %d faces", 

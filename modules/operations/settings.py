@@ -122,6 +122,13 @@ class Settings(BaseSettings):
     recon_pre_cleanup_target_faces: int = Field(800_000, validation_alias="RECON_PRE_CLEANUP_TARGET_FACES")
     recon_mobile_target_faces: int = Field(100_000, validation_alias="RECON_MOBILE_TARGET_FACES")
 
+    # Poisson retry settings
+    recon_poisson_depth_retry: int = Field(9, validation_alias="RECON_POISSON_DEPTH_RETRY")
+    recon_poisson_trim_retry: int = Field(8, validation_alias="RECON_POISSON_TRIM_RETRY")
+    
+    # Python load limit (safe threshold for trimesh.load)
+    max_faces_python_decimation: int = Field(1_500_000, validation_alias="MAX_FACES_PYTHON_DECIMATION")
+
     # OpenMVS specific flags
     openmvs_fail_hard: bool = Field(False, validation_alias="OPENMVS_FAIL_HARD")
     openmvs_textured_output: bool = Field(True, validation_alias="OPENMVS_TEXTURED_OUTPUT")

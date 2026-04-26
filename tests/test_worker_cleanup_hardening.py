@@ -126,10 +126,11 @@ def test_oversized_mesh_trigger_gate(worker):
         ""
     ))
     
-    with patch.object(worker, "_mark_session_needs_recapture") as mock_recapture:
+    with patch.object(worker, "_persist_session") as mock_persist:
         worker._handle_cleanup(session)
-        assert mock_recapture.called
-        assert "Too big!" in mock_recapture.call_args[1]["reason"]
+        assert mock_persist.called
+        assert mock_persist.call_args[1]["new_status"] == AssetStatus.PROCESSING_BUDGET_EXCEEDED
+        assert "Too big!" in mock_persist.call_args[1]["failure_reason"]
 
 def test_pre_decimation_failure_handling(worker):
     """Verify that pre-decimation failure returns actionable error."""
@@ -146,9 +147,72 @@ def test_pre_decimation_failure_handling(worker):
         ""
     ))
     
-    with patch.object(worker, "_mark_session_needs_recapture") as mock_recapture:
+    with patch.object(worker, "_persist_session") as mock_persist:
         worker._handle_cleanup(session)
-        assert "MemoryError" in mock_recapture.call_args[1]["reason"]
+        assert mock_persist.called
+        assert mock_persist.call_args[1]["new_status"] == AssetStatus.PROCESSING_BUDGET_EXCEEDED
+        assert "MemoryError" in mock_persist.call_args[1]["failure_reason"]
+
+def test_2_2M_mesh_oom_handling(worker):
+    """Verify that a 2.2M face mesh hitting memory limits is handled as budget exceeded."""
+    session = CaptureSession(session_id="test_session", product_id="p1", operator_id="o1", status=AssetStatus.RECONSTRUCTED)
+    manifest = OutputManifest.model_construct(job_id="j1", mesh_path="m.ply", log_path="l.txt")
+    worker._load_manifest = MagicMock(return_value=manifest)
+    
+    # Simulate the cleanup failure result from cleaner.py for 2.2M face mesh
+    worker.cleaner.process_cleanup = MagicMock(return_value=(
+        None, 
+        {
+            "status": "failed_memory_limit", 
+            "cleanup_failure_type": "pre_decimation_oom",
+            "raw_mesh_faces": 2200000,
+            "recommended_poisson_depth": 9,
+            "retryable_from_fused_ply": True,
+            "reason": "Pre-decimation failed: System ran out of memory while loading huge raw mesh. Lower Poisson depth."
+        }, 
+        ""
+    ))
+    
+    with patch.object(worker, "_persist_session") as mock_persist:
+        worker._handle_cleanup(session)
+        assert mock_persist.called
+        assert mock_persist.call_args[1]["new_status"] == AssetStatus.PROCESSING_BUDGET_EXCEEDED
+        # Ensure it's not marked as recapture_required
+        assert mock_persist.call_args[1]["new_status"] != AssetStatus.RECAPTURE_REQUIRED
+
+def test_budget_exceeded_retry_logic(worker):
+    """Verify that the worker correctly handles PROCESSING_BUDGET_EXCEEDED by retrying."""
+    session = CaptureSession(
+        session_id="test_session", 
+        product_id="p1", 
+        operator_id="o1", 
+        status=AssetStatus.PROCESSING_BUDGET_EXCEEDED,
+        retry_count=0
+    )
+    
+    with patch("modules.reconstruction_engine.job_manager.JobManager") as mock_jm_cls, \
+         patch("modules.reconstruction_engine.runner.ReconstructionRunner") as mock_rr_cls, \
+         patch.object(worker, "_persist_session") as mock_persist:
+        
+        mock_jm = mock_jm_cls.return_value
+        mock_rr = mock_rr_cls.return_value
+        
+        mock_job = MagicMock()
+        mock_job.job_id = "job_test_session"
+        mock_job.job_dir = "data/recon/job_test_session"
+        mock_jm.get_job.return_value = mock_job
+        
+        worker._handle_budget_exceeded_retry(session)
+        
+        # Should call remesh_retry with depth=9 (default retry depth)
+        assert mock_rr.remesh_retry.called
+        args, kwargs = mock_rr.remesh_retry.call_args
+        assert kwargs["depth"] == 9
+        
+        # Should persist back to RECONSTRUCTED
+        assert mock_persist.called
+        assert mock_persist.call_args[1]["new_status"] == AssetStatus.RECONSTRUCTED
+        assert mock_persist.call_args[1]["retry_count"] == 1
 
 if __name__ == "__main__":
     pytest.main([__file__])

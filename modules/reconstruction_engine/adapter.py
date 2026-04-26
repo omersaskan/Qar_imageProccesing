@@ -1336,6 +1336,38 @@ class COLMAPAdapter(ReconstructionAdapter):
             json.dump(diag, f, indent=2)
 
 
+    def poisson_remesh_only(self, output_dir: Path, log_file, depth: int, trim: int) -> str:
+        """
+        Specialized method to rerun only the Poisson meshing step from an existing fused.ply.
+        Used for recovering from oversized meshes without rerunning the entire dense chain.
+        """
+        dense_dir = output_dir / "dense"
+        fused_path = dense_dir / "fused.ply"
+        output_path = dense_dir / "meshed-poisson.ply"
+        
+        if not fused_path.exists():
+            raise FileNotFoundError(f"Cannot rerun meshing: {fused_path} not found.")
+            
+        mesher_timeout = settings.recon_poisson_timeout_sec
+        cmd_mesh = self.builder.poisson_mesher(
+            fused_path,
+            output_path,
+            depth=depth,
+            trim=trim,
+        )
+        
+        log_file.write(f"\n--- Rerunning Poisson mesher (RETRY) ---")
+        log_file.write(f"\nSettings: depth={depth}, trim={trim}\n")
+        self._run_command(cmd_mesh, output_dir, log_file, timeout=mesher_timeout)
+        
+        if self._is_valid_mesh_candidate(output_path):
+            log_file.write("Poisson retry successful.\n")
+            return "poisson"
+        else:
+            log_file.write("Poisson retry failed to produce valid mesh.\n")
+            raise RuntimeReconstructionError("Poisson retry failed.")
+
+
 class OpenMVSAdapter(COLMAPAdapter):
     """
     Advanced adapter that uses COLMAP for SfM and OpenMVS for MVS/Texturing.

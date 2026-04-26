@@ -216,6 +216,8 @@ class IngestionWorker:
                 elif session.status == AssetStatus.VALIDATED:
                     if session.publish_state not in {"draft", "published"}:
                         self._handle_publish(session)
+                elif session.status == AssetStatus.PROCESSING_BUDGET_EXCEEDED:
+                    self._handle_budget_exceeded_retry(session)
                 elif session.status in {AssetStatus.PUBLISHED, AssetStatus.FAILED}:
                     continue
 
@@ -601,6 +603,63 @@ class IngestionWorker:
                 )
             raise RecoverableError(f"Engine failure: {e}")
 
+    def _handle_budget_exceeded_retry(self, session: CaptureSession) -> CaptureSession:
+        """
+        Retries reconstruction with lower Poisson density settings when budget is exceeded.
+        """
+        try:
+            from modules.reconstruction_engine.job_manager import JobManager
+            from modules.reconstruction_engine.runner import ReconstructionRunner
+            from modules.reconstruction_engine.failures import MissingArtifactError, RuntimeReconstructionError
+            
+            logger.info(f"Retrying reconstruction with lower density for {session.session_id}...")
+            
+            manager = JobManager(data_root=str(self.data_root))
+            runner = ReconstructionRunner()
+            job_id = f"job_{session.session_id}"
+            job = manager.get_job(job_id)
+            
+            if not job:
+                raise IrrecoverableError(f"Job {job_id} not found for retry.")
+
+            # Logic to lower settings:
+            retry_count = session.retry_count or 0
+            if retry_count >= 2:
+                # If we already tried twice with lower settings, give up and require recapture
+                return self._mark_session_needs_recapture(
+                    session,
+                    reason=f"Processing budget exceeded even with minimum density settings. Recapture recommended."
+                )
+
+            # SPRINT 5: Retry settings
+            # 1st retry: 9/8
+            # 2nd retry: 8/8
+            depth = settings.recon_poisson_depth_retry if retry_count == 0 else settings.recon_poisson_depth_retry - 1
+            trim = settings.recon_poisson_trim_retry
+            
+            logger.info(f"Retry {retry_count + 1}: depth={depth}, trim={trim}")
+            
+            manager.update_job_status(job.job_id, ReconstructionStatus.RUNNING)
+            manifest = runner.remesh_retry(job, depth=depth, trim=trim)
+            manager.update_job_status(job.job_id, ReconstructionStatus.COMPLETED)
+            
+            # Advance session back to RECONSTRUCTED
+            return self._persist_session(
+                session,
+                new_status=AssetStatus.RECONSTRUCTED,
+                retry_count=retry_count + 1,
+                reconstruction_manifest_path=str(Path(job.manifest_path).resolve()) if job.manifest_path else str(Path(job.job_dir) / "manifest.json"),
+                failure_reason=None,
+                last_pipeline_stage=AssetStatus.RECONSTRUCTED.value,
+            )
+            
+        except Exception as e:
+            logger.error(f"Budget exceeded retry failed for {session.session_id}: {e}")
+            return self._mark_session_needs_recapture(
+                session,
+                reason=f"Failed to retry with lower density: {str(e)}"
+            )
+
     def _handle_cleanup(self, session: CaptureSession) -> CaptureSession:
         """
         Orchestrate cleanup + texturing.
@@ -637,13 +696,17 @@ class IngestionWorker:
             )
 
             if metadata is None:
-                if cleanup_stats.get("status") == "failed_oversized_mesh":
-                    reason = cleanup_stats.get("reason") or f"Mesh is too large for processing ({cleanup_stats.get('raw_faces')} faces)."
-                    return self._mark_session_needs_recapture(
+                status = cleanup_stats.get("status")
+                if status in {"failed_oversized_mesh", "failed_memory_limit"}:
+                    reason = cleanup_stats.get("reason") or f"Processing budget exceeded ({cleanup_stats.get('raw_faces')} faces)."
+                    logger.warning("[%s] %s. Moving to PROCESSING_BUDGET_EXCEEDED.", session.session_id, reason)
+                    return self._persist_session(
                         session,
-                        reason=reason,
+                        new_status=AssetStatus.PROCESSING_BUDGET_EXCEEDED,
+                        failure_reason=reason,
+                        last_pipeline_stage=AssetStatus.CLEANED.value,
                     )
-                raise IrrecoverableError(f"Cleanup failed with no metadata: {cleanup_stats.get('status')}")
+                raise IrrecoverableError(f"Cleanup failed with no metadata: {status}")
 
             if cleanup_stats.get("quality_status") == "quality_fail":
                 cleanup_stats_path = Path(cleaned_mesh_path).parent / "cleanup_stats.json"

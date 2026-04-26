@@ -571,3 +571,49 @@ class ReconstructionRunner:
         manifest_path = job_dir / "manifest.json"
         atomic_write_json(manifest_path, manifest.model_dump(mode="json"))
         return manifest
+
+    def remesh_retry(self, job: ReconstructionJob, depth: int, trim: int) -> OutputManifest:
+        """
+        Retries meshing with different parameters from an existing fused.ply.
+        """
+        job_dir = Path(job.job_dir).resolve()
+        # Find the last attempt directory that has a dense/fused.ply
+        # In practice, for budget exceeded it's usually attempt_0_default or attempt_1_denser_frames
+        attempts = sorted(job_dir.glob("attempt_*"), key=os.path.getmtime, reverse=True)
+        
+        target_attempt = None
+        for attempt in attempts:
+            if (attempt / "dense" / "fused.ply").exists():
+                target_attempt = attempt
+                break
+        
+        if not target_attempt:
+            raise MissingArtifactError("No attempt with fused.ply found for remesh retry.")
+
+        log_path = target_attempt / "reconstruction.log"
+        with open(log_path, "a", encoding="utf-8") as log_file:
+            log_file.write(f"\n--- PROCESSING BUDGET EXCEEDED: Retrying with lower density ---")
+            
+            # We use COLMAPAdapter specifically for Poisson
+            adapter = COLMAPAdapter()
+            mesher_used = adapter.poisson_remesh_only(target_attempt, log_file, depth, trim)
+            
+            # We need to re-validate and update manifest
+            mesh_path = target_attempt / "dense" / "meshed-poisson.ply"
+            
+            # Mock results dict for _finalize_best_attempt
+            results = {
+                "mesh_path": str(mesh_path),
+                "log_path": str(log_path),
+                "mesher_used": mesher_used,
+                "registered_images": 0, # Not strictly needed for manifest update
+                "sparse_points": 0,
+            }
+            
+            return self._finalize_best_attempt(
+                results,
+                job,
+                job_dir,
+                "colmap_dense",
+                elapsed_seconds=0.0 # Not timing retries yet
+            )
