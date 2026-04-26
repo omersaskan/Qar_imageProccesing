@@ -1481,7 +1481,14 @@ class OpenMVSAdapter(COLMAPAdapter):
                     
                     # Data-supported isolation
                     isolated_mesh, iso_stats = isolator.isolate_product(raw_mesh, point_cloud=point_cloud)
-                    log_file.write(f"Isolation: initial_faces={iso_stats.get('initial_faces')}, final_faces={iso_stats.get('final_faces')}\n")
+                    log_file.write(f"Isolation results:\n")
+                    log_file.write(f" - status: {iso_stats.get('object_isolation_status')}\n")
+                    log_file.write(f" - method: {iso_stats.get('object_isolation_method')}\n")
+                    log_file.write(f" - initial faces: {iso_stats.get('initial_faces')}\n")
+                    log_file.write(f" - final faces: {iso_stats.get('final_faces')}\n")
+                    log_file.write(f" - removed face ratio: {iso_stats.get('removed_face_ratio', 0.0):.4f}\n")
+                    log_file.write(f" - mask support ratio: {iso_stats.get('mask_support_ratio', 0.0):.4f}\n")
+                    log_file.write(f" - point cloud support ratio: {iso_stats.get('point_cloud_support_ratio', 0.0):.4f}\n")
                     
                     isolated_mesh.export(str(cleaned_mesh_ply))
                     log_file.write(f"Isolated mesh saved to: {cleaned_mesh_ply.name}\n")
@@ -1490,7 +1497,8 @@ class OpenMVSAdapter(COLMAPAdapter):
                     project_mesh_ply = cleaned_mesh_ply
                     
                 except Exception as iso_err:
-                    log_file.write(f"Warning: Object isolation failed, falling back to raw mesh for texturing: {iso_err}\n")
+                    log_file.write(f"Error: Object isolation failed, aborting texturing to prevent raw scene export: {iso_err}\n")
+                    raise RuntimeReconstructionError(f"Object isolation failed: {iso_err}")
 
                 self._run_command(
                     self.mvs_builder.texture_mesh(mvs_dense, project_mesh_ply, project_textured_obj),

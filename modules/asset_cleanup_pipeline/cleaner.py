@@ -202,6 +202,9 @@ class AssetCleaner:
             
             isolated_mesh, isolation_stats = self.isolator.isolate_product(mesh)
             
+            if isolation_stats.get("object_isolation_status") != "success":
+                raise ValueError(f"Object isolation failed: {isolation_stats.get('object_isolation_status')}")
+
             # Export isolated mesh to a temp OBJ to preserve UVs (trimesh OBJ export handles vt)
             isolated_temp_obj = output_dir / "isolated_temp.obj"
             isolated_mesh.export(str(isolated_temp_obj))
@@ -209,9 +212,13 @@ class AssetCleaner:
             # Use the isolated mesh for subsequent alignment
             work_mesh = isolated_temp_obj
         except Exception as e:
-            logger.warning("Isolation failed during texture_safe_copy, falling back to raw: %s", e)
-            work_mesh = raw_mesh
-            isolation_stats = {"isolation_error": str(e)}
+            logger.error("Isolation failed during texture_safe_copy: %s", e)
+            return {
+                "cleanup_mode": "failed",
+                "object_isolation_status": "failed",
+                "unsafe_scene_copy_forbidden": True,
+                "error": str(e)
+            }
 
         # 2. Perform safe alignment (translates vertices, computes bbox and pivot offset)
         pivot_offset, bbox_min, bbox_max = self._safe_align_obj(work_mesh, cleaned_mesh_path)
@@ -253,6 +260,17 @@ class AssetCleaner:
             "bbox_min": bbox_min,
             "bbox_max": bbox_max,
             "isolation": isolation_stats,
+            
+            # Part 3 Diagnostics
+            "object_isolation_status": isolation_stats.get("object_isolation_status"),
+            "object_isolation_method": isolation_stats.get("object_isolation_method"),
+            "raw_mesh_faces": isolation_stats.get("raw_mesh_faces"),
+            "isolated_mesh_faces": isolation_stats.get("isolated_mesh_faces"),
+            "removed_face_ratio": isolation_stats.get("removed_face_ratio"),
+            "mask_support_ratio": isolation_stats.get("mask_support_ratio"),
+            "point_cloud_support_ratio": isolation_stats.get("point_cloud_support_ratio"),
+            "texture_input_mesh_path": str(work_mesh),
+            "unsafe_scene_copy_forbidden": False,
         }
 
     def _safe_align_obj(self, input_path: Path, output_path: Path) -> Tuple[Dict[str, float], Dict[str, float], Dict[str, float]]:
@@ -287,6 +305,7 @@ class AssetCleaner:
         pivot_offset = {"x": shift_x, "y": shift_y, "z": shift_z}
         
         # Second pass: write translated vertices and other lines
+        usemtl_written = False
         with open(input_path, "r", encoding="utf-8", errors="ignore") as f_in, \
              open(output_path, "w", encoding="utf-8") as f_out:
             for line in f_in:
@@ -301,8 +320,18 @@ class AssetCleaner:
                         f_out.write(line)
                 elif line.startswith("usemtl "):
                     f_out.write("usemtl material_0\n")
+                    usemtl_written = True
+                elif line.startswith("f "):
+                    if not usemtl_written:
+                        f_out.write("usemtl material_0\n")
+                        usemtl_written = True
+                    f_out.write(line)
                 else:
                     f_out.write(line)
+            
+            # Final safety
+            if not usemtl_written:
+                f_out.write("usemtl material_0\n")
 
         bbox_min = {"x": float(v_min[0] + shift_x), "y": float(v_min[1] + shift_y), "z": 0.0}
         bbox_max = {"x": float(v_max[0] + shift_x), "y": float(v_max[1] + shift_y), "z": float(v_max[2] + shift_z)}
@@ -352,6 +381,9 @@ class AssetCleaner:
                 job_cleaned_dir
             )
             
+            if stats.get("cleanup_mode") == "failed":
+                raise RuntimeError(f"texture_safe_copy failed: {stats.get('error')}")
+
             # Generate metadata
             bbox_min = stats["bbox_min"]
             bbox_max = stats["bbox_max"]
@@ -482,7 +514,18 @@ class AssetCleaner:
             "material_preserved": bool(has_material),
             "quality_status": quality_status,
             "quality_reason": quality_reason,
-            "recapture_recommended": quality_status == "quality_fail"
+            "recapture_recommended": quality_status == "quality_fail",
+            
+            # Part 3 Diagnostics
+            "object_isolation_status": isolation_stats.get("object_isolation_status"),
+            "object_isolation_method": isolation_stats.get("object_isolation_method"),
+            "raw_mesh_faces": isolation_stats.get("raw_mesh_faces"),
+            "isolated_mesh_faces": isolation_stats.get("isolated_mesh_faces"),
+            "removed_face_ratio": isolation_stats.get("removed_face_ratio"),
+            "mask_support_ratio": isolation_stats.get("mask_support_ratio"),
+            "point_cloud_support_ratio": isolation_stats.get("point_cloud_support_ratio"),
+            "texture_input_mesh_path": str(isolation_temp_path),
+            "unsafe_scene_copy_forbidden": False,
         }
 
         return metadata, cleanup_stats, str(cleaned_mesh_path)

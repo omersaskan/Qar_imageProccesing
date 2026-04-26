@@ -300,52 +300,83 @@ class MeshIsolator:
         cameras: List[Dict[str, Any]],
         masks: List[np.ndarray],
         threshold: float = 0.5,
-    ) -> trimesh.Trimesh:
+        sample_size: int = 200,
+    ) -> Tuple[trimesh.Trimesh, Dict[str, Any]]:
         """
         Prunes components that have low support across provided masks.
+        Uses vertex-level projection consensus.
         """
         if not cameras or not masks:
-            return mesh
+            return mesh, {"mask_support_ratio": 0.0, "mask_support_status": "skipped"}
 
         components = mesh.split(only_watertight=False)
         if not components:
-            return mesh
+            return mesh, {"mask_support_ratio": 0.0, "mask_support_status": "empty"}
 
         keep = []
+        total_mask_support = 0.0
+        
         for comp in components:
             if len(comp.faces) < 50:
                 continue
             
-            # Simple heuristic: check if component centroid projects into masks
-            # In a real implementation, we would project more points or use ray-casting.
-            # But for this hardening, we use a multi-view consensus check.
+            # Sample vertices for more robust projection check than just centroid
+            if len(comp.vertices) > sample_size:
+                indices = np.random.choice(len(comp.vertices), sample_size, replace=False)
+                sample_v = comp.vertices[indices]
+            else:
+                sample_v = comp.vertices
             
-            support_count = 0
+            comp_support_ratios = []
             for cam, mask in zip(cameras, masks):
-                # Project centroid to image space
-                # cam should have 'P' (3x4 projection matrix) or 'K', 'R', 't'
-                # For now, we assume a pre-computed 'support' flag or a simple projection mock
-                # as we don't have the full projection logic here yet.
-                # However, we can implement the logic if 'P' is provided.
-                if "P" in cam:
-                    P = cam["P"]
-                    p3d = np.append(comp.centroid, 1.0)
-                    p2d = P @ p3d
-                    if p2d[2] > 0: # In front of camera
-                        x = int(p2d[0] / p2d[2])
-                        y = int(p2d[1] / p2d[2])
-                        h, w = mask.shape[:2]
-                        if 0 <= x < w and 0 <= y < h:
-                            if mask[y, x] > 0:
-                                support_count += 1
+                if "P" not in cam:
+                    continue
+                
+                P = cam["P"]
+                # Project all sampled vertices at once
+                p3d = np.hstack([sample_v, np.ones((len(sample_v), 1))])
+                p2d_h = p3d @ P.T
+                
+                # Check points in front of camera (z > 0)
+                mask_hits = 0
+                visible_points = 0
+                
+                h, w = mask.shape[:2]
+                for i in range(len(p2d_h)):
+                    z = p2d_h[i, 2]
+                    if z <= 0:
+                        continue
+                    
+                    visible_points += 1
+                    x = int(p2d_h[i, 0] / z)
+                    y = int(p2d_h[i, 1] / z)
+                    
+                    if 0 <= x < w and 0 <= y < h:
+                        if mask[y, x] > 0:
+                            mask_hits += 1
+                
+                if visible_points > 0:
+                    comp_support_ratios.append(mask_hits / visible_points)
             
-            if support_count / len(cameras) >= threshold:
+            # Multi-view consensus: average support across cameras
+            if comp_support_ratios:
+                comp_avg_support = float(np.mean(comp_support_ratios))
+            else:
+                comp_avg_support = 0.0
+                
+            if comp_avg_support >= threshold:
                 keep.append(comp)
+                total_mask_support += comp_avg_support
+        
+        avg_support = total_mask_support / max(len(keep), 1)
         
         if not keep:
-            return mesh
+            return mesh, {"mask_support_ratio": 0.0, "mask_support_status": "no_support"}
         
-        return trimesh.util.concatenate(keep)
+        return trimesh.util.concatenate(keep), {
+            "mask_support_ratio": float(avg_support),
+            "mask_support_status": "supported" if avg_support >= threshold else "weak"
+        }
 
     def isolate_by_point_cloud(
         self,
@@ -353,22 +384,24 @@ class MeshIsolator:
         point_cloud: trimesh.points.PointCloud,
         dist_threshold: float = 0.05,
         min_support_ratio: float = 0.1,
-    ) -> trimesh.Trimesh:
+    ) -> Tuple[trimesh.Trimesh, Dict[str, Any]]:
         """
         Prunes components that are far from the dense point cloud.
         Useful when the point cloud was already masked/filtered.
         """
         if point_cloud is None or len(point_cloud.vertices) == 0:
-            return mesh
+            return mesh, {"pc_support_ratio": 0.0, "pc_support_status": "skipped"}
 
         components = mesh.split(only_watertight=False)
         if not components:
-            return mesh
+            return mesh, {"pc_support_ratio": 0.0, "pc_support_status": "empty"}
 
         from scipy.spatial import cKDTree
         tree = cKDTree(point_cloud.vertices)
 
         keep = []
+        total_pc_support = 0.0
+        
         for comp in components:
             if len(comp.faces) < 50:
                 continue
@@ -376,15 +409,23 @@ class MeshIsolator:
             # Check how many vertices of this component are near the point cloud
             dists, _ = tree.query(comp.vertices, k=1)
             supported = np.sum(dists < dist_threshold)
+            support_ratio = supported / len(comp.vertices)
             
-            if (supported / len(comp.vertices)) >= min_support_ratio:
+            if support_ratio >= min_support_ratio:
                 keep.append(comp)
+                total_pc_support += support_ratio
+        
+        avg_support = total_pc_support / max(len(keep), 1)
         
         if not keep:
             # Fallback to largest if everything was pruned (safety)
-            return max(components, key=lambda c: len(c.faces))
+            best = max(components, key=lambda c: len(c.faces))
+            return best, {"pc_support_ratio": 0.0, "pc_support_status": "no_support"}
         
-        return trimesh.util.concatenate(keep)
+        return trimesh.util.concatenate(keep), {
+            "pc_support_ratio": float(avg_support),
+            "pc_support_status": "supported" if avg_support >= min_support_ratio else "weak"
+        }
 
     def isolate_product(
         self, 
@@ -396,10 +437,14 @@ class MeshIsolator:
         mesh = self._ensure_mesh(mesh)
 
         if len(mesh.vertices) == 0:
-            return mesh, {"error": "Empty mesh"}
+            return mesh, {"error": "Empty mesh", "object_isolation_status": "failed"}
 
         initial_faces = int(len(mesh.faces))
         initial_vertices = int(len(mesh.vertices))
+        
+        isolation_method = "geometric_only"
+        mask_support_metrics = {}
+        pc_support_metrics = {}
 
         # 1) remove dominant planes (Geometric)
         current_mesh, plane_stats = self._remove_horizontal_planes(mesh)
@@ -407,11 +452,13 @@ class MeshIsolator:
 
         # 2) Mask-based filtering (Semantic)
         if masks and cameras:
-            current_mesh = self.isolate_by_masks(current_mesh, cameras, masks)
+            current_mesh, mask_support_metrics = self.isolate_by_masks(current_mesh, cameras, masks)
+            isolation_method = "mask_guided"
             
         # 3) Point-cloud based filtering (Data support)
         if point_cloud is not None:
-            current_mesh = self.isolate_by_point_cloud(current_mesh, point_cloud)
+            current_mesh, pc_support_metrics = self.isolate_by_point_cloud(current_mesh, point_cloud)
+            isolation_method = "hybrid_pc_mask" if isolation_method == "mask_guided" else "pc_guided"
 
         # 4) split components and score
         components = current_mesh.split(only_watertight=False)
@@ -430,6 +477,8 @@ class MeshIsolator:
                 "compactness_score": 0.0,
                 "flatness_score": 0.0,
                 "selected_component_score": 0.0,
+                "object_isolation_status": "failed_empty",
+                "object_isolation_method": isolation_method,
             }
             return current_mesh, stats
 
@@ -452,6 +501,9 @@ class MeshIsolator:
             best_comp = ranked[0][1]
             best_scores = ranked[0][2]
 
+        final_faces = int(len(best_comp.faces))
+        removed_face_ratio = (initial_faces - final_faces) / max(initial_faces, 1)
+
         stats = {
             "initial_faces": initial_faces,
             "initial_vertices": initial_vertices,
@@ -459,7 +511,7 @@ class MeshIsolator:
             **support_stats,
             "component_count": len(components),
             "removed_islands": removed_islands,
-            "final_faces": int(len(best_comp.faces)),
+            "final_faces": final_faces,
             "final_vertices": int(len(best_comp.vertices)),
             "removed_plane_face_share": plane_stats["removed_plane_faces"] / max(initial_faces, 1),
             "removed_plane_vertex_ratio": plane_stats["removed_plane_vertices"] / max(initial_vertices, 1),
@@ -468,6 +520,15 @@ class MeshIsolator:
             "selected_component_score": float(best_scores["total_score"]),
             "aspect_ratio": float(best_scores["aspect_ratio"]),
             "footprint_dominance": float(best_scores["footprint_dominance"]),
+            
+            # Part 3 Hardening Metrics
+            "object_isolation_status": "success" if final_faces > 0 else "failed",
+            "object_isolation_method": isolation_method,
+            "raw_mesh_faces": initial_faces,
+            "isolated_mesh_faces": final_faces,
+            "removed_face_ratio": float(removed_face_ratio),
+            "mask_support_ratio": mask_support_metrics.get("mask_support_ratio", 0.0),
+            "point_cloud_support_ratio": pc_support_metrics.get("pc_support_ratio", 0.0),
         }
 
         return best_comp, stats
