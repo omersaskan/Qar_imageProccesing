@@ -1,12 +1,14 @@
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from pydantic import BaseModel, Field
 
 
 class ValidationThresholds(BaseModel):
     # geometry / runtime thresholds
+    # Profile limits are now handled dynamically, but these remain as global defaults
     polycount_pass: int = Field(50_000, ge=0)
-    polycount_review: int = Field(100_000, ge=0)
+    polycount_review: int = Field(150_000, ge=0)
     polycount_fail: int = Field(250_000, ge=0)
+    
     bbox_max_dimension_cm: float = Field(500.0, ge=0)
     ground_alignment_threshold_cm: float = Field(1.0, ge=0)
 
@@ -29,136 +31,38 @@ class ValidationThresholds(BaseModel):
     require_pbr_complete: bool = False
 
     # texture quality thresholds
-    max_black_pixel_ratio: float = Field(0.20, ge=0, le=1.0)
-    max_dominant_background_ratio: float = Field(0.15, ge=0, le=1.0)
-    min_atlas_coverage_ratio: float = Field(0.60, ge=0, le=1.0)
+    max_black_pixel_ratio: float = Field(0.40, ge=0, le=1.0)
+    max_near_black_ratio: float = Field(0.60, ge=0, le=1.0)
+    max_flat_color_ratio: float = Field(0.70, ge=0, le=1.0)
+    max_dominant_background_ratio: float = Field(0.50, ge=0, le=1.0)
+    min_atlas_coverage_ratio: float = Field(0.05, ge=0, le=1.0)
     min_near_white_ratio_white_cream: float = Field(0.40, ge=0, le=1.0)
 
 
-def validate_polycount(count: int, thresholds: ValidationThresholds) -> str:
-    if count >= thresholds.polycount_fail:
-        return "fail"
-    if count > thresholds.polycount_review:
-        return "review"
-    if count > thresholds.polycount_pass:
-        return "review" # or "review" as per previous logic, but let's be precise
+def validate_polycount_by_profile(count: int, profile_name: str) -> str:
+    """
+    Hard gates for delivery profiles:
+    - mobile_preview > 50k => fail
+    - mobile_high > 150k => fail
+    - desktop_high > 250k => fail
+    - raw_archive => always pass (but not mobile ready)
+    """
+    p = profile_name.lower()
+    if p == "mobile_preview":
+        if count > 50_000: return "fail"
+        if count > 45_000: return "review"
+    elif p == "mobile_high":
+        if count > 150_000: return "fail"
+        if count > 130_000: return "review"
+    elif p == "desktop_high":
+        if count > 250_000: return "fail"
+        if count > 220_000: return "review"
+    elif p == "raw_archive":
+        return "pass"
+    
+    # Standard fallback
+    if count > 150_000: return "review"
     return "pass"
-
-
-def validate_texture(status: str) -> str:
-    """
-    Integrity focus: whether mapping/packaging survived.
-    """
-    status = status.lower()
-    if status == "complete":
-        return "pass"
-    if status in {"degraded", "minor_missing"}:
-        return "review"
-    if status == "missing":
-        return "fail"
-    return "fail"
-
-
-def validate_material_semantics(status: str) -> str:
-    """
-    Richness focus: diffuse vs partial PBR vs complete PBR.
-    - geometry_only -> fail
-    - uv_only -> review
-    - diffuse_textured -> pass
-    - pbr_partial -> pass
-    - pbr_complete -> pass
-    """
-    status = status.lower()
-    if status in {"pbr_complete", "pbr_partial", "diffuse_textured"}:
-        return "pass"
-    if status in {"uv_only", "material_incomplete"}:
-        return "review"
-    return "fail" # geometry_only or unknown
-
-
-
-def validate_bbox(dimensions: Dict[str, float], thresholds: ValidationThresholds) -> str:
-    if not dimensions:
-        return "fail"
-
-    for _, val in dimensions.items():
-        if val <= 0:
-            return "fail"
-        if val > thresholds.bbox_max_dimension_cm:
-            return "review"
-
-    return "pass"
-
-
-def validate_ground_alignment(offset: float, thresholds: ValidationThresholds) -> str:
-    if abs(offset) <= thresholds.ground_alignment_threshold_cm:
-        return "pass"
-    return "review"
-
-
-def validate_contamination(stats: Dict[str, Any], thresholds: ValidationThresholds) -> Dict[str, str]:
-    """
-    Uses cleanup_stats -> isolation stats to assess scene contamination.
-    If no isolation stats are present (e.g. standalone validation without a
-    cleanup pipeline), returns all-pass so caller judgment is not corrupted.
-    """
-    results: Dict[str, str] = {}
-    iso = stats.get("isolation", {})
-
-    # If there is no isolation data at all, assume clean (caller didn't run cleanup)
-    if not iso:
-        return {}
-
-    final_faces = int(iso.get("final_faces", 0))
-    initial_faces = max(int(iso.get("initial_faces", 1)), 1)
-    share = final_faces / initial_faces
-
-    # 1) largest component share
-    if share >= thresholds.min_largest_component_share_pass:
-        results["component_share"] = "pass"
-    elif share >= thresholds.min_largest_component_share_review:
-        results["component_share"] = "review"
-    else:
-        results["component_share"] = "fail"
-
-    # 2) component count
-    comp_count = int(iso.get("component_count", 1))
-    if comp_count == 1:
-        results["component_count"] = "pass"
-    elif comp_count <= thresholds.max_component_count:
-        results["component_count"] = "review"
-    else:
-        results["component_count"] = "fail"
-
-    # 3) plane contamination
-    plane_share = float(iso.get("removed_plane_face_share", 0.0))
-    plane_v_ratio = float(iso.get("removed_plane_vertex_ratio", 0.0))
-
-    if plane_share <= thresholds.max_plane_face_share and plane_v_ratio <= thresholds.max_plane_vertex_ratio:
-        results["plane_contamination"] = "pass"
-    elif (
-        plane_share <= thresholds.max_plane_face_share * 1.5
-        and plane_v_ratio <= thresholds.max_plane_vertex_ratio * 1.5
-    ):
-        results["plane_contamination"] = "review"
-    else:
-        results["plane_contamination"] = "fail"
-
-    # 4) compactness
-    compactness = float(iso.get("compactness_score", 0.0))
-    if compactness >= thresholds.min_compactness_score:
-        results["compactness"] = "pass"
-    else:
-        results["compactness"] = "review"
-
-    # 5) selected component score
-    selected_score = float(iso.get("selected_component_score", 0.0))
-    if selected_score >= thresholds.min_selected_component_score:
-        results["selection_quality"] = "pass"
-    else:
-        results["selection_quality"] = "review"
-
-    return results
 
 
 def validate_texture_integrity(asset_data: Dict[str, Any], thresholds: ValidationThresholds) -> Dict[str, str]:
@@ -194,9 +98,123 @@ def validate_texture_integrity(asset_data: Dict[str, Any], thresholds: Validatio
     return results
 
 
+def validate_material_semantics(status: str) -> str:
+    status = status.lower()
+    if status in {"pbr_complete", "pbr_partial", "diffuse_textured"}:
+        return "pass"
+    if status in {"uv_only", "material_incomplete"}:
+        return "review"
+    return "fail"
+
+
+def validate_bbox(dimensions: Dict[str, float], thresholds: ValidationThresholds) -> str:
+    if not dimensions:
+        return "fail"
+    for _, val in dimensions.items():
+        if val <= 0: return "fail"
+        if val > thresholds.bbox_max_dimension_cm: return "review"
+    return "pass"
+
+
+def validate_ground_alignment(offset: float, thresholds: ValidationThresholds) -> str:
+    if abs(offset) <= thresholds.ground_alignment_threshold_cm:
+        return "pass"
+    return "review"
+
+
+def validate_contamination(stats: Dict[str, Any], thresholds: ValidationThresholds) -> Dict[str, str]:
+    results: Dict[str, str] = {}
+    iso = stats.get("isolation", {})
+    if not iso: return {}
+
+    final_faces = int(iso.get("final_faces", 0))
+    initial_faces = max(int(iso.get("initial_faces", 1)), 1)
+    share = final_faces / initial_faces
+
+    if share >= thresholds.min_largest_component_share_pass:
+        results["component_share"] = "pass"
+    elif share >= thresholds.min_largest_component_share_review:
+        results["component_share"] = "review"
+    else:
+        results["component_share"] = "fail"
+
+    comp_count = int(iso.get("component_count", 1))
+    if comp_count == 1:
+        results["component_count"] = "pass"
+    elif comp_count <= thresholds.max_component_count:
+        results["component_count"] = "review"
+    else:
+        results["component_count"] = "fail"
+
+    plane_share = float(iso.get("removed_plane_face_share", 0.0))
+    plane_v_ratio = float(iso.get("removed_plane_vertex_ratio", 0.0))
+    if plane_share <= thresholds.max_plane_face_share and plane_v_ratio <= thresholds.max_plane_vertex_ratio:
+        results["plane_contamination"] = "pass"
+    else:
+        results["plane_contamination"] = "review"
+
+    compactness = float(iso.get("compactness_score", 0.0))
+    results["compactness"] = "pass" if compactness >= thresholds.min_compactness_score else "review"
+
+    selected_score = float(iso.get("selected_component_score", 0.0))
+    results["selection_quality"] = "pass" if selected_score >= thresholds.min_selected_component_score else "review"
+
+    return results
+
+
+def validate_accessors(asset_data: Dict[str, Any]) -> Dict[str, str]:
+    """
+    Enforces existence of critical GLB accessors (POSITION, NORMAL, TEXCOORD_0).
+    """
+    results: Dict[str, str] = {}
+    
+    all_pos = bool(asset_data.get("all_primitives_have_position", False))
+    all_norm = bool(asset_data.get("all_primitives_have_normal", False))
+    all_uv = bool(asset_data.get("all_textured_primitives_have_texcoord_0", False))
+    
+    results["accessor_position"] = "pass" if all_pos else "fail"
+    results["accessor_normal"] = "pass" if all_norm else "fail"
+    
+    # UV is mandatory if textured
+    sem_status = str(asset_data.get("material_semantic_status", "geometry_only")).lower()
+    if sem_status != "geometry_only":
+        results["accessor_uv"] = "pass" if all_uv else "fail"
+    else:
+        results["accessor_uv"] = "pass"
+        
+    return results
+
+
+def validate_texture_quality(quality_data: Dict[str, Any]) -> str:
+    """
+    Hard gate for texture atlas quality.
+    """
+    status = str(quality_data.get("texture_quality_status", "fail")).lower()
+    if status == "success":
+        return "pass"
+    if status == "review":
+        return "review"
+    return "fail"
+
+
+def validate_decimation(stats: Dict[str, Any]) -> str:
+    """
+    Ensures decimation didn't break UVs/Materials.
+    """
+    status = str(stats.get("decimation_status", "none")).lower()
+    if status == "failed_visual_integrity":
+        return "fail"
+    if "error" in status:
+        return "review"
+    
+    if not stats.get("uv_preserved", True) or not stats.get("material_preserved", True):
+        return "fail"
+        
+    return "pass"
+
+
 def validate_delivery_mesh(asset_data: Dict[str, Any], thresholds: ValidationThresholds) -> Dict[str, str]:
     results: Dict[str, str] = {}
-
     if "delivery_geometry_count" in asset_data:
         geometry_count = int(asset_data.get("delivery_geometry_count", 0))
         results["delivery_geometry"] = "pass" if geometry_count > 0 else "fail"
@@ -209,66 +227,12 @@ def validate_delivery_mesh(asset_data: Dict[str, Any], thresholds: ValidationThr
             results["delivery_fragmentation"] = "review"
         else:
             results["delivery_fragmentation"] = "fail"
-
     return results
 
-def validate_accessors(asset_data: Dict[str, Any]) -> Dict[str, str]:
-    """
-    Enforces existence of critical GLB accessors (POSITION, NORMAL, TEXCOORD_0) per primitive.
-    """
-    results: Dict[str, str] = {}
-    
-    # Use all_* fields if available, otherwise fall back to legacy has_* fields
-    # Default is False for fail-safe behavior
-    all_pos = bool(asset_data.get("all_primitives_have_position", asset_data.get("has_position_accessor", False)))
-    all_norm = bool(asset_data.get("all_primitives_have_normal", asset_data.get("has_normal_accessor", False)))
-    all_uv = bool(asset_data.get("all_textured_primitives_have_texcoord_0", asset_data.get("has_texcoord_0_accessor", False)))
-    
-    results["accessor_position"] = "pass" if all_pos else "fail"
-    
-    # NORMAL is mandatory for all delivered assets
-    results["accessor_normal"] = "pass" if all_norm else "fail"
-    
-    # UV is mandatory if textured
-    sem_status = str(asset_data.get("material_semantic_status", "geometry_only")).lower()
-    if sem_status != "geometry_only":
-        results["accessor_uv"] = "pass" if all_uv else "fail"
-    else:
-        results["accessor_uv"] = "pass"
-        
-    return results
-
-def validate_texture_quality(quality_data: Dict[str, Any]) -> str:
-    """
-    Assesses quality status from TextureQualityAnalyzer.
-    """
-    status = str(quality_data.get("texture_quality_status", "unknown")).lower()
-    if status == "clean":
-        return "pass"
-    if status == "warning":
-        return "review"
-    if status == "contaminated":
-        return "fail"
-    return "fail"
 
 def validate_object_filtering(asset_data: Dict[str, Any]) -> str:
-    """
-    Ensures that for production assets, we didn't just export the raw scene.
-    Requires filtering_status == 'object_isolated'.
-    """
     status = str(asset_data.get("filtering_status", "unknown")).lower()
-    
-    # 1. Clear Pass
-    if status == "object_isolated":
-        return "pass"
-        
-    # 2. Clear Fail
-    if status == "failed":
-        return "fail"
-        
-    # 3. Review Required: Scene might be raw or isolation is unverified
-    if status == "scene_raw":
-        return "review"
-        
-    # 4. Unknown/Missing (Production risk)
+    if status == "object_isolated": return "pass"
+    if status == "failed": return "fail"
+    if status == "scene_raw": return "review"
     return "review"

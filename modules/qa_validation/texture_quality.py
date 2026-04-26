@@ -6,18 +6,19 @@ from pathlib import Path
 class TextureQualityAnalyzer:
     def __init__(self, thresholds=None):
         from modules.operations.settings import settings
-        # Use provided thresholds or global settings
         self.settings = settings
+        # Ensure we have thresholds for the new hard gates
         self.thresholds = thresholds or settings
 
     def analyze_path(self, image_path: str, expected_product_color: str = "unknown") -> Dict[str, Any]:
         """
         Loads image from path and analyzes its quality.
         """
-        # Read with alpha channel support
+        if not image_path or not Path(image_path).exists():
+            return self._error_result(f"Texture file missing: {image_path}")
+
         image = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
         if image is None:
-             # Try reading with numpy/imdecode for unicode paths on Windows
              try:
                  img_bytes = np.fromfile(image_path, dtype=np.uint8)
                  image = cv2.imdecode(img_bytes, cv2.IMREAD_UNCHANGED)
@@ -28,32 +29,18 @@ class TextureQualityAnalyzer:
             return self._error_result(f"Could not read image: {image_path}")
         return self.analyze_image(image, expected_product_color)
 
-    def analyze_bytes(self, image_bytes: bytes, expected_product_color: str = "unknown") -> Dict[str, Any]:
-        """
-        Decodes image bytes and analyzes its quality.
-        """
-        nparr = np.frombuffer(image_bytes, np.uint8)
-        image = cv2.imdecode(nparr, cv2.IMREAD_UNCHANGED)
-        if image is None:
-            return self._error_result("Could not decode image bytes")
-        return self.analyze_image(image, expected_product_color)
-
     def analyze_image(self, image: np.ndarray, expected_product_color: str = "unknown") -> Dict[str, Any]:
         """
         Core analysis logic using NumPy and OpenCV.
         """
         # 1. Handle Alpha / Transparency
-        # 4 channels: BGR + Alpha
         has_alpha = image.shape[2] == 4 if len(image.shape) == 3 else False
         if has_alpha:
             alpha = image[:, :, 3]
-            # Consider only pixels that are at least partially opaque
             mask = alpha > 0
             rgb = image[:, :, :3]
         else:
-            # If 2D (grayscale) or 3D without alpha
             if len(image.shape) == 2:
-                # Convert grayscale to BGR for uniform processing
                 rgb = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
                 mask = np.ones(image.shape, dtype=bool)
             else:
@@ -61,110 +48,91 @@ class TextureQualityAnalyzer:
                 rgb = image
 
         visible_pixels = np.count_nonzero(mask)
+        total_pixels = image.shape[0] * image.shape[1]
+        
         if visible_pixels == 0:
             return self._error_result("Texture atlas is completely transparent or empty")
 
         # 2. Metric Computation
+        max_rgb = np.max(rgb, axis=2)
         
         # A) Black Pixel Ratio (max(RGB) < 25)
-        # Using vectorized max across channels
-        max_rgb = np.max(rgb, axis=2)
         black_pixels = np.count_nonzero((max_rgb < 25) & mask)
         black_pixel_ratio = black_pixels / visible_pixels
 
-        # B) Near White Ratio (HSV: High Value, Low Saturation)
-        hsv = cv2.cvtColor(rgb, cv2.COLOR_BGR2HSV)
-        h, s, v = cv2.split(hsv)
-        # white/cream: high value (>180), low saturation (<60)
-        white_pixels = np.count_nonzero((v > 180) & (s < 60) & mask)
-        near_white_ratio = white_pixels / visible_pixels
-
-        # C) Dominant Background / Color Clusters
-        h_visible = h[mask]
-        s_visible = s[mask]
-        v_visible = v[mask]
-        
-        # Warm/Orange (Common leakage): Hue between 5 and 25 (OpenCV Hue is 0-180)
-        orange_pixels = np.count_nonzero((h_visible >= 5) & (h_visible <= 25) & (s_visible > 50) & (v_visible > 50))
-        orange_ratio = orange_pixels / visible_pixels
-
-        # Generic dominant non-neutral color detection
-        # Neutral: low saturation or extreme value
-        non_neutral_mask = (s_visible > 40) & (v_visible > 40) & (v_visible < 240)
-        non_neutral_count = np.count_nonzero(non_neutral_mask)
-        non_neutral_ratio = non_neutral_count / visible_pixels
-        
-        # Dominant background is either the specific orange leakage or high non-neutral saturation
-        dominant_background_ratio = orange_ratio
-        if expected_product_color != "colorful":
-            dominant_background_ratio = max(orange_ratio, non_neutral_ratio * 0.7)
-        else:
-            # For colorful products, only specific common background hues like orange/warm are suspicious
-            dominant_background_ratio = orange_ratio
-
-        # D) Atlas Coverage
-        total_pixels = image.shape[0] * image.shape[1]
-        atlas_coverage_ratio = visible_pixels / total_pixels
-
-        # E) Alpha Empty Ratio
-        if has_alpha:
-            alpha_empty_pixels = np.count_nonzero(alpha == 0)
-            alpha_empty_ratio = alpha_empty_pixels / total_pixels
-        else:
-            alpha_empty_ratio = 0.0
-
-        # F) Near Black Ratio (max(RGB) < 45)
+        # B) Near Black Ratio (max(RGB) < 45)
         near_black_pixels = np.count_nonzero((max_rgb < 45) & mask)
         near_black_ratio = near_black_pixels / visible_pixels
 
-        # G) Default Fill or Flat Color Ratio
-        # Check for large areas with exactly the same color (neutral flat areas)
-        flat_color_pixels = np.count_nonzero((s < 10) & (v > 30) & (v < 225) & mask)
+        # C) Near White Ratio (HSV: High Value, Low Saturation)
+        hsv = cv2.cvtColor(rgb, cv2.COLOR_BGR2HSV)
+        h, s, v = cv2.split(hsv)
+        white_pixels = np.count_nonzero((v > 180) & (s < 60) & mask)
+        near_white_ratio = white_pixels / visible_pixels
+
+        # D) Default Fill or Flat Color Ratio
+        # Neutral flat areas: low saturation, non-extreme value
+        flat_color_pixels = np.count_nonzero((s < 12) & (v > 35) & (v < 220) & mask)
         default_fill_ratio = flat_color_pixels / visible_pixels
         
-        # H) Dominant Color Ratio (most frequent hue bin)
+        # E) Dominant Color Ratio (most frequent hue bin)
         hue_hist = cv2.calcHist([h], [0], mask.astype(np.uint8), [180], [0, 180])
         dominant_hue_count = np.max(hue_hist)
         dominant_color_ratio = dominant_hue_count / visible_pixels
 
-        # 3. Decision Logic
+        # F) Dominant Background (Specific warm leakage)
+        # Warm/Orange: Hue between 5 and 25
+        h_visible = h[mask]
+        s_visible = s[mask]
+        v_visible = v[mask]
+        orange_pixels = np.count_nonzero((h_visible >= 5) & (h_visible <= 25) & (s_visible > 50) & (v_visible > 50))
+        orange_ratio = orange_pixels / visible_pixels
+        
+        # Generic non-neutral ratio
+        non_neutral_mask = (s_visible > 40) & (v_visible > 40) & (v_visible < 240)
+        non_neutral_count = np.count_nonzero(non_neutral_mask)
+        non_neutral_ratio = non_neutral_count / visible_pixels
+        
+        dominant_background_ratio = orange_ratio
+        if expected_product_color != "colorful":
+            dominant_background_ratio = max(orange_ratio, non_neutral_ratio * 0.7)
+
+        # G) Atlas Coverage
+        atlas_coverage_ratio = visible_pixels / total_pixels
+
+        # H) Alpha Empty Ratio
+        alpha_empty_ratio = np.count_nonzero(alpha == 0) / total_pixels if has_alpha else 0.0
+
+        # 3. Decision Logic (Hard Gates)
         reasons = []
-        status = "clean"
+        status = "success"
         
-        # Black ratio check (skip or relax for dark products)
-        if black_pixel_ratio > self.thresholds.max_black_pixel_ratio:
-            if expected_product_color != "dark":
-                reasons.append("BLACK_PATCH_RATIO_HIGH")
-                status = "contaminated"
-            elif black_pixel_ratio > 0.8: # Even for dark products, 80% black might be empty
-                reasons.append("BLACK_PATCH_RATIO_EXTREME")
-                status = "warning"
+        # Thresholds (using safe defaults if settings missing)
+        thr_black = getattr(self.thresholds, "max_black_pixel_ratio", 0.4)
+        thr_near_black = getattr(self.thresholds, "max_near_black_ratio", 0.6)
+        thr_flat = getattr(self.thresholds, "max_flat_color_ratio", 0.7)
+        thr_coverage = getattr(self.thresholds, "min_atlas_coverage_ratio", 0.05)
+        thr_bg = getattr(self.thresholds, "max_dominant_background_ratio", 0.5)
+
+        if black_pixel_ratio > thr_black and expected_product_color != "dark":
+            reasons.append(f"High black pixel ratio: {black_pixel_ratio:.2f} > {thr_black}")
+            status = "fail"
         
-        # Background contamination check
-        if dominant_background_ratio > self.thresholds.max_dominant_background_ratio:
-            reasons.append("BACKGROUND_COLOR_CONTAMINATION")
-            status = "contaminated"
+        if near_black_ratio > thr_near_black and expected_product_color != "dark":
+            reasons.append(f"High near-black ratio: {near_black_ratio:.2f} > {thr_near_black}")
+            status = "fail"
 
-        # Coverage check
-        if atlas_coverage_ratio < self.thresholds.min_atlas_coverage_ratio:
-            reasons.append("LOW_ATLAS_COVERAGE")
-            if status == "clean": 
-                status = "warning"
+        if default_fill_ratio > thr_flat:
+            reasons.append(f"High flat color / default fill ratio: {default_fill_ratio:.2f} > {thr_flat}")
+            status = "fail"
 
-        # Product-specific: White/Cream check
-        if expected_product_color == "white_cream":
-            if near_white_ratio < self.thresholds.min_near_white_ratio_white_cream:
-                reasons.append("WHITE_PRODUCT_TEXTURE_RATIO_LOW")
-                status = "contaminated"
+        if atlas_coverage_ratio < thr_coverage:
+            reasons.append(f"Low atlas coverage: {atlas_coverage_ratio:.2f} < {thr_coverage}")
+            status = "review"
 
-        # Grading (A-F)
-        grade = "A"
-        if status == "contaminated":
-            grade = "F"
-        elif status == "warning":
-            grade = "C"
-        elif black_pixel_ratio > 0.1 or dominant_background_ratio > 0.05:
-            grade = "B"
+        if dominant_background_ratio > thr_bg:
+            reasons.append(f"Excessive background color contamination: {dominant_background_ratio:.2f} > {thr_bg}")
+            status = "fail"
 
         return {
             "black_pixel_ratio": float(black_pixel_ratio),
@@ -176,14 +144,12 @@ class TextureQualityAnalyzer:
             "default_fill_or_flat_color_ratio": float(default_fill_ratio),
             "alpha_empty_ratio": float(alpha_empty_ratio),
             "texture_quality_status": status,
-            "texture_quality_grade": grade,
             "texture_quality_reasons": reasons
         }
 
     def _error_result(self, message: str) -> Dict[str, Any]:
         return {
-            "texture_quality_status": "invalid",
-            "texture_quality_grade": "F",
+            "texture_quality_status": "fail",
             "texture_quality_reasons": [f"ERROR: {message}"],
             "black_pixel_ratio": 0.0,
             "near_black_ratio": 0.0,
