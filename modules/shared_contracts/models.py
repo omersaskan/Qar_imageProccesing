@@ -157,6 +157,10 @@ class ValidationReport(BaseModel):
     default_fill_or_flat_color_ratio: float = 0.0
     alpha_empty_ratio: float = 0.0
 
+    # Delivery Strategy
+    is_mobile_ready: bool = False
+    delivery_status: str = "pending" # pending|delivery_ready|archive_only
+
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class AssetPackage(BaseModel):

@@ -8,9 +8,9 @@ class IntegrationFlow:
     Standardizes the data bridge between Cleanup and Validation.
     """
     @staticmethod
-    def map_metadata_to_validator_input(metadata: NormalizedMetadata, texture_status: str = "complete", profile_name: str = "mobile_high", **overrides) -> Dict[str, Any]:
+    def map_metadata_to_validator_input(metadata: NormalizedMetadata, cleanup_stats: Dict[str, Any] = None, export_report: Dict[str, Any] = None, **overrides) -> Dict[str, Any]:
         """
-        Maps NormalizedMetadata (Cleanup output) to AssetValidator input format.
+        Maps NormalizedMetadata and pipeline reports to AssetValidator input format.
         """
         width = abs(metadata.bbox_max["x"] - metadata.bbox_min["x"])
         height = abs(metadata.bbox_max["y"] - metadata.bbox_min["y"])
@@ -18,17 +18,22 @@ class IntegrationFlow:
         
         input_data = {
             "poly_count": metadata.final_polycount,
-            "texture_status": texture_status,
-            "texture_integrity_status": texture_status,
-            "material_semantic_status": "diffuse_textured",
-            "delivery_profile": profile_name,
-            "bbox": {
-                "width": width,
-                "height": height,
-                "depth": depth
-            },
+            "bbox": {"width": width, "height": height, "depth": depth},
             "ground_offset": metadata.pivot_offset.get("z", 0.0),
+            "cleanup_stats": cleanup_stats or {},
+            "delivery_profile": (export_report or {}).get("profile", "raw_archive"),
+            "material_semantic_status": "diffuse_textured" if (cleanup_stats or {}).get("has_uv") else "geometry_only",
+            "texture_integrity_status": "complete",
         }
+        
+        if export_report:
+            input_data.update(export_report)
+            # Ensure accessor flags are present for rules.py
+            input_data["all_primitives_have_position"] = export_report.get("all_primitives_have_position", False)
+            input_data["all_primitives_have_normal"] = export_report.get("all_primitives_have_normal", False)
+            input_data["all_textured_primitives_have_texcoord_0"] = export_report.get("all_textured_primitives_have_texcoord_0", False)
+            input_data["delivery_ready"] = export_report.get("delivery_ready", False)
+
         input_data.update(overrides)
         return input_data
 

@@ -35,7 +35,7 @@ class ValidationThresholds(BaseModel):
     max_near_black_ratio: float = Field(0.60, ge=0, le=1.0)
     max_flat_color_ratio: float = Field(0.70, ge=0, le=1.0)
     max_dominant_background_ratio: float = Field(0.50, ge=0, le=1.0)
-    min_atlas_coverage_ratio: float = Field(0.05, ge=0, le=1.0)
+    min_atlas_coverage_ratio: float = Field(0.30, ge=0, le=1.0) # Tightened from 0.05
     min_near_white_ratio_white_cream: float = Field(0.40, ge=0, le=1.0)
 
 

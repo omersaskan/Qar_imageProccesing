@@ -185,6 +185,16 @@ class GLBExporter:
         # 5. Final Strict Inspection
         inspection = self.inspect_exported_asset(output_path)
         
+        # Delivery Gate logic
+        all_accessors = (
+            inspection["all_primitives_have_position"] and
+            inspection["all_primitives_have_normal"] and
+            inspection["all_textured_primitives_have_texcoord_0"]
+        )
+        
+        delivery_ready = all_accessors
+        export_status = "success" if delivery_ready else "failed_validation"
+
         result = {
             "format": "GLB",
             "filesize": os.path.getsize(output_path),
@@ -192,6 +202,8 @@ class GLBExporter:
             "smoothing_mode": smoothing_mode,
             "texture_applied": texture_applied,
             "optimization_hooks": opt_report,
+            "delivery_ready": delivery_ready,
+            "export_status": export_status,
             **inspection
         }
 

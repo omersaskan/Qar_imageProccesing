@@ -93,10 +93,26 @@ class AssetValidator:
         else:
             final_decision = "pass"
 
+        # 3. Delivery Strategy
+        is_mobile_ready = False
+        delivery_status = "pending"
+        
+        if profile_name == "raw_archive":
+            delivery_status = "archive_only"
+            is_mobile_ready = False
+        elif final_decision == "pass":
+            delivery_status = "delivery_ready"
+            is_mobile_ready = True
+        elif final_decision == "fail":
+            delivery_status = "failed"
+            is_mobile_ready = False
+        
         # Mobile Ready Gate
         if profile_name in ["mobile_preview", "mobile_high"]:
-            if final_decision == "pass" and poly_count > 150_000:
-                final_decision = "review"
+            if is_mobile_ready and poly_count > 150_000:
+                # Extra safety, though rules should have caught it
+                is_mobile_ready = False
+                if final_decision == "pass": final_decision = "review"
                 warning_checks.append("mobile_limit_gate")
 
         # Scoring
@@ -150,6 +166,8 @@ class AssetValidator:
             alpha_empty_ratio=texture_quality_stats.get("alpha_empty_ratio", 0.0),
             
             final_decision=final_decision,
+            is_mobile_ready=is_mobile_ready,
+            delivery_status=delivery_status,
         )
 
     def _calculate_grade(self, poly_count: int) -> str:
