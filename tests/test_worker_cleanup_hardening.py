@@ -64,7 +64,7 @@ def test_handle_validation_uses_integration_flow(worker):
         mesh_metadata=MeshMetadata.model_construct(vertex_count=100, face_count=200, has_texture=False, uv_present=True)
     )
     
-    # Current GLBExporter metrics schema
+    # Current GLBExporter metrics schema ONLY
     export_metrics = {
         "final_face_count": 200,
         "final_vertex_count": 100,
@@ -73,12 +73,10 @@ def test_handle_validation_uses_integration_flow(worker):
         "all_primitives_have_position": True,
         "all_primitives_have_normal": True,
         "all_textured_primitives_have_texcoord_0": False,
-        "has_uv": True,
-        "has_material": True,
-        "has_embedded_texture": False,
+        "delivery_ready": True,
+        "export_status": "success",
         "bbox": {"width": 1, "height": 1, "depth": 1},
         "ground_offset": 0.0,
-        "face_count": 200 # legacy compatibility sometimes added by exporter
     }
     
     worker._load_cleanup_artifacts = MagicMock(return_value=(metadata, cleanup_stats))

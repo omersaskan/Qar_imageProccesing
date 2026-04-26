@@ -72,10 +72,17 @@ def test_full_factory_smoke_flow(smoke_env):
         metadata, 
         validator, 
         allow_texture_quality_skip=True,
-        has_position_accessor=True,
-        has_normal_accessor=True,
-        has_texcoord_0_accessor=True
+        cleanup_stats={"has_uv": True, "has_material": True},
+        all_primitives_have_position=True,
+        all_primitives_have_normal=True,
+        all_textured_primitives_have_texcoord_0=True,
+        material_semantic_status="diffuse_textured",
+        texture_applied=True,
+        texture_count=1,
+        export_status="success",
+        delivery_ready=True
     )
+    print(f"\nVALIDATION REPORT: {report.model_dump_json(indent=2)}")
     assert report.final_decision in ["pass", "review"]
     
     # 6. Registry & Publish

@@ -26,6 +26,7 @@ from .failures import (
     InsufficientReconstructionError,
 )
 from .output_manifest import MeshMetadata, OutputManifest
+from modules.utils.mesh_inspection import get_mesh_stats_cheaply
 
 
 class ReconstructionRunner:
@@ -193,21 +194,14 @@ class ReconstructionRunner:
         if not mesh_path.exists():
             raise MissingArtifactError(mesh_path.name)
 
-        try:
-            mesh = trimesh.load(str(mesh_path))
-        except Exception as e:
-            raise MissingArtifactError(f"{mesh_path.name}: unreadable mesh ({e})")
+        stats = get_mesh_stats_cheaply(str(mesh_path))
+        vertex_count = stats.get("vertex_count", 0)
+        face_count = stats.get("face_count", 0)
 
-        if isinstance(mesh, trimesh.Scene):
-            mesh = mesh.dump(concatenate=True)
+        if vertex_count == 0 or face_count == 0:
+            raise MissingArtifactError(f"{mesh_path.name}: empty or face-less mesh (detected by header scan)")
 
-        if not isinstance(mesh, trimesh.Trimesh):
-            raise MissingArtifactError(f"{mesh_path.name}: not a polygon mesh")
-
-        if len(mesh.vertices) == 0 or len(mesh.faces) == 0:
-            raise MissingArtifactError(f"{mesh_path.name}: empty or face-less mesh")
-
-        return int(len(mesh.vertices)), int(len(mesh.faces))
+        return int(vertex_count), int(face_count)
 
     def _score_attempt(self, results: dict) -> float:
         """

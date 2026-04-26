@@ -775,17 +775,13 @@ class IngestionWorker:
         )
         texture_path = cleanup_stats.get("cleaned_texture_path") or primary_texture
         texture_path_exists = bool(texture_path and Path(texture_path).exists())
-        has_uv = bool(export_metrics["has_uv"])
-        has_material = bool(export_metrics["has_material"])
-        has_embedded_texture = bool(export_metrics["has_embedded_texture"])
-        texture_status = export_metrics.get("texture_integrity_status", "missing")
-
+        
         # ── TICKET-005/007: Use IntegrationFlow for validation input assembly ──
         validation_input = IntegrationFlow.map_metadata_to_validator_input(
             metadata=metadata,
             cleanup_stats=cleanup_stats,
             export_report=export_metrics,
-            texture_path_exists=bool(texture_path_exists or export_metrics.get("has_embedded_texture")),
+            texture_path_exists=bool(texture_path_exists or export_metrics.get("has_embedded_texture", False)),
             expected_product_color=settings.expected_product_color,
         )
 

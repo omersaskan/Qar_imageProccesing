@@ -967,17 +967,9 @@ class COLMAPAdapter(ReconstructionAdapter):
         if not mesh_path.exists() or mesh_path.stat().st_size <= 0:
             return False
 
-        try:
-            mesh = trimesh.load(str(mesh_path))
-            if isinstance(mesh, trimesh.Scene):
-                mesh = mesh.dump(concatenate=True)
-            return (
-                isinstance(mesh, trimesh.Trimesh)
-                and len(mesh.vertices) > 0
-                and len(mesh.faces) > 0
-            )
-        except Exception:
-            return False
+        from modules.utils.mesh_inspection import get_mesh_stats_cheaply
+        stats = get_mesh_stats_cheaply(str(mesh_path))
+        return stats.get("vertex_count", 0) > 0 and stats.get("face_count", 0) > 0
 
     def _discover_mesh_candidates(self, dense_dir: Path) -> List[str]:
         candidates: List[str] = []
