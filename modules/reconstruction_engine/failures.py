@@ -43,10 +43,15 @@ class DenseMaskAlignmentError(ReconstructionError):
 
 class TexturingFailed(ReconstructionError):
     """Raised when TextureMesh fails to produce expected outputs."""
-    def __init__(self, message: str, log_path: Optional[str] = None):
-        if log_path:
-            full_msg = f"{message} | Log: {log_path}"
+    def __init__(self, message: str, log_path: Optional[str] = None, exit_code: Optional[int] = None):
+        self.exit_code = exit_code
+        if exit_code == 3221226505:
+            full_msg = f"TEXTUREMESH_NATIVE_CRASH (code {exit_code}): {message}"
         else:
             full_msg = message
+            
+        if log_path:
+            full_msg = f"{full_msg} | Log: {log_path}"
+        
         super().__init__(full_msg)
         self.log_path = log_path

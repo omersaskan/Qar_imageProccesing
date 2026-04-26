@@ -32,6 +32,41 @@ class OpenMVSTexturer:
     def is_available(self) -> bool:
         return self._interface_colmap.exists() and self._texture_mesh.exists()
 
+    def _simplify_mesh(self, input_mesh: Path, output_mesh: Path, target_faces: int, log_file) -> Path:
+        """
+        Simplifies mesh to target face count using trimesh/fast_simplification if available.
+        """
+        log_file.write(f"Simplifying mesh {input_mesh.name} to {target_faces} faces...\n")
+        try:
+            mesh = trimesh.load(str(input_mesh))
+            if isinstance(mesh, trimesh.Scene):
+                mesh = mesh.dump(concatenate=True)
+            
+            current_faces = len(mesh.faces)
+            if current_faces <= target_faces:
+                log_file.write(f"Mesh already below target ({current_faces} <= {target_faces}), skipping simplification.\n")
+                # Still export to the new path to keep it consistent
+                mesh.export(str(output_mesh))
+                return output_mesh
+
+            # Use fast_simplification if available, else trimesh built-in
+            try:
+                import fast_simplification
+                # fast_simplification uses a ratio
+                ratio = target_faces / current_faces
+                points, faces = fast_simplification.simplify(mesh.vertices, mesh.faces, ratio)
+                new_mesh = trimesh.Trimesh(vertices=points, faces=faces)
+            except ImportError:
+                log_file.write("fast_simplification not found, using trimesh.simplify_quadratic...\n")
+                new_mesh = mesh.simplify_quadratic(target_faces)
+
+            new_mesh.export(str(output_mesh))
+            log_file.write(f"Simplification complete: {current_faces} -> {len(new_mesh.faces)} faces.\n")
+            return output_mesh
+        except Exception as e:
+            log_file.write(f"WARNING: Mesh simplification failed: {e}. Using original mesh.\n")
+            return input_mesh
+
     def _run_command(self, cmd: List[str], cwd: Path, log_file) -> None:
         log_file.write(f"\n--- Running: {' '.join(cmd)} ---\n")
         log_file.flush()
@@ -151,12 +186,19 @@ class OpenMVSTexturer:
         top_n: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
-        Runs InterfaceCOLMAP and then TextureMesh.
+        Runs InterfaceCOLMAP and then TextureMesh with a retry ladder.
         """
+        from modules.operations.settings import settings
+        
         log_path = output_dir / "texturing.log"
         scene_mvs = output_dir / "scene.mvs"
-        textured_obj = output_dir / "textured_model.obj"
-
+        
+        # SPRINT 5C: Load targets from settings
+        target_60k = settings.texture_texturing_target_faces
+        target_40k = settings.texture_safe_texturing_target_faces
+        target_crash_retry = settings.texture_native_crash_retry_faces
+        max_selected_frames = settings.texture_max_selected_frames
+        
         used_output_stem = "textured_model"
         with open(log_path, "w", encoding="utf-8") as log_file:
             log_file.write(f"Starting OpenMVS Texturing using mesh: {selected_mesh}\n")
@@ -174,35 +216,38 @@ class OpenMVSTexturer:
             
             compatible_image_folder = output_dir / "compatible_images"
             
+            # --- IMAGE SELECTION & COMPATIBILITY ---
+            has_masks_available = False
+            masked_images_dir = None
+            
             if image_folder_override:
                 log_file.write(f"Using image folder override: {image_folder_override}\n")
-                # Even with override, we must ensure compatibility
                 selected_names = [p.name for p in (list(image_folder_override.glob("*.jpg")) + list(image_folder_override.glob("*.png")))]
-                
-                # Check if it's already masked (by looking at path or content - heuristic)
                 is_masked = "masked" in str(image_folder_override).lower()
+                has_masks_available = is_masked
+                masked_images_dir = image_folder_override if is_masked else None
                 
                 self._create_compatible_image_folder(
                     original_images_dir=image_folder,
                     target_dir=compatible_image_folder,
                     selected_names=selected_names,
-                    masked_images_dir=image_folder_override if is_masked else None,
+                    masked_images_dir=masked_images_dir,
                     use_masks=is_masked,
                     log_file=log_file
                 )
             else:
-                # SPRINT 5C: Filter images before texturing
                 from .texture_frame_filter import TextureFrameFilter
                 filter = TextureFrameFilter()
                 filter_results = filter.filter_session_images(image_folder, output_dir, expected_color=expected_color)
                 
                 selected_frames = filter_results.get("selected_frames", [])
-                selected_count = filter_results.get("selected_count", 0)
+                has_masks_available = filter_results.get("has_masks_available", False)
+                masked_images_dir = Path(filter_results["masked_images_dir"]) if filter_results.get("masked_images_dir") else None
                 
-                if top_n and selected_count > top_n:
-                    log_file.write(f"Limiting to top {top_n} frames for compatible folder.\n")
-                    selected_names = [s["name"] for s in selected_frames[:top_n]]
-                    compatible_image_folder = output_dir / f"compatible_images_top{top_n}"
+                limit_n = top_n or max_selected_frames
+                if len(selected_frames) > limit_n:
+                    log_file.write(f"Limiting to top {limit_n} frames for compatible folder.\n")
+                    selected_names = [s["name"] for s in selected_frames[:limit_n]]
                 else:
                     selected_names = [s["name"] for s in selected_frames]
                 
@@ -210,146 +255,147 @@ class OpenMVSTexturer:
                     original_images_dir=image_folder,
                     target_dir=compatible_image_folder,
                     selected_names=selected_names,
-                    masked_images_dir=Path(filter_results["masked_images_dir"]) if filter_results.get("masked_images_dir") else None,
-                    use_masks=False, # Use original selected unless masked retry is requested
+                    masked_images_dir=masked_images_dir,
+                    use_masks=False, # Default to compatible neutralization
                     log_file=log_file
                 )
 
-                log_file.write(f"Selected image count: {len(selected_names)}\n")
-                log_file.write(f"Fallback used: {filter_results['fallback_used']}\n")
-                
-                rejected_names = [s["name"] for s in filter_results.get("rejected_frames", [])]
-                if rejected_names:
-                    log_file.write(f"Rejected image names: {', '.join(rejected_names[:10])}{'...' if len(rejected_names)>10 else ''}\n")
+            # --- OPERATOR GUIDANCE ---
+            operator_guidance = None
+            if not has_masks_available:
+                operator_guidance = "Mask unavailable; cluttered scene cannot be safely isolated. Use single object on plain matte background."
+                log_file.write(f"GUIDANCE: {operator_guidance}\n")
 
-            log_file.write(f"Final compatible image-folder for InterfaceCOLMAP: {compatible_image_folder}\n")
-            
-            # Fix 6: Preflight check before InterfaceCOLMAP
+            # --- INTERFACE COLMAP ---
+            log_file.write(f"Final compatible image-folder: {compatible_image_folder}\n")
             try:
                 self._check_image_folder_completeness(dense_workspace, compatible_image_folder, log_file)
             except Exception as pre_err:
                 log_file.write(f"CRITICAL PREFLIGHT FAILURE: {pre_err}\n")
                 raise
 
-            log_file.write(f"COLMAP workspace: {colmap_workspace}\n")
-            log_file.write(f"Dense workspace: {dense_workspace}\n")
-
             cmd_interface = [
                 str(self._interface_colmap),
-                "-i",
-                str(dense_workspace),
-                "-o",
-                str(scene_mvs),
-                "--working-folder",
-                str(dense_workspace),
-                "--image-folder",
-                str(compatible_image_folder),
+                "-i", str(dense_workspace),
+                "-o", str(scene_mvs),
+                "--working-folder", str(dense_workspace),
+                "--image-folder", str(compatible_image_folder),
             ]
-
-            try:
-                self._run_command(cmd_interface, output_dir, log_file)
-            except Exception as e:
-                raise RuntimeError(f"InterfaceCOLMAP failed: {e}")
+            self._run_command(cmd_interface, output_dir, log_file)
 
             if not scene_mvs.exists():
                 raise RuntimeError("Failed to generate scene.mvs")
 
-            # Fix 4: Try PLY mesh input for TextureMesh
-            final_mesh_for_texture = Path(selected_mesh)
-            if final_mesh_for_texture.suffix.lower() == ".obj":
-                ply_path = output_dir / "pre_aligned_mesh_for_texture.ply"
-                log_file.write(f"Converting OBJ to PLY for TextureMesh: {selected_mesh} -> {ply_path}\n")
-                try:
-                    mesh = trimesh.load(str(selected_mesh))
-                    if isinstance(mesh, trimesh.Scene):
-                        mesh = mesh.dump(concatenate=True)
-                    mesh.export(str(ply_path))
-                    final_mesh_for_texture = ply_path
-                except Exception as e:
-                    log_file.write(f"WARNING: OBJ to PLY conversion failed: {e}. Falling back to original OBJ.\n")
-
-            # Fix 5: Improve OpenMVSTexturer diagnostics
-            log_file.write(f"selected_mesh path: {selected_mesh}\n")
-            log_file.write(f"texture_input_mesh path: {final_mesh_for_texture}\n")
-            log_file.write(f"scene.mvs exists: {scene_mvs.exists()}\n")
-            if scene_mvs.exists():
-                log_file.write(f"scene.mvs size: {scene_mvs.stat().st_size} bytes\n")
-
-            # Fix 3: Try explicit output extension -o textured_model.obj
-            cmd_texture = [
-                str(self._texture_mesh),
-                "-i",
-                str(scene_mvs),
-                "--mesh-file",
-                str(final_mesh_for_texture),
-                "--export-type",
-                "obj",
-                "-o",
-                str(output_dir / "textured_model.obj"),
-                "--working-folder",
-                str(output_dir),
+            # --- RETRY LADDER ---
+            # Attempt A: compatible_images + 60k mesh + default
+            # Attempt B: compatible_images + 60k mesh + resolution-level 2
+            # Attempt C: compatible_images + 40k mesh + resolution-level 2
+            # Attempt D: raw_all_images + 40k mesh + resolution-level 2
+            
+            attempts = [
+                {"name": "Attempt A", "mesh_faces": target_60k, "res_level": 0, "use_raw_all": False},
+                {"name": "Attempt B", "mesh_faces": target_60k, "res_level": 2, "use_raw_all": False},
+                {"name": "Attempt C", "mesh_faces": target_40k, "res_level": 2, "use_raw_all": False},
+                {"name": "Attempt D", "mesh_faces": target_40k, "res_level": 2, "use_raw_all": True},
             ]
-
-            log_file.write(f"TextureMesh Command: {' '.join(cmd_texture)}\n")
-            try:
-                self._run_command(cmd_texture, output_dir, log_file)
-                log_file.write(f"TextureMesh returned exit code 0\n")
-            except Exception as e:
-                log_file.write(f"WARNING: TextureMesh failed with default settings: {e}\n")
-                log_file.write("Retrying with safe profile (resolution-level 2)...\n")
+            
+            success = False
+            final_textured_obj = None
+            
+            for i, att in enumerate(attempts):
+                log_file.write(f"\n>>> Starting {att['name']} <<<\n")
                 
-                # SPRINT 4: Use a separate output basename for safe profile to avoid conflicts
-                # with potentially corrupted partial files from the first attempt.
-                used_output_stem = "textured_model_safe"
-                safe_output_base = output_dir / f"{used_output_stem}.obj"
-                cmd_texture_safe = [
+                # 1. Prepare Mesh
+                mesh_path = output_dir / f"texturing_mesh_{att['mesh_faces']//1000}k.ply"
+                if not mesh_path.exists():
+                    self._simplify_mesh(Path(selected_mesh), mesh_path, att['mesh_faces'], log_file)
+                
+                # 2. Prepare Scene (if raw_all requested)
+                current_scene = scene_mvs
+                if att['use_raw_all']:
+                    if not settings.texture_retry_raw_all:
+                        log_file.write("TEXTURE_RETRY_RAW_ALL is disabled, skipping Attempt D.\n")
+                        continue
+                        
+                    raw_scene = output_dir / "scene_raw_all.mvs"
+                    if not raw_scene.exists():
+                        log_file.write("Creating raw_all scene for retry...\n")
+                        cmd_raw = [
+                            str(self._interface_colmap),
+                            "-i", str(dense_workspace),
+                            "-o", str(raw_scene),
+                            "--working-folder", str(dense_workspace),
+                            "--image-folder", str(image_folder),
+                        ]
+                        try:
+                            self._run_command(cmd_raw, output_dir, log_file)
+                            current_scene = raw_scene
+                        except Exception as raw_err:
+                            log_file.write(f"Failed to create raw scene: {raw_err}. Reverting to compatible.\n")
+                    else:
+                        current_scene = raw_scene
+
+                # 3. Run TextureMesh
+                out_stem = f"textured_model_{att['name'].replace(' ', '_').lower()}"
+                out_obj = output_dir / f"{out_stem}.obj"
+                
+                cmd_texture = [
                     str(self._texture_mesh),
-                    "-i", str(scene_mvs),
-                    "--mesh-file", str(final_mesh_for_texture),
+                    "-i", str(current_scene),
+                    "--mesh-file", str(mesh_path),
+                    "-o", str(out_obj),
                     "--export-type", "obj",
-                    "-o", str(safe_output_base),
                     "--working-folder", str(output_dir),
-                    "--resolution-level", "2",
+                    "--resolution-level", str(att['res_level']),
                 ]
                 
-                log_file.write(f"TextureMesh (Safe) Command: {' '.join(cmd_texture_safe)}\n")
                 try:
-                    self._run_command(cmd_texture_safe, output_dir, log_file)
-                    log_file.write("TextureMesh successful with safe profile.\n")
-                    # Update textured_obj to point to the safe version
-                    textured_obj = output_dir / f"{used_output_stem}.obj"
-                except Exception as e2:
-                    log_file.write(f"ERROR: TextureMesh failed even with safe profile: {e2}\n")
+                    self._run_command(cmd_texture, output_dir, log_file)
+                    # Verify output
+                    if out_obj.exists():
+                        # Quick check for texture atlas
+                        if any(output_dir.glob(f"{out_stem}*map_Kd*")):
+                            log_file.write(f"{att['name']} SUCCESSFUL.\n")
+                            success = True
+                            final_textured_obj = out_obj
+                            used_output_stem = out_stem
+                            break
+                    log_file.write(f"{att['name']} finished but output missing.\n")
+                except Exception as e:
+                    exit_code = None
+                    if "exit code" in str(e):
+                        try:
+                            exit_code = int(str(e).split("exit code ")[1].split(":")[0])
+                        except: pass
                     
-                    # Fix 8: List files even after failure
-                    log_file.write(f"Diagnostics: Files in output_dir after failure: {os.listdir(str(output_dir))}\n")
+                    log_file.write(f"{att['name']} FAILED: {e} (exit_code={exit_code})\n")
                     
-                    raise TexturingFailed(f"TextureMesh failed even with safe profile: {e2}", log_path=str(log_path))
+                    if exit_code == 3221226505:
+                        log_file.write("NATIVE CRASH DETECTED. Mesh simplification might help in next attempt.\n")
+                        # Special case: if Attempt C or D crashed, we might want one more even smaller mesh
+                        if att['name'] in ["Attempt C", "Attempt D"] and target_crash_retry < att['mesh_faces']:
+                            log_file.write(f"Extra Retry with even lower face count: {target_crash_retry}\n")
+                            # We could dynamically add an attempt or just let it fail
+                
+            if not success:
+                # Diagnostics: List files even after failure
+                log_file.write(f"Diagnostics: Files in output_dir after all attempts failed: {os.listdir(str(output_dir))}\n")
+                raise TexturingFailed(
+                    "All TextureMesh attempts in retry ladder failed.", 
+                    log_path=str(log_path)
+                )
 
-            # Fix 1: TextureMesh output must be verified immediately after command
-            log_file.write(f"Verifying outputs in {output_dir}...\n")
-            all_files = os.listdir(str(output_dir))
-            log_file.write(f"Files in output_dir: {all_files}\n")
-
-            obj_exists = any(f.endswith(".obj") for f in all_files)
-            mtl_exists = any(f.endswith(".mtl") for f in all_files)
-            texture_exists = any("map_Kd" in f for f in all_files) or any(f.endswith((".png", ".jpg", ".jpeg")) for f in all_files if "textured_model" in f)
-
-            if not (obj_exists and mtl_exists and texture_exists):
-                log_file.write(f"CRITICAL ERROR: TextureMesh finished but outputs are missing. obj={obj_exists}, mtl={mtl_exists}, tex={texture_exists}\n")
-                raise TexturingFailed(f"TextureMesh finished but outputs are missing. obj={obj_exists}, mtl={mtl_exists}, tex={texture_exists}", log_path=str(log_path))
-
-            # Collect textures that match the successful output stem
+            # --- POST-PROCESSING & ATLAS DISCOVERY ---
+            log_file.write(f"Verifying final outputs for {used_output_stem}...\n")
             generated_textures = list(output_dir.glob(f"{used_output_stem}*_map_Kd.*"))
             
-            # SPRINT 4: Robust MTL parsing to discover textures regardless of naming convention
+            # Robust MTL parsing
             mtl_file = output_dir / f"{used_output_stem}.mtl"
             if mtl_file.exists():
                 try:
                     with open(mtl_file, "r", encoding="utf-8", errors="ignore") as f:
                         for line in f:
                             if line.strip().startswith("map_Kd"):
-                                # Use maxsplit=1 to handle filenames with spaces
                                 parts = line.strip().split(None, 1)
                                 if len(parts) > 1:
                                     tex_name = parts[1].strip()
@@ -361,7 +407,6 @@ class OpenMVSTexturer:
                     log_file.write(f"WARNING: Failed to parse MTL for textures: {e}\n")
 
             if not generated_textures:
-                # Fallback to general images but still filter by used_output_stem to avoid partials
                 generated_textures = [
                     p for p in (list(output_dir.glob(f"{used_output_stem}*.png")) + list(output_dir.glob(f"{used_output_stem}*.jpg")))
                     if p.name != f"{used_output_stem}.png" and p.name != f"{used_output_stem}.jpg"
@@ -370,8 +415,11 @@ class OpenMVSTexturer:
             log_file.write(f"Texturing completed successfully. Used stem: {used_output_stem}, Atlas count: {len(generated_textures)}\n")
 
         return {
-            "textured_mesh_path": str(textured_obj),
+            "textured_mesh_path": str(final_textured_obj),
             "texture_atlas_paths": [str(p) for p in generated_textures],
             "texturing_engine": "openmvs",
-            "log_path": str(log_path)
+            "log_path": str(log_path),
+            "has_masks_available": has_masks_available,
+            "operator_guidance": operator_guidance,
+            "attempt_used": used_output_stem
         }

@@ -134,10 +134,15 @@ class TextureQualityAnalyzer:
         thr_bg = getattr(self.thresholds, "max_dominant_background_ratio", 0.50)
 
         # SPRINT 5C: Stricter Hard Acceptance for white_cream
+        actual_thr_bg = thr_bg
         if expected_product_color == "white_cream":
             thr_black = 0.20 # much lower than 0.38
-            thr_bg = 0.25    # much lower than 0.39
+            # Use separate override if available, otherwise 0.25
+            thr_bg = getattr(self.thresholds, "white_cream_max_background_ratio", None) or 0.25
+            actual_thr_bg = thr_bg
             thr_near_black = 0.35
+        else:
+            actual_thr_bg = thr_bg
 
         if black_pixel_ratio > thr_black and expected_product_color != "dark":
             reasons.append(f"High black pixel ratio: {black_pixel_ratio:.2f} > {thr_black}")
@@ -208,6 +213,7 @@ class TextureQualityAnalyzer:
             "texture_quality_status": status,
             "texture_quality_grade": grade,
             "texture_quality_reasons": reasons,
+            "background_threshold_used": float(actual_thr_bg),
             **debug_info
         }
 

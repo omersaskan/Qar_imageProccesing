@@ -140,11 +140,20 @@ class Settings(BaseSettings):
     texture_reject_subject_clipped: bool = Field(True, validation_alias="TEXTURE_REJECT_SUBJECT_CLIPPED")
     texture_min_clean_frames: int = Field(20, validation_alias="TEXTURE_MIN_CLEAN_FRAMES")
 
+    # --- TEXTURE MESH SIMPLIFICATION & RETRY ---
+    texture_texturing_target_faces: int = Field(60000, validation_alias="TEXTURE_TEXTURING_TARGET_FACES")
+    texture_safe_texturing_target_faces: int = Field(40000, validation_alias="TEXTURE_SAFE_TEXTURING_TARGET_FACES")
+    texture_native_crash_retry_faces: int = Field(30000, validation_alias="TEXTURE_NATIVE_CRASH_RETRY_FACES")
+    texture_use_compatible_neutralization: bool = Field(True, validation_alias="TEXTURE_USE_COMPATIBLE_NEUTRALIZATION")
+    texture_retry_raw_all: bool = Field(True, validation_alias="TEXTURE_RETRY_RAW_ALL")
+    texture_max_selected_frames: int = Field(20, validation_alias="TEXTURE_MAX_SELECTED_FRAMES")
+
     # --- TEXTURE QUALITY QA ---
     max_black_pixel_ratio: float = Field(0.20, validation_alias="MAX_BLACK_PIXEL_RATIO")
     max_dominant_background_ratio: float = Field(0.15, validation_alias="MAX_DOMINANT_BACKGROUND_RATIO")
     min_atlas_coverage_ratio: float = Field(0.60, validation_alias="MIN_ATLAS_COVERAGE_RATIO")
     min_near_white_ratio_white_cream: float = Field(0.40, validation_alias="MIN_NEAR_WHITE_RATIO_WHITE_CREAM")
+    white_cream_max_background_ratio: Optional[float] = Field(None, validation_alias="WHITE_CREAM_MAX_BACKGROUND_RATIO")
     expected_product_color: str = Field("unknown", validation_alias="EXPECTED_PRODUCT_COLOR")
 
     @property
