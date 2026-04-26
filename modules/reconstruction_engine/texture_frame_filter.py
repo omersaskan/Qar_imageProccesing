@@ -29,30 +29,67 @@ class TextureFrameFilter:
              shutil.rmtree(selected_dir)
         selected_dir.mkdir(parents=True, exist_ok=True)
         
-        # SPRINT 5C: Mask-aware source improvement - Robust resolution
+        # SPRINT 5C: Real Mask Resolver - Robust Evaluation
         masked_dir = output_dir / "selected_images_masked"
         if masked_dir.exists():
             shutil.rmtree(masked_dir)
         masked_dir.mkdir(parents=True, exist_ok=True)
         
-        # Check multiple potential mask locations
         potential_mask_paths = [
             image_folder.parent / "stereo" / "masks",
             image_folder.parent / "masks",
             image_folder.parent.parent / "dense" / "stereo" / "masks",
             image_folder.parent.parent / "dense" / "masks",
             image_folder.parent.parent / "masks",
+            image_folder / "masks", # Some workflows put masks inside images folder
         ]
         
-        mask_folder = None
-        for p in potential_mask_paths:
-            if p.exists() and any(p.glob("*.png")):
-                mask_folder = p
-                break
+        best_mask_folder = None
+        best_match_score = -1
         
+        # We'll use a sample image to check dimensions
+        sample_img = None
+        if images:
+            sample_img = cv2.imread(str(images[0]))
+        
+        for p in potential_mask_paths:
+            exists = p.exists()
+            mask_files = list(p.glob("*.png")) + list(p.glob("*.jpg"))
+            mask_count = len(mask_files)
+            
+            if not exists or mask_count == 0:
+                logger.debug(f"Mask candidate: {p} - exists={exists}, count={mask_count}")
+                continue
+                
+            # Match evaluation
+            stem_matches = 0
+            dim_matches = 0
+            
+            image_stems = {img.stem for img in images}
+            for mask_path in mask_files[:20]: # Sample first 20 for speed
+                if mask_path.stem in image_stems:
+                    stem_matches += 1
+                    # Check dimension if it matches stem
+                    if sample_img is not None:
+                         m_img = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
+                         if m_img is not None and m_img.shape[:2] == sample_img.shape[:2]:
+                             dim_matches += 1
+            
+            # Normalize scores
+            sample_size = min(20, mask_count)
+            match_ratio = stem_matches / sample_size if sample_size > 0 else 0
+            
+            logger.info(f"Mask candidate: {p} | exists=True | count={mask_count} | stem_matches={stem_matches}/{sample_size} | dim_matches={dim_matches}/{sample_size}")
+            
+            # Selection criteria: high stem match and some dimension matches
+            if match_ratio > 0.5 and match_ratio >= best_match_score:
+                best_match_score = match_ratio
+                best_mask_folder = p
+        
+        mask_folder = best_mask_folder
         has_masks = mask_folder is not None
-        mask_count = len(list(mask_folder.glob("*.png"))) if has_masks else 0
-        logger.info(f"Mask resolution: folder={mask_folder}, count={mask_count}")
+        mask_count = len(list(mask_folder.glob("*"))) if has_masks else 0
+        logger.info(f"Selected mask_folder: {mask_folder} (score={best_match_score}, count={mask_count})")
 
         analyzed_stats = []
         rejected_stats = []
