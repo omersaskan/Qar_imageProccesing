@@ -13,6 +13,7 @@ from .rules import (
     validate_texture_quality,
     validate_material_semantics,
     validate_accessors,
+    validate_object_filtering,
 )
 from .texture_quality import TextureQualityAnalyzer
 
@@ -124,6 +125,9 @@ class AssetValidator:
         accessor_decisions = validate_accessors(asset_data)
         for k, v in accessor_decisions.items():
             checks[k] = v
+
+        # Object filtering check (Scene vs Object)
+        checks["object_filtering"] = validate_object_filtering(asset_data)
 
         blocking_checks = [k for k, v in checks.items() if v == "fail"]
         warning_checks = [k for k, v in checks.items() if v == "review"]

@@ -250,3 +250,16 @@ def validate_texture_quality(quality_data: Dict[str, Any]) -> str:
     if status == "contaminated":
         return "fail"
     return "fail"
+
+def validate_object_filtering(asset_data: Dict[str, Any]) -> str:
+    """
+    Ensures that for production assets, we didn't just export the raw scene.
+    Requires filtering_status == 'object_isolated'.
+    """
+    status = str(asset_data.get("filtering_status", "unknown")).lower()
+    if status == "object_isolated":
+        return "pass"
+    if status == "scene_raw":
+        # Raw scene geometry is a review/fail condition for delivered products
+        return "review"
+    return "pass" # Default pass for backward compatibility

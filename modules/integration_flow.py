@@ -9,7 +9,7 @@ class IntegrationFlow:
     Ensures validation is performed on actual cleanup results.
     """
     @staticmethod
-    def map_metadata_to_validator_input(metadata: NormalizedMetadata, texture_status: str = "complete") -> Dict[str, Any]:
+    def map_metadata_to_validator_input(metadata: NormalizedMetadata, texture_status: str = "complete", **overrides) -> Dict[str, Any]:
         """
         Maps NormalizedMetadata (Cleanup output) to AssetValidator input format.
         """
@@ -18,7 +18,7 @@ class IntegrationFlow:
         height = abs(metadata.bbox_max["y"] - metadata.bbox_min["y"])
         depth = abs(metadata.bbox_max["z"] - metadata.bbox_min["z"])
         
-        return {
+        input_data = {
             "poly_count": metadata.final_polycount,
             "texture_status": texture_status,
             # validator.validate() reads texture_integrity_status specifically
@@ -32,16 +32,17 @@ class IntegrationFlow:
             },
             # Pivot offset Z is often used as the base-to-center ground offset in this factory
             "ground_offset": metadata.pivot_offset.get("z", 0.0),
-            # Cleanup results are assumed to have valid accessors for geometry
-            "has_position_accessor": True,
-            "has_normal_accessor": True,
-            "has_texcoord_0_accessor": True
+            # STRICT: Do not hardcode accessor presence here. 
+            # It must be provided by the caller (e.g., from a real GLB inspection result)
+            # or explicitly passed as an override for test cases.
         }
+        input_data.update(overrides)
+        return input_data
 
     @staticmethod
-    def validate_cleanup_result(asset_id: str, metadata: NormalizedMetadata, validator: AssetValidator, allow_texture_quality_skip: bool = False) -> ValidationReport:
+    def validate_cleanup_result(asset_id: str, metadata: NormalizedMetadata, validator: AssetValidator, allow_texture_quality_skip: bool = False, **kwargs) -> ValidationReport:
         """
         Directly validates the cleanup metadata using the provided validator.
         """
-        validator_input = IntegrationFlow.map_metadata_to_validator_input(metadata)
+        validator_input = IntegrationFlow.map_metadata_to_validator_input(metadata, **kwargs)
         return validator.validate(asset_id, validator_input, allow_texture_quality_skip=allow_texture_quality_skip)

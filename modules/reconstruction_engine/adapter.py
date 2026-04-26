@@ -1072,6 +1072,8 @@ class COLMAPAdapter(ReconstructionAdapter):
                 # Hybrid masking: Unmasked pose (SfM), masked object (MVS)
                 # We extract features from the whole image to get better camera poses from the background.
                 pose_masks_dir = None if settings.recon_hybrid_masking else effective_masks_dir
+                
+                log_file.write(f"Feature extraction mask mode: {'UNMASKED (Hybrid Pose Estimation)' if pose_masks_dir is None and effective_masks_dir is not None else 'MASKED'}\n")
 
                 cmd_extract = self.builder.feature_extractor(
                     db_path,
@@ -1161,9 +1163,11 @@ class COLMAPAdapter(ReconstructionAdapter):
                 effective_mask_path = None
                 if is_mask_valid and not force_unmasked_fusion:
                     effective_mask_path = stereo_masks_dir
-                    log_file.write(f"Using validated dense masks from: {effective_mask_path}\n")
+                    log_file.write(f"Using validated dense masks for object reconstruction: {effective_mask_path}\n")
                 else:
-                    log_file.write("Proceeding UNMASKED for stereo_fusion (masks invalid or forced off).\n")
+                    log_file.write("PROCEEDING UNMASKED for stereo_fusion (masks invalid or forced off).\n")
+                    if settings.recon_hybrid_masking:
+                        log_file.write("WARNING: Raw scene geometry will be reconstructed as masks were unavailable.\n")
 
                 # Load StereoFusion settings
                 sf_min_pix = settings.recon_stereo_fusion_min_num_pixels
@@ -1276,6 +1280,7 @@ class COLMAPAdapter(ReconstructionAdapter):
             "mesher_used": mesher_used,
             "selected_sparse_model": selected_model_name,
             "mask_mode": "masked" if effective_masks_dir is not None else "unmasked",
+            "filtering_status": "object_isolated" if effective_mask_path else "scene_raw",
             "feature_mask_path": str(effective_masks_dir) if effective_masks_dir else None,
             "stereo_fusion_mask_path": str(effective_mask_path) if effective_mask_path else None,
             "dense_mask_valid": bool(is_mask_valid),
@@ -1308,6 +1313,8 @@ class COLMAPAdapter(ReconstructionAdapter):
             "sparse_dense_ratio": round(ratio, 4),
             "selected_mask_path": str(mask_path) if mask_path else None,
             "mask_validation_status": "valid" if mask_valid else "invalid/none",
+            "filtering_status": "object_isolated" if mask_path else "scene_raw",
+            "hybrid_strategy": "unmasked_pose_masked_object" if settings.recon_hybrid_masking else "standard",
             "stereo_fusion_thresholds": thresholds,
             "status": "success",
             "recommendation": "none"
@@ -1392,6 +1399,8 @@ class OpenMVSAdapter(COLMAPAdapter):
             try:
                 # Hybrid masking: Unmasked pose (SfM), masked object (MVS)
                 pose_masks_dir = None if settings.recon_hybrid_masking else effective_masks_dir
+                
+                log_file.write(f"Feature extraction mask mode: {'UNMASKED (Hybrid Pose Estimation)' if pose_masks_dir is None and effective_masks_dir is not None else 'MASKED'}\n")
 
                 self._run_command(
                     self.builder.feature_extractor(
@@ -1497,6 +1506,7 @@ class OpenMVSAdapter(COLMAPAdapter):
                     "engine_type": self.engine_type,
                     "textured": bool(discovered_texture),
                     "selected_sparse_model": best_model["path"].name,
+                    "filtering_status": "object_isolated" if effective_masks_dir else "scene_raw",
                 }
 
             except Exception as e:
@@ -1663,4 +1673,5 @@ class SimulatedAdapter(ReconstructionAdapter):
             "log_path": str(log_path),
             "vertex_count": 3,
             "face_count": 1,
+            "filtering_status": "object_isolated",
         }

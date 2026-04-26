@@ -94,7 +94,15 @@ def test_cleanup_validation_bridge(setup_system):
     )
     
     # Use the bridge
-    report = IntegrationFlow.validate_cleanup_result("asset_123", cleanup_metadata, validator, allow_texture_quality_skip=True)
+    report = IntegrationFlow.validate_cleanup_result(
+        "asset_123", 
+        cleanup_metadata, 
+        validator, 
+        allow_texture_quality_skip=True,
+        has_position_accessor=True,
+        has_normal_accessor=True,
+        has_texcoord_0_accessor=True
+    )
     
     assert report.final_decision == "pass"
     assert report.poly_count == 45000
