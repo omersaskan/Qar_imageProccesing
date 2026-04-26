@@ -39,7 +39,7 @@ def test_texture_frame_filter_rejects_dark_and_blurry(temp_dir):
     # Ensure it doesn't fallback by making sure good.jpg is actually good
     results = filter.filter_session_images(image_dir, output_dir)
     
-    selected_files = [f.name for f in results["selected_images_dir"].iterdir()]
+    selected_files = [f.name for f in Path(results["selected_images_dir"]).iterdir()]
     assert "good.jpg" in selected_files
     assert "dark.jpg" not in selected_files
     assert "blurry.jpg" not in selected_files

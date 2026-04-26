@@ -170,6 +170,7 @@ class TexturingService:
                 dense_workspace=colmap_dir / "dense",
                 selected_mesh=cleanup_stats["pre_aligned_mesh_path"],
                 output_dir=texturing_dir,
+                expected_color=expected_color,
             )
         except Exception as exc:
             logger.warning(f"OpenMVS texturing failed (degraded): {exc}")
@@ -196,6 +197,7 @@ class TexturingService:
                 generated_textures[0] = repair_results["repaired_path"]
                 texture_results["texture_atlas_paths"] = generated_textures
                 final_texture_stats = repair_results["repaired_stats"]
+                final_texture_stats["repaired_atlas_path"] = repair_results["repaired_path"]
             else:
                 final_texture_stats = repair_results.get("stats")
 

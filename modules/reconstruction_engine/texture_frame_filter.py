@@ -56,8 +56,10 @@ class TextureFrameFilter:
                 rejected_stats.append(stats)
                 
         # Ensure we have at least SOME images. If too restrictive, fallback to best of bad.
+        fallback_used = False
         if not selected_stats and images:
              logger.warning("All images rejected by filter. Falling back to top 10 by sharpness.")
+             fallback_used = True
              # Simple fallback to prevent complete failure
              all_analyzed = sorted([s for s in rejected_stats if "sharpness" in s], key=lambda x: x["sharpness"], reverse=True)
              for s in all_analyzed[:10]:
@@ -67,20 +69,23 @@ class TextureFrameFilter:
                  shutil.copy2(Path(s["path"]), selected_dir / s["name"])
 
         # Diagnostics
+        report = {
+            "selected_count": len(selected_stats),
+            "rejected_count": len(rejected_stats),
+            "fallback_used": fallback_used,
+            "selected_images_dir": str(selected_dir),
+            "selected_frames": selected_stats,
+            "rejected_frames": rejected_stats
+        }
         with open(output_dir / "selected_texture_frames.json", "w") as f:
-            json.dump(selected_stats, f, indent=2)
+            json.dump(report, f, indent=2)
         with open(output_dir / "rejected_texture_frames.json", "w") as f:
             json.dump(rejected_stats, f, indent=2)
             
         # Contact sheet of selected
         self._generate_contact_sheet(selected_stats, output_dir / "selected_texture_frames_contact_sheet.png")
 
-        return {
-            "selected_count": len(selected_stats),
-            "rejected_count": len(rejected_stats),
-            "selected_images_dir": selected_dir,
-            "selected_frames": selected_stats
-        }
+        return report
 
     def analyze_frame(self, path: Path, expected_color: str) -> Dict[str, Any]:
         img = cv2.imread(str(path))

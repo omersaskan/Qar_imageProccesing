@@ -60,14 +60,10 @@ class OpenMVSTexturer:
         dense_workspace: Path,
         selected_mesh: str,
         output_dir: Path,
+        expected_color: str = "unknown",
     ) -> Dict[str, Any]:
         """
-        Convert COLMAP output into MVS scene, and run TextureMesh.
-
-        Important fix:
-        InterfaceCOLMAP should prefer dense/images when available. Some previous
-        runs used dense_workspace.parent / images, which can point to the raw
-        input folder instead of COLMAP undistorted images.
+        Runs InterfaceCOLMAP and then TextureMesh.
         """
         log_path = output_dir / "texturing.log"
         scene_mvs = output_dir / "scene.mvs"
@@ -91,12 +87,19 @@ class OpenMVSTexturer:
             # SPRINT 5C: Filter images before texturing
             from .texture_frame_filter import TextureFrameFilter
             filter = TextureFrameFilter()
-            # We don't have expected_color here easily, but we can pass it if we update signature
-            # For now, use "unknown" or look for it in settings if we can
-            filter_results = filter.filter_session_images(image_folder, output_dir)
+            filter_results = filter.filter_session_images(image_folder, output_dir, expected_color=expected_color)
             selected_image_folder = filter_results["selected_images_dir"]
             
-            log_file.write(f"Filtered image-folder: {selected_image_folder} ({filter_results['selected_count']} images selected)\n")
+            log_file.write(f"Filtered image-folder: {selected_image_folder}\n")
+            original_images = list(image_folder.glob('*.jpg')) + list(image_folder.glob('*.png'))
+            log_file.write(f"Original image count: {len(original_images)}\n")
+            log_file.write(f"Selected image count: {filter_results['selected_count']}\n")
+            log_file.write(f"Fallback used: {filter_results['fallback_used']}\n")
+            
+            rejected_names = [s["name"] for s in filter_results.get("rejected_frames", [])]
+            if rejected_names:
+                log_file.write(f"Rejected image names: {', '.join(rejected_names)}\n")
+
             log_file.write(f"COLMAP workspace: {colmap_workspace}\n")
             log_file.write(f"Dense workspace: {dense_workspace}\n")
 
