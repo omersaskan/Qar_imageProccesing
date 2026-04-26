@@ -1,7 +1,11 @@
 import os
 import subprocess
+import shutil
 from pathlib import Path
 from typing import Dict, Any, List
+
+import trimesh
+from .failures import TexturingFailed
 
 
 class OpenMVSTexturer:
@@ -106,22 +110,46 @@ class OpenMVSTexturer:
             if not scene_mvs.exists():
                 raise RuntimeError("Failed to generate scene.mvs")
 
+            # Fix 4: Try PLY mesh input for TextureMesh
+            final_mesh_for_texture = Path(selected_mesh)
+            if final_mesh_for_texture.suffix.lower() == ".obj":
+                ply_path = output_dir / "pre_aligned_mesh_for_texture.ply"
+                log_file.write(f"Converting OBJ to PLY for TextureMesh: {selected_mesh} -> {ply_path}\n")
+                try:
+                    mesh = trimesh.load(str(selected_mesh))
+                    if isinstance(mesh, trimesh.Scene):
+                        mesh = mesh.dump(concatenate=True)
+                    mesh.export(str(ply_path))
+                    final_mesh_for_texture = ply_path
+                except Exception as e:
+                    log_file.write(f"WARNING: OBJ to PLY conversion failed: {e}. Falling back to original OBJ.\n")
+
+            # Fix 5: Improve OpenMVSTexturer diagnostics
+            log_file.write(f"selected_mesh path: {selected_mesh}\n")
+            log_file.write(f"texture_input_mesh path: {final_mesh_for_texture}\n")
+            log_file.write(f"scene.mvs exists: {scene_mvs.exists()}\n")
+            if scene_mvs.exists():
+                log_file.write(f"scene.mvs size: {scene_mvs.stat().st_size} bytes\n")
+
+            # Fix 3: Try explicit output extension -o textured_model.obj
             cmd_texture = [
                 str(self._texture_mesh),
                 "-i",
                 str(scene_mvs),
                 "--mesh-file",
-                str(selected_mesh),
+                str(final_mesh_for_texture),
                 "--export-type",
                 "obj",
                 "-o",
-                str(output_dir / "textured_model"),
+                str(output_dir / "textured_model.obj"),
                 "--working-folder",
                 str(output_dir),
             ]
 
+            log_file.write(f"TextureMesh Command: {' '.join(cmd_texture)}\n")
             try:
                 self._run_command(cmd_texture, output_dir, log_file)
+                log_file.write(f"TextureMesh returned exit code 0\n")
             except Exception as e:
                 log_file.write(f"WARNING: TextureMesh failed with default settings: {e}\n")
                 log_file.write("Retrying with safe profile (resolution-level 2)...\n")
@@ -129,17 +157,18 @@ class OpenMVSTexturer:
                 # SPRINT 4: Use a separate output basename for safe profile to avoid conflicts
                 # with potentially corrupted partial files from the first attempt.
                 used_output_stem = "textured_model_safe"
-                safe_output_base = output_dir / used_output_stem
+                safe_output_base = output_dir / f"{used_output_stem}.obj"
                 cmd_texture_safe = [
                     str(self._texture_mesh),
                     "-i", str(scene_mvs),
-                    "--mesh-file", str(selected_mesh),
+                    "--mesh-file", str(final_mesh_for_texture),
                     "--export-type", "obj",
                     "-o", str(safe_output_base),
                     "--working-folder", str(output_dir),
                     "--resolution-level", "2",
                 ]
                 
+                log_file.write(f"TextureMesh (Safe) Command: {' '.join(cmd_texture_safe)}\n")
                 try:
                     self._run_command(cmd_texture_safe, output_dir, log_file)
                     log_file.write("TextureMesh successful with safe profile.\n")
@@ -147,10 +176,20 @@ class OpenMVSTexturer:
                     textured_obj = output_dir / f"{used_output_stem}.obj"
                 except Exception as e2:
                     log_file.write(f"ERROR: TextureMesh failed even with safe profile: {e2}\n")
-                    raise RuntimeError(f"TextureMesh failed even with safe profile: {e2}")
+                    raise TexturingFailed(f"TextureMesh failed even with safe profile: {e2}", log_path=str(log_path))
 
-            if not textured_obj.exists():
-                raise RuntimeError(f"TextureMesh finished but obj file missing: {textured_obj}")
+            # Fix 1: TextureMesh output must be verified immediately after command
+            log_file.write(f"Verifying outputs in {output_dir}...\n")
+            all_files = os.listdir(str(output_dir))
+            log_file.write(f"Files in output_dir: {all_files}\n")
+
+            obj_exists = any(f.endswith(".obj") for f in all_files)
+            mtl_exists = any(f.endswith(".mtl") for f in all_files)
+            texture_exists = any("map_Kd" in f for f in all_files) or any(f.endswith((".png", ".jpg", ".jpeg")) for f in all_files if "textured_model" in f)
+
+            if not (obj_exists and mtl_exists and texture_exists):
+                log_file.write(f"CRITICAL ERROR: TextureMesh finished but outputs are missing. obj={obj_exists}, mtl={mtl_exists}, tex={texture_exists}\n")
+                raise TexturingFailed(f"TextureMesh finished but outputs are missing. obj={obj_exists}, mtl={mtl_exists}, tex={texture_exists}", log_path=str(log_path))
 
             # Collect textures that match the successful output stem
             generated_textures = list(output_dir.glob(f"{used_output_stem}*_map_Kd.*"))

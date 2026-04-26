@@ -21,9 +21,9 @@ class IntegrationFlow:
             "bbox": {"width": width, "height": height, "depth": depth},
             "ground_offset": metadata.pivot_offset.get("z", 0.0),
             "cleanup_stats": cleanup_stats or {},
-            "delivery_profile": (export_report or {}).get("profile", "raw_archive"),
+            "delivery_profile": (cleanup_stats or {}).get("delivery_profile") or (export_report or {}).get("profile", "raw_archive"),
             "material_semantic_status": "geometry_only", # Default
-            "texture_integrity_status": "complete",
+            "texture_integrity_status": "complete" if (cleanup_stats or {}).get("has_uv") and (export_report or {}).get("texture_count", 0) > 0 else ("geometry_only" if not (cleanup_stats or {}).get("has_uv") else "missing"),
             "has_uv": (cleanup_stats or {}).get("has_uv", False),
             "has_material": (cleanup_stats or {}).get("has_material", False),
         }

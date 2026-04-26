@@ -40,3 +40,13 @@ class DenseMaskAlignmentError(ReconstructionError):
         else:
             full_msg = message
         super().__init__(full_msg)
+
+class TexturingFailed(ReconstructionError):
+    """Raised when TextureMesh fails to produce expected outputs."""
+    def __init__(self, message: str, log_path: Optional[str] = None):
+        if log_path:
+            full_msg = f"{message} | Log: {log_path}"
+        else:
+            full_msg = message
+        super().__init__(full_msg)
+        self.log_path = log_path

@@ -736,6 +736,14 @@ class IngestionWorker:
 
         if texturing_result.texturing_status == "real" and texturing_result.texture_atlas_paths:
             cleanup_stats["cleaned_texture_path"] = texturing_result.texture_atlas_paths[0]
+        
+        # SPRINT 5: Fix 2 — Enforce REQUIRE_TEXTURED_OUTPUT
+        if settings.require_textured_output and texturing_result.texturing_status in ["degraded", "absent"]:
+            reason = f"TEXTURING_REQUIRED_BUT_MISSING: Texturing status is '{texturing_result.texturing_status}' but settings.require_textured_output=True."
+            log_path = manifest.texturing_log_path or "unknown"
+            logger.error("[%s] %s (Log: %s)", session.session_id, reason, log_path)
+            raise IrrecoverableError(f"{reason} See {log_path} for details.")
+
         manifest.texturing_status = texturing_result.texturing_status
 
         manifest_file = (
@@ -849,6 +857,8 @@ class IngestionWorker:
             export_report=export_metrics,
             texture_path_exists=bool(texture_path_exists or export_metrics.get("has_embedded_texture", False)),
             expected_product_color=settings.expected_product_color,
+            # SPRINT 5: Fix 7 — Preserve delivery_profile from cleanup_stats
+            delivery_profile=cleanup_stats.get("delivery_profile", "raw_archive"),
         )
 
         report = self.validator.validate(asset_id, validation_input)

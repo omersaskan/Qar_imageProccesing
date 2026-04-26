@@ -1637,11 +1637,28 @@ class OpenMVSAdapter(COLMAPAdapter):
                     log_file.write(f"Error: Object isolation failed, aborting texturing to prevent raw scene export: {iso_err}\n")
                     raise RuntimeReconstructionError(f"Object isolation failed: {iso_err}")
 
+                # SPRINT 5: Fix 5 — Improved Diagnostics
+                log_file.write(f"selected_mesh path: {project_mesh_ply}\n")
+                log_file.write(f"scene.mvs exists: {mvs_dense.exists()}\n")
+                if mvs_dense.exists():
+                    log_file.write(f"scene.mvs size: {mvs_dense.stat().st_size} bytes\n")
+
                 self._run_command(
                     self.mvs_builder.texture_mesh(mvs_dense, project_mesh_ply, project_textured_obj),
                     dense_dir,
                     log_file,
                 )
+
+                # SPRINT 5: Fix 1 — Immediate Verification
+                log_file.write(f"Verifying outputs in {dense_dir}...\n")
+                all_files = os.listdir(str(dense_dir))
+                log_file.write(f"Files in dense_dir: {all_files}\n")
+
+                obj_exists = project_textured_obj.exists()
+                mtl_exists = any(f.endswith(".mtl") for f in all_files if "project_textured" in f)
+                texture_exists = any("map_Kd" in f for f in all_files if "project_textured" in f) or any(f.endswith((".png", ".jpg", ".jpeg")) for f in all_files if "project_textured" in f)
+
+                log_file.write(f"TextureMesh output check: obj={obj_exists}, mtl={mtl_exists}, tex={texture_exists}\n")
 
                 final_mesh = project_textured_obj
                 # OpenMVS 2.4 generates project_textured_material_*_map_Kd.jpg or .png
