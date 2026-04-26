@@ -127,6 +127,12 @@ class ValidationReport(BaseModel):
     contamination_score: float = 0.0 # 0.0 (clean) to 1.0 (contaminated)
     contamination_report: Dict[str, Any] = Field(default_factory=dict)
 
+    # Explainability & Traceability
+    blocking_checks: List[str] = Field(default_factory=list)
+    warning_checks: List[str] = Field(default_factory=list)
+    passed_checks: List[str] = Field(default_factory=list)
+    raw_metrics: Dict[str, Any] = Field(default_factory=dict)
+
     final_decision: str # pass, fail, review
 
     # Phase 3: New Robust Scoring
@@ -143,9 +149,13 @@ class ValidationReport(BaseModel):
     texture_quality_grade: str = "F" # A|B|C|D|F
     texture_quality_reasons: List[str] = Field(default_factory=list)
     black_pixel_ratio: float = 0.0
+    near_black_ratio: float = 0.0
     near_white_ratio: float = 0.0
+    dominant_color_ratio: float = 0.0
     dominant_background_color_ratio: float = 0.0
     atlas_coverage_ratio: float = 0.0
+    default_fill_or_flat_color_ratio: float = 0.0
+    alpha_empty_ratio: float = 0.0
 
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 

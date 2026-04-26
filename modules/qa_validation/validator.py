@@ -11,6 +11,7 @@ from .rules import (
     validate_texture_integrity,
     validate_delivery_mesh,
     validate_texture_quality,
+    validate_material_semantics,
 )
 from .texture_quality import TextureQualityAnalyzer
 
@@ -79,30 +80,65 @@ class AssetValidator:
         else:
             # If no texture path, it's either geometry-only (already handled) 
             # or we are validating a report without access to local files.
-            quality_decision = "pass" if semantic_status == "geometry_only" else "fail"
-            texture_quality_stats = {
-                "texture_quality_status": "unknown",
-                "texture_quality_grade": "F",
-                "texture_quality_reasons": ["MISSING_TEXTURE_PATH"]
-            }
+            # Fallback to asset_data if metrics are already there
+            if "texture_quality_status" in asset_data:
+                 quality_decision = validate_texture_quality(asset_data)
+                 texture_quality_stats = asset_data
+            else:
+                 quality_decision = "pass" if semantic_status == "geometry_only" else "fail"
+                 texture_quality_stats = {
+                     "texture_quality_status": "unknown",
+                     "texture_quality_grade": "F",
+                     "texture_quality_reasons": ["MISSING_TEXTURE_PATH"]
+                 }
 
-        if "fail" in all_decisions:
+        # --- 2. Explainability & Decision Logic ---
+        checks = {
+            "polycount": poly_decision,
+            "texture_integrity": texture_decision,
+            "bbox": bbox_decision,
+            "ground_alignment": ground_decision,
+            "texture_quality": quality_decision,
+            "material_semantics": validate_material_semantics(semantic_status)
+        }
+        # Flatten sub-decisions
+        for k, v in contamination_decisions.items():
+            checks[f"contamination_{k}"] = v
+        for k, v in texture_integrity_decisions.items():
+            checks[f"texture_{k}"] = v
+        for k, v in delivery_decisions.items():
+            checks[f"delivery_{k}"] = v
+
+        blocking_checks = [k for k, v in checks.items() if v == "fail"]
+        warning_checks = [k for k, v in checks.items() if v == "review"]
+        passed_checks = [k for k, v in checks.items() if v == "pass"]
+
+        if blocking_checks:
             final_decision = "fail"
-        elif "review" in all_decisions:
+        elif warning_checks:
             final_decision = "review"
         else:
             final_decision = "pass"
 
         # Customer-ready semantic guard:
-        # - geometry_only is a hard fail
-        # - uv_only / material_incomplete should not pass, but can be reviewed
         if semantic_status == "geometry_only":
+            if "material_semantics" not in blocking_checks:
+                blocking_checks.append("material_semantics")
             final_decision = "fail"
-            combined_report = {"semantic_guard": "fail_geometry_only"}
         elif semantic_status in ["uv_only", "material_incomplete"]:
             if final_decision == "pass":
                 final_decision = "review"
-                combined_report = {"semantic_guard": "review_material_incomplete"}
+                if "material_semantics" not in warning_checks:
+                    warning_checks.append("material_semantics")
+
+        # Mandatory consistency: If FAIL, blocking_checks cannot be empty.
+        if final_decision == "fail" and not blocking_checks:
+             blocking_checks.append("forced_failure_unspecified_blocking_check")
+             
+        # Mandatory consistency: If all pass, cannot be FAIL.
+        if not blocking_checks and not warning_checks and final_decision == "fail":
+             final_decision = "pass" # Recovery
+
         comp_count = int(iso_stats.get("component_count", 1))
         final_faces = int(iso_stats.get("final_faces", 0))
         initial_faces = max(int(iso_stats.get("initial_faces", 1)), 1)
@@ -142,14 +178,24 @@ class AssetValidator:
             material_quality_grade=material_grade,
             material_semantic_status=semantic_status,
             
+            # Explainability
+            blocking_checks=blocking_checks,
+            warning_checks=warning_checks,
+            passed_checks=passed_checks,
+            raw_metrics=asset_data,
+
             # Texture Quality Metrics
             texture_quality_status=texture_quality_stats.get("texture_quality_status", "unknown"),
             texture_quality_grade=texture_quality_stats.get("texture_quality_grade", "F"),
             texture_quality_reasons=texture_quality_stats.get("texture_quality_reasons", []),
             black_pixel_ratio=texture_quality_stats.get("black_pixel_ratio", 0.0),
+            near_black_ratio=texture_quality_stats.get("near_black_ratio", 0.0),
             near_white_ratio=texture_quality_stats.get("near_white_ratio", 0.0),
+            dominant_color_ratio=texture_quality_stats.get("dominant_color_ratio", 0.0),
             dominant_background_color_ratio=texture_quality_stats.get("dominant_background_color_ratio", 0.0),
             atlas_coverage_ratio=texture_quality_stats.get("atlas_coverage_ratio", 0.0),
+            default_fill_or_flat_color_ratio=texture_quality_stats.get("default_fill_or_flat_color_ratio", 0.0),
+            alpha_empty_ratio=texture_quality_stats.get("alpha_empty_ratio", 0.0),
             
             final_decision=final_decision,
         )

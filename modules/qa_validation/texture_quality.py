@@ -106,6 +106,27 @@ class TextureQualityAnalyzer:
         total_pixels = image.shape[0] * image.shape[1]
         atlas_coverage_ratio = visible_pixels / total_pixels
 
+        # E) Alpha Empty Ratio
+        if has_alpha:
+            alpha_empty_pixels = np.count_nonzero(alpha == 0)
+            alpha_empty_ratio = alpha_empty_pixels / total_pixels
+        else:
+            alpha_empty_ratio = 0.0
+
+        # F) Near Black Ratio (max(RGB) < 45)
+        near_black_pixels = np.count_nonzero((max_rgb < 45) & mask)
+        near_black_ratio = near_black_pixels / visible_pixels
+
+        # G) Default Fill or Flat Color Ratio
+        # Check for large areas with exactly the same color (neutral flat areas)
+        flat_color_pixels = np.count_nonzero((s < 10) & (v > 30) & (v < 225) & mask)
+        default_fill_ratio = flat_color_pixels / visible_pixels
+        
+        # H) Dominant Color Ratio (most frequent hue bin)
+        hue_hist = cv2.calcHist([h], [0], mask.astype(np.uint8), [180], [0, 180])
+        dominant_hue_count = np.max(hue_hist)
+        dominant_color_ratio = dominant_hue_count / visible_pixels
+
         # 3. Decision Logic
         reasons = []
         status = "clean"
@@ -147,9 +168,13 @@ class TextureQualityAnalyzer:
 
         return {
             "black_pixel_ratio": float(black_pixel_ratio),
+            "near_black_ratio": float(near_black_ratio),
             "near_white_ratio": float(near_white_ratio),
+            "dominant_color_ratio": float(dominant_color_ratio),
             "dominant_background_color_ratio": float(dominant_background_ratio),
             "atlas_coverage_ratio": float(atlas_coverage_ratio),
+            "default_fill_or_flat_color_ratio": float(default_fill_ratio),
+            "alpha_empty_ratio": float(alpha_empty_ratio),
             "texture_quality_status": status,
             "texture_quality_grade": grade,
             "texture_quality_reasons": reasons
@@ -161,7 +186,11 @@ class TextureQualityAnalyzer:
             "texture_quality_grade": "F",
             "texture_quality_reasons": [f"ERROR: {message}"],
             "black_pixel_ratio": 0.0,
+            "near_black_ratio": 0.0,
             "near_white_ratio": 0.0,
+            "dominant_color_ratio": 0.0,
             "dominant_background_color_ratio": 0.0,
-            "atlas_coverage_ratio": 0.0
+            "atlas_coverage_ratio": 0.0,
+            "default_fill_or_flat_color_ratio": 0.0,
+            "alpha_empty_ratio": 0.0
         }
