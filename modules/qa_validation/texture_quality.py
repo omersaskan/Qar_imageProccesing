@@ -185,6 +185,8 @@ class TextureQualityAnalyzer:
         except Exception:
              pass
 
+        grade = self._calculate_grade(status, match_score, neon_ratio, atlas_coverage_ratio)
+
         return {
             "black_pixel_ratio": float(black_pixel_ratio),
             "near_black_ratio": float(near_black_ratio),
@@ -198,9 +200,27 @@ class TextureQualityAnalyzer:
             "average_luminance": float(avg_luminance),
             "expected_product_color_match_score": float(match_score),
             "texture_quality_status": status,
+            "texture_quality_grade": grade,
             "texture_quality_reasons": reasons,
             **debug_info
         }
+
+    def _calculate_grade(self, status: str, match_score: float, neon_ratio: float, coverage: float) -> str:
+        """
+        Assigns a letter grade (A-F) based on quality metrics.
+        """
+        if status == "fail":
+            return "F"
+        if status == "review":
+            return "C"
+        
+        # High quality criteria
+        if match_score > 0.9 and neon_ratio < 0.01 and coverage > 0.6:
+            return "A"
+        if match_score > 0.8 and neon_ratio < 0.03 and coverage > 0.4:
+            return "B"
+        
+        return "C"
 
     def _error_result(self, message: str) -> Dict[str, Any]:
         return {
