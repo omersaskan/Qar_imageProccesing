@@ -294,7 +294,105 @@ class MeshIsolator:
             "footprint_penalty": float(footprint_penalty),
         }
 
-    def isolate_product(self, mesh: trimesh.Trimesh) -> Tuple[trimesh.Trimesh, dict]:
+    def isolate_by_masks(
+        self,
+        mesh: trimesh.Trimesh,
+        cameras: List[Dict[str, Any]],
+        masks: List[np.ndarray],
+        threshold: float = 0.5,
+    ) -> trimesh.Trimesh:
+        """
+        Prunes components that have low support across provided masks.
+        """
+        if not cameras or not masks:
+            return mesh
+
+        components = mesh.split(only_watertight=False)
+        if not components:
+            return mesh
+
+        keep = []
+        for comp in components:
+            if len(comp.faces) < 50:
+                continue
+            
+            # Simple heuristic: check if component centroid projects into masks
+            # In a real implementation, we would project more points or use ray-casting.
+            # But for this hardening, we use a multi-view consensus check.
+            
+            support_count = 0
+            for cam, mask in zip(cameras, masks):
+                # Project centroid to image space
+                # cam should have 'P' (3x4 projection matrix) or 'K', 'R', 't'
+                # For now, we assume a pre-computed 'support' flag or a simple projection mock
+                # as we don't have the full projection logic here yet.
+                # However, we can implement the logic if 'P' is provided.
+                if "P" in cam:
+                    P = cam["P"]
+                    p3d = np.append(comp.centroid, 1.0)
+                    p2d = P @ p3d
+                    if p2d[2] > 0: # In front of camera
+                        x = int(p2d[0] / p2d[2])
+                        y = int(p2d[1] / p2d[2])
+                        h, w = mask.shape[:2]
+                        if 0 <= x < w and 0 <= y < h:
+                            if mask[y, x] > 0:
+                                support_count += 1
+            
+            if support_count / len(cameras) >= threshold:
+                keep.append(comp)
+        
+        if not keep:
+            return mesh
+        
+        return trimesh.util.concatenate(keep)
+
+    def isolate_by_point_cloud(
+        self,
+        mesh: trimesh.Trimesh,
+        point_cloud: trimesh.points.PointCloud,
+        dist_threshold: float = 0.05,
+        min_support_ratio: float = 0.1,
+    ) -> trimesh.Trimesh:
+        """
+        Prunes components that are far from the dense point cloud.
+        Useful when the point cloud was already masked/filtered.
+        """
+        if point_cloud is None or len(point_cloud.vertices) == 0:
+            return mesh
+
+        components = mesh.split(only_watertight=False)
+        if not components:
+            return mesh
+
+        from scipy.spatial import cKDTree
+        tree = cKDTree(point_cloud.vertices)
+
+        keep = []
+        for comp in components:
+            if len(comp.faces) < 50:
+                continue
+            
+            # Check how many vertices of this component are near the point cloud
+            dists, _ = tree.query(comp.vertices, k=1)
+            supported = np.sum(dists < dist_threshold)
+            
+            if (supported / len(comp.vertices)) >= min_support_ratio:
+                keep.append(comp)
+        
+        if not keep:
+            # Fallback to largest if everything was pruned (safety)
+            return max(components, key=lambda c: len(c.faces))
+        
+        return trimesh.util.concatenate(keep)
+
+    def isolate_product(
+        self, 
+        mesh: trimesh.Trimesh, 
+        cameras: List[Dict] = None, 
+        masks: List[np.ndarray] = None,
+        point_cloud: trimesh.points.PointCloud = None
+    ) -> Tuple[trimesh.Trimesh, dict]:
         mesh = self._ensure_mesh(mesh)
 
         if len(mesh.vertices) == 0:
@@ -303,11 +401,19 @@ class MeshIsolator:
         initial_faces = int(len(mesh.faces))
         initial_vertices = int(len(mesh.vertices))
 
-        # 1) remove dominant planes
+        # 1) remove dominant planes (Geometric)
         current_mesh, plane_stats = self._remove_horizontal_planes(mesh)
         current_mesh, support_stats = self._remove_bottom_support_bands(current_mesh)
 
-        # 2) split components
+        # 2) Mask-based filtering (Semantic)
+        if masks and cameras:
+            current_mesh = self.isolate_by_masks(current_mesh, cameras, masks)
+            
+        # 3) Point-cloud based filtering (Data support)
+        if point_cloud is not None:
+            current_mesh = self.isolate_by_point_cloud(current_mesh, point_cloud)
+
+        # 4) split components and score
         components = current_mesh.split(only_watertight=False)
         if not components:
             stats = {

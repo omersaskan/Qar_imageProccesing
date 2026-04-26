@@ -193,18 +193,38 @@ class AssetCleaner:
         cleaned_mtl_path = output_dir / mtl_filename
         cleaned_tex_path = output_dir / raw_tex.name
         
-        # 1. Perform safe alignment (translates vertices, computes bbox and pivot offset)
-        pivot_offset, bbox_min, bbox_max = self._safe_align_obj(raw_mesh, cleaned_mesh_path)
+        # 1. Perform isolation before alignment to remove table/support/islands
+        import trimesh
+        try:
+            mesh = trimesh.load(raw_mesh, process=False)
+            if isinstance(mesh, trimesh.Scene):
+                mesh = mesh.dump(concatenate=True)
+            
+            isolated_mesh, isolation_stats = self.isolator.isolate_product(mesh)
+            
+            # Export isolated mesh to a temp OBJ to preserve UVs (trimesh OBJ export handles vt)
+            isolated_temp_obj = output_dir / "isolated_temp.obj"
+            isolated_mesh.export(str(isolated_temp_obj))
+            
+            # Use the isolated mesh for subsequent alignment
+            work_mesh = isolated_temp_obj
+        except Exception as e:
+            logger.warning("Isolation failed during texture_safe_copy, falling back to raw: %s", e)
+            work_mesh = raw_mesh
+            isolation_stats = {"isolation_error": str(e)}
 
-        # 2. OBJ usemtl normalization (could be merged with alignment but kept separate for clarity)
-        # Actually, let's merge it into _safe_align_obj or do it here. 
-        # Since _safe_align_obj already wrote the file, we can either update it or do it during rewrite.
-        # Let's update _safe_align_obj to also normalize usemtl.
+        # 2. Perform safe alignment (translates vertices, computes bbox and pivot offset)
+        pivot_offset, bbox_min, bbox_max = self._safe_align_obj(work_mesh, cleaned_mesh_path)
         
+        # Cleanup temp
+        if work_mesh != raw_mesh and work_mesh.exists():
+            work_mesh.unlink()
+
+        # 3. OBJ usemtl normalization ...
         import shutil
         shutil.copy2(raw_tex, cleaned_tex_path)
         
-        # 3. Normalize MTL
+        # 4. Normalize MTL
         with open(cleaned_mtl_path, "w", encoding="utf-8") as f:
             f.write(f"newmtl material_0\n")
             f.write(f"Ka 1.000000 1.000000 1.000000\n")
@@ -214,12 +234,13 @@ class AssetCleaner:
             f.write(f"illum 2\n")
             f.write(f"map_Kd {raw_tex.name}\n")
             
-        # 4. Get face count via direct OBJ parsing (No trimesh!)
+        # 5. Get face count
         face_count = 0
-        with open(cleaned_mesh_path, "r", encoding="utf-8", errors="ignore") as f:
-            for line in f:
-                if line.startswith("f "):
-                    face_count += 1
+        if cleaned_mesh_path.exists():
+            with open(cleaned_mesh_path, "r", encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    if line.startswith("f "):
+                        face_count += 1
         
         return {
             "cleanup_mode": "texture_safe_copy",
@@ -231,6 +252,7 @@ class AssetCleaner:
             "pivot_offset": pivot_offset,
             "bbox_min": bbox_min,
             "bbox_max": bbox_max,
+            "isolation": isolation_stats,
         }
 
     def _safe_align_obj(self, input_path: Path, output_path: Path) -> Tuple[Dict[str, float], Dict[str, float], Dict[str, float]]:
@@ -310,34 +332,10 @@ class AssetCleaner:
         logger.info("texture_safe_copy auto-detect: valid=%s reason=%s", valid, reason)
 
         if valid:
-            logger.info("Skipping destructive cleanup for textured OBJ: %s", raw_mesh_path)
-            # Route to texture_safe_copy
-            job_cleaned_dir = self.cleaned_root / job_id
-            job_cleaned_dir.mkdir(parents=True, exist_ok=True)
-            
-            stats = self._run_texture_safe_copy(
-                raw_mesh_path,
-                resolved_texture_path,
-                job_cleaned_dir
-            )
-            
-            # Generate metadata
-            bbox_min = stats["bbox_min"]
-            bbox_max = stats["bbox_max"]
-            pivot_offset = stats["pivot_offset"]
-            
-            metadata = self.normalizer.generate_metadata(
-                bbox_min,
-                bbox_max,
-                pivot_offset,
-                stats["final_polycount"],
-            )
-            metadata_path = job_cleaned_dir / "normalized_metadata.json"
-            self.normalizer.save_metadata(metadata, str(metadata_path))
-            
-            stats["metadata_path"] = str(metadata_path)
-            
-            return metadata, stats, stats["cleaned_mesh_path"]
+            logger.info("Found textured OBJ bundle: %s. Proceeding with object isolation check.", raw_mesh_path)
+            # We don't return early here anymore. 
+            # Instead, we will use the discovered texture later if we reach the texture safe copy path.
+            pass
 
         profile = PROFILES[profile_type]
 

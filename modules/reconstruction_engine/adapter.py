@@ -334,6 +334,8 @@ class OpenMVSCommandBuilder:
             "0",
             "--max-threads",
             "0",
+            "--export-type",
+            "ply",
         ]
 
     def reconstruct_mesh(self, input_mvs: Path, output_mesh_ply: Path) -> List[str]:
@@ -1455,6 +1457,40 @@ class OpenMVSAdapter(COLMAPAdapter):
                     raise RuntimeReconstructionError(
                         f"ReconstructMesh failed: {project_mesh_ply} not found."
                     )
+                
+                # Part 3: Object-First Isolation (Isolate before texturing)
+                cleaned_mesh_ply = dense_dir / "project_mesh_isolated.ply"
+                try:
+                    log_file.write("\n--- Object-First Isolation (Point-Cloud Guided) ---\n")
+                    from modules.asset_cleanup_pipeline.isolation import MeshIsolator
+                    isolator = MeshIsolator()
+                    
+                    raw_mesh = trimesh.load(str(project_mesh_ply))
+                    if isinstance(raw_mesh, trimesh.Scene):
+                        raw_mesh = raw_mesh.dump(concatenate=True)
+                    
+                    # Load dense point cloud for guidance (it was masked during densification)
+                    dense_ply_path = dense_dir / "project_dense.ply"
+                    point_cloud = None
+                    if dense_ply_path.exists():
+                        try:
+                            point_cloud = trimesh.load(str(dense_ply_path))
+                            log_file.write(f"Loaded guidance point cloud: {len(point_cloud.vertices)} points\n")
+                        except Exception as pc_err:
+                            log_file.write(f"Warning: Could not load guidance point cloud: {pc_err}\n")
+                    
+                    # Data-supported isolation
+                    isolated_mesh, iso_stats = isolator.isolate_product(raw_mesh, point_cloud=point_cloud)
+                    log_file.write(f"Isolation: initial_faces={iso_stats.get('initial_faces')}, final_faces={iso_stats.get('final_faces')}\n")
+                    
+                    isolated_mesh.export(str(cleaned_mesh_ply))
+                    log_file.write(f"Isolated mesh saved to: {cleaned_mesh_ply.name}\n")
+                    
+                    # Update the mesh to be used for texturing
+                    project_mesh_ply = cleaned_mesh_ply
+                    
+                except Exception as iso_err:
+                    log_file.write(f"Warning: Object isolation failed, falling back to raw mesh for texturing: {iso_err}\n")
 
                 self._run_command(
                     self.mvs_builder.texture_mesh(mvs_dense, project_mesh_ply, project_textured_obj),
