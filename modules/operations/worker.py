@@ -59,6 +59,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from modules.asset_cleanup_pipeline.cleaner import AssetCleaner
 from modules.asset_cleanup_pipeline.normalizer import NormalizedMetadata
 from modules.asset_cleanup_pipeline.profiles import CleanupProfileType
+from modules.asset_cleanup_pipeline.camera_projection import load_reconstruction_cameras, load_reconstruction_masks
 from modules.asset_registry.registry import AssetRegistry
 from modules.capture_workflow.session_manager import SessionManager
 from modules.export_pipeline.glb_exporter import GLBExporter
@@ -687,12 +688,39 @@ class IngestionWorker:
 
         logger.info(f"Starting mesh cleanup for {session.session_id}...")
 
+        # Resolve guidance data (cameras, masks, point cloud)
+        cameras = None
+        masks = None
+        point_cloud = None
+        
+        try:
+            workspace_path = Path(manifest.mesh_path).parent.parent
+            if workspace_path.exists():
+                cameras = load_reconstruction_cameras(workspace_path)
+                if cameras:
+                    masks = load_reconstruction_masks(workspace_path, [c["name"] for c in cameras])
+                
+                fused_path = workspace_path / "dense" / "fused.ply"
+                if fused_path.exists():
+                    try:
+                        import trimesh
+                        point_cloud = trimesh.load(str(fused_path))
+                        if not isinstance(point_cloud, trimesh.points.PointCloud):
+                            point_cloud = None
+                    except Exception as pc_err:
+                        logger.warning("Could not load fused point cloud for guidance: %s", pc_err)
+        except Exception as guide_err:
+            logger.warning("Failed to resolve guidance data for cleanup: %s", guide_err)
+
         try:
             metadata, cleanup_stats, cleaned_mesh_path = self.cleaner.process_cleanup(
                 job_id=manifest.job_id,
                 raw_mesh_path=raw_mesh_path,
                 profile_type=CleanupProfileType.MOBILE_DEFAULT,
                 raw_texture_path=raw_texture_path,
+                cameras=cameras,
+                masks=masks,
+                point_cloud=point_cloud,
             )
 
             if metadata is None:

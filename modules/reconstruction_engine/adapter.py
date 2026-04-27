@@ -23,6 +23,7 @@ from .failures import (
 )
 from modules.utils.mask_resolution import resolve_mask_path
 from modules.operations.settings import Settings, settings
+from modules.asset_cleanup_pipeline.camera_projection import load_reconstruction_cameras, load_reconstruction_masks
 
 class ColmapCapabilityManager:
     """
@@ -1636,7 +1637,18 @@ class OpenMVSAdapter(COLMAPAdapter):
                             log_file.write(f"Warning: Could not load guidance point cloud: {pc_err}\n")
                     
                     # Data-supported isolation
-                    isolated_mesh, iso_stats = isolator.isolate_product(raw_mesh, point_cloud=point_cloud)
+                    cameras = load_reconstruction_cameras(output_dir)
+                    masks = None
+                    if cameras:
+                        masks = load_reconstruction_masks(output_dir, [c["name"] for c in cameras])
+
+                    isolated_mesh, iso_stats = isolator.isolate_product(
+                        raw_mesh, 
+                        point_cloud=point_cloud,
+                        cameras=cameras,
+                        masks=masks,
+                        output_dir=dense_dir
+                    )
                     log_file.write(f"Isolation results:\n")
                     log_file.write(f" - status: {iso_stats.get('object_isolation_status')}\n")
                     log_file.write(f" - method: {iso_stats.get('object_isolation_method')}\n")
@@ -1645,6 +1657,7 @@ class OpenMVSAdapter(COLMAPAdapter):
                     log_file.write(f" - removed face ratio: {iso_stats.get('removed_face_ratio', 0.0):.4f}\n")
                     log_file.write(f" - mask support ratio: {iso_stats.get('mask_support_ratio', 0.0):.4f}\n")
                     log_file.write(f" - point cloud support ratio: {iso_stats.get('point_cloud_support_ratio', 0.0):.4f}\n")
+                    log_file.write(f" - supported view count: {iso_stats.get('supported_view_count', 0)}\n")
                     
                     isolated_mesh.export(str(cleaned_mesh_ply))
                     log_file.write(f"Isolated mesh saved to: {cleaned_mesh_ply.name}\n")

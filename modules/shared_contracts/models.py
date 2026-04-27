@@ -139,6 +139,12 @@ class ValidationReport(BaseModel):
     flatness_score: float = 1.0
     compactness_score: float = 1.0
     selected_component_score: float = 1.0
+    
+    # Phase 2: Semantic Isolation Guidance
+    mask_support_ratio: float = 0.0
+    point_cloud_support_ratio: float = 0.0
+    supported_view_count: int = 0
+    isolation_confidence: float = 0.0
 
     # Phase 2.2C: Material Semantics
     material_quality_grade: str = "F"
@@ -210,6 +216,12 @@ class ReconstructionAttemptResult(BaseModel):
     mesh_path: Optional[str] = None
     log_path: Optional[str] = None
     error_message: Optional[str] = None
+    
+    # Semantic Isolation Metrics
+    mask_support_ratio: float = 0.0
+    point_cloud_support_ratio: float = 0.0
+    supported_view_count: int = 0
+    isolation_confidence: float = 0.0
     
     # Re-extraction evidence
     sampling_rate_used: Optional[int] = None

@@ -1,7 +1,10 @@
 import trimesh
 import numpy as np
-from typing import Tuple, Dict, Any, List
+import json
+from pathlib import Path
+from typing import Tuple, Dict, Any, List, Optional
 from modules.operations.logging_config import get_component_logger
+from .camera_projection import compute_component_mask_support
 
 logger = get_component_logger("isolation")
 
@@ -11,8 +14,11 @@ class MeshIsolator:
     Product isolation pipeline:
     1. remove dominant horizontal-ish planes (table/floor)
     2. split into connected components
-    3. score components by product-likeness
-    4. keep the best candidate
+    3. score components by:
+       - product-likeness (geometric)
+       - mask support (semantic)
+       - point cloud support (reconstruction confidence)
+    4. keep the best candidates
     """
 
     def __init__(self):
@@ -75,11 +81,6 @@ class MeshIsolator:
     ) -> Tuple[trimesh.Trimesh, Dict[str, Any]]:
         """
         Removes large horizontal-ish face groups, which are likely table/floor planes.
-
-        Strategy:
-        - find near-horizontal faces using face normals
-        - histogram their z-centers
-        - remove dominant z-slab if sufficiently large
         """
         working = mesh.copy()
 
@@ -149,11 +150,6 @@ class MeshIsolator:
     ) -> Tuple[trimesh.Trimesh, Dict[str, Any]]:
         """
         Removes large low-z support slabs even when they are not perfectly horizontal.
-
-        This catches contamination that survives normal-based plane removal:
-        - slightly tilted tables
-        - thick support slabs
-        - connected low support geometry around the base
         """
         working = mesh.copy()
         stats = {
@@ -252,7 +248,12 @@ class MeshIsolator:
 
         return working, stats
 
-    def _score_component(self, comp: trimesh.Trimesh) -> Dict[str, float]:
+    def _score_component(
+        self, 
+        comp: trimesh.Trimesh, 
+        mask_support: Optional[Dict] = None, 
+        pc_support: Optional[Dict] = None
+    ) -> Dict[str, float]:
         faces = max(len(comp.faces), 1)
         bbox = self._bbox_extents(comp)
 
@@ -273,7 +274,8 @@ class MeshIsolator:
         footprint_dominance = self._footprint_dominance(comp)
         footprint_penalty = 1.0 if footprint_dominance <= 10.0 else max(0.15, 10.0 / footprint_dominance)
 
-        total_score = (
+        # Base geometric score (0.0 to 1.0)
+        geom_score = (
             face_score * 0.30
             + compactness_score * 0.20
             + flatness_penalty * 0.20
@@ -282,8 +284,45 @@ class MeshIsolator:
             + footprint_penalty * 0.05
         )
 
+        total_score = geom_score
+        
+        # Integration of Semantic Support (Masks)
+        mask_score = 0.0
+        if mask_support:
+            # We use a mix of average support and supported view count
+            avg_support = mask_support.get("avg_support", 0.0)
+            hit_ratio = mask_support.get("hit_ratio", 0.0)
+            view_count = mask_support.get("view_count", 1)
+            supported_views = mask_support.get("supported_view_count", 0)
+            
+            # Semantic confidence is high if avg support is high AND it's visible in many views
+            mask_score = (avg_support * 0.7 + hit_ratio * 0.3)
+            
+            # Boost score if we have semantic confirmation
+            # If mask support is very high (>0.8), it's almost certainly the product
+            # If mask support is very low (<0.2), it's almost certainly NOT the product
+            total_score = total_score * 0.4 + mask_score * 0.6
+            
+            if supported_views < 3 and view_count > 10:
+                # Penalty for components that are mostly outside masks in many views
+                total_score *= 0.5
+
+        # Integration of Point Cloud Support
+        pc_score = 0.0
+        if pc_support:
+            pc_score = pc_support.get("support_ratio", 0.0)
+            # PC support confirms the geometry exists in the dense reconstruction
+            # If we have both, we weigh PC heavily as it's the "ground truth" of the reconstruction
+            if mask_support:
+                total_score = total_score * 0.7 + pc_score * 0.3
+            else:
+                total_score = total_score * 0.6 + pc_score * 0.4
+
         return {
             "total_score": float(total_score),
+            "geom_score": float(geom_score),
+            "mask_score": float(mask_score),
+            "pc_score": float(pc_score),
             "face_score": float(face_score),
             "compactness_score": float(compactness),
             "flatness_score": float(flatness_ratio),
@@ -294,143 +333,48 @@ class MeshIsolator:
             "footprint_penalty": float(footprint_penalty),
         }
 
-    def isolate_by_masks(
-        self,
-        mesh: trimesh.Trimesh,
-        cameras: List[Dict[str, Any]],
-        masks: List[np.ndarray],
-        threshold: float = 0.5,
-        sample_size: int = 200,
-    ) -> Tuple[trimesh.Trimesh, Dict[str, Any]]:
-        """
-        Prunes components that have low support across provided masks.
-        Uses vertex-level projection consensus.
-        """
-        if not cameras or not masks:
-            return mesh, {"mask_support_ratio": 0.0, "mask_support_status": "skipped"}
-
-        components = mesh.split(only_watertight=False)
-        if not components:
-            return mesh, {"mask_support_ratio": 0.0, "mask_support_status": "empty"}
-
-        keep = []
-        total_mask_support = 0.0
-        
-        for comp in components:
-            if len(comp.faces) < 50:
-                continue
-            
-            # Sample vertices for more robust projection check than just centroid
-            if len(comp.vertices) > sample_size:
-                indices = np.random.choice(len(comp.vertices), sample_size, replace=False)
-                sample_v = comp.vertices[indices]
-            else:
-                sample_v = comp.vertices
-            
-            comp_support_ratios = []
-            for cam, mask in zip(cameras, masks):
-                if "P" not in cam:
-                    continue
-                
-                P = cam["P"]
-                # Project all sampled vertices at once
-                p3d = np.hstack([sample_v, np.ones((len(sample_v), 1))])
-                p2d_h = p3d @ P.T
-                
-                # Check points in front of camera (z > 0)
-                mask_hits = 0
-                visible_points = 0
-                
-                h, w = mask.shape[:2]
-                for i in range(len(p2d_h)):
-                    z = p2d_h[i, 2]
-                    if z <= 0:
-                        continue
-                    
-                    visible_points += 1
-                    x = int(p2d_h[i, 0] / z)
-                    y = int(p2d_h[i, 1] / z)
-                    
-                    if 0 <= x < w and 0 <= y < h:
-                        if mask[y, x] > 0:
-                            mask_hits += 1
-                
-                if visible_points > 0:
-                    comp_support_ratios.append(mask_hits / visible_points)
-            
-            # Multi-view consensus: average support across cameras
-            if comp_support_ratios:
-                comp_avg_support = float(np.mean(comp_support_ratios))
-            else:
-                comp_avg_support = 0.0
-                
-            if comp_avg_support >= threshold:
-                keep.append(comp)
-                total_mask_support += comp_avg_support
-        
-        avg_support = total_mask_support / max(len(keep), 1)
-        
-        if not keep:
-            return trimesh.Trimesh(), {"mask_support_ratio": 0.0, "mask_support_status": "no_support"}
-        
-        return trimesh.util.concatenate(keep), {
-            "mask_support_ratio": float(avg_support),
-            "mask_support_status": "supported" if avg_support >= threshold else "weak"
-        }
-
     def isolate_by_point_cloud(
         self,
         mesh: trimesh.Trimesh,
         point_cloud: trimesh.points.PointCloud,
         dist_threshold: float = 0.05,
-        min_support_ratio: float = 0.1,
-    ) -> Tuple[trimesh.Trimesh, Dict[str, Any]]:
+    ) -> Dict[int, Dict[str, Any]]:
         """
-        Prunes components that are far from the dense point cloud.
-        Useful when the point cloud was already masked/filtered.
+        Computes support for each component from the dense point cloud.
         """
         if point_cloud is None or len(point_cloud.vertices) == 0:
-            return mesh, {"pc_support_ratio": 0.0, "pc_support_status": "skipped"}
+            return {}
 
         components = mesh.split(only_watertight=False)
         if not components:
-            return mesh, {"pc_support_ratio": 0.0, "pc_support_status": "empty"}
+            return {}
 
         from scipy.spatial import cKDTree
         tree = cKDTree(point_cloud.vertices)
 
-        keep = []
-        total_pc_support = 0.0
-        
-        for comp in components:
-            if len(comp.faces) < 50:
-                continue
+        results = {}
+        for i, comp in enumerate(components):
+            if len(comp.vertices) == 0: continue
             
-            # Check how many vertices of this component are near the point cloud
             dists, _ = tree.query(comp.vertices, k=1)
             supported = np.sum(dists < dist_threshold)
             support_ratio = supported / len(comp.vertices)
             
-            if support_ratio >= min_support_ratio:
-                keep.append(comp)
-                total_pc_support += support_ratio
-        
-        avg_support = total_pc_support / max(len(keep), 1)
-        
-        if not keep:
-            return trimesh.Trimesh(), {"pc_support_ratio": 0.0, "pc_support_status": "no_support"}
-        
-        return trimesh.util.concatenate(keep), {
-            "pc_support_ratio": float(avg_support),
-            "pc_support_status": "supported" if avg_support >= min_support_ratio else "weak"
-        }
+            results[i] = {
+                "supported_vertices": int(supported),
+                "total_vertices": len(comp.vertices),
+                "support_ratio": float(support_ratio)
+            }
+            
+        return results
 
     def isolate_product(
         self, 
         mesh: trimesh.Trimesh, 
-        cameras: List[Dict] = None, 
-        masks: List[np.ndarray] = None,
-        point_cloud: trimesh.points.PointCloud = None
+        cameras: Optional[List[Dict]] = None, 
+        masks: Optional[Dict[str, np.ndarray]] = None,
+        point_cloud: Optional[trimesh.points.PointCloud] = None,
+        output_dir: Optional[Path] = None
     ) -> Tuple[trimesh.Trimesh, dict]:
         mesh = self._ensure_mesh(mesh)
 
@@ -441,129 +385,133 @@ class MeshIsolator:
         initial_vertices = int(len(mesh.vertices))
         
         isolation_method = "geometric_only"
-        mask_support_metrics = {}
-        pc_support_metrics = {}
+        reason_if_geometric_fallback = None
+        
+        if not cameras or not masks:
+            reason_if_geometric_fallback = "No cameras or masks provided"
+        elif not cameras:
+            reason_if_geometric_fallback = "Cameras missing"
+        elif not masks:
+            reason_if_geometric_fallback = "Masks missing"
 
-        # 1) remove dominant planes (Geometric)
+        # 1) remove dominant planes (Geometric pre-pass)
         current_mesh, plane_stats = self._remove_horizontal_planes(mesh)
         current_mesh, support_stats = self._remove_bottom_support_bands(current_mesh)
 
-        # 2) Mask-based filtering (Semantic)
-        if masks and cameras:
-            current_mesh, mask_support_metrics = self.isolate_by_masks(current_mesh, cameras, masks)
-            isolation_method = "mask_guided"
-            if len(current_mesh.faces) == 0:
-                return current_mesh, {
-                    "object_isolation_status": "failed_mask_support",
-                    "object_isolation_method": isolation_method,
-                    "initial_faces": initial_faces,
-                    "initial_vertices": initial_vertices,
-                    "final_faces": 0,
-                    "isolated_mesh_faces": 0,
-                    **mask_support_metrics
-                }
-            
-        # 3) Point-cloud based filtering (Data support)
-        if point_cloud is not None:
-            current_mesh, pc_support_metrics = self.isolate_by_point_cloud(current_mesh, point_cloud)
-            isolation_method = "hybrid_pc_mask" if isolation_method == "mask_guided" else "pc_guided"
-            if len(current_mesh.faces) == 0:
-                return current_mesh, {
-                    "object_isolation_status": "failed_pc_support",
-                    "object_isolation_method": isolation_method,
-                    "initial_faces": initial_faces,
-                    "initial_vertices": initial_vertices,
-                    "final_faces": 0,
-                    "isolated_mesh_faces": 0,
-                    **pc_support_metrics
-                }
-
-        # 4) split components and score
+        # 2) split components
         components = current_mesh.split(only_watertight=False)
         if not components:
-            stats = {
-                "initial_faces": initial_faces,
-                "initial_vertices": initial_vertices,
-                **plane_stats,
-                **support_stats,
-                "component_count": 0,
-                "removed_islands": 0,
-                "final_faces": int(len(current_mesh.faces)),
-                "final_vertices": int(len(current_mesh.vertices)),
-                "removed_plane_face_share": plane_stats["removed_plane_faces"] / max(initial_faces, 1),
-                "removed_plane_vertex_ratio": plane_stats["removed_plane_vertices"] / max(initial_vertices, 1),
-                "compactness_score": 0.0,
-                "flatness_score": 0.0,
-                "selected_component_score": 0.0,
-                "object_isolation_status": "failed_empty",
-                "object_isolation_method": isolation_method,
-            }
-            return current_mesh, stats
+             return current_mesh, {"object_isolation_status": "failed_no_components", "initial_faces": initial_faces}
 
-        ranked: List[Tuple[float, trimesh.Trimesh, Dict[str, float]]] = []
-        removed_islands = 0
+        # Save debug components before isolation
+        if output_dir:
+            try:
+                current_mesh.export(str(output_dir / "debug_components_before_isolation.obj"))
+            except Exception: pass
 
-        for comp in components:
-            if len(comp.faces) < 50: # Reduced from 100 to catch more tiny fragments
-                removed_islands += 1
+        # 3) Compute Support Metrics
+        mask_supports = {}
+        if cameras and masks:
+            isolation_method = "mask_guided"
+            for i, comp in enumerate(components):
+                if len(comp.faces) < 20: continue
+                mask_supports[i] = compute_component_mask_support(comp, cameras, masks)
+            
+            if output_dir:
+                with open(output_dir / "mask_projection_report.json", "w") as f:
+                    json.dump(mask_supports, f, indent=2)
+
+        pc_supports = {}
+        if point_cloud is not None:
+            pc_supports = self.isolate_by_point_cloud(current_mesh, point_cloud)
+            if isolation_method == "mask_guided":
+                isolation_method = "hybrid_pc_mask"
+            else:
+                isolation_method = "pc_guided"
+
+        # 4) Score and Rank
+        ranked = []
+        all_scores = {}
+        for i, comp in enumerate(components):
+            if len(comp.faces) < 50:
                 continue
-
-            scores = self._score_component(comp)
-            ranked.append((scores["total_score"], comp, scores))
+            
+            scores = self._score_component(
+                comp, 
+                mask_support=mask_supports.get(i), 
+                pc_support=pc_supports.get(i)
+            )
+            ranked.append((scores["total_score"], i, comp, scores))
+            all_scores[i] = {
+                "faces": len(comp.faces),
+                "geometric_score": scores["geom_score"],
+                "mask_support": mask_supports.get(i, {}),
+                "pc_support": pc_supports.get(i, {}),
+                "total_score": scores["total_score"],
+                "decision": "pending"
+            }
 
         if not ranked:
-            # Fallback if nothing passed the 50 face gate
-            best_comp = max(components, key=lambda c: len(c.faces))
-            best_scores = self._score_component(best_comp)
+            # Absolute fallback: keep largest
+            best_idx = np.argmax([len(c.faces) for c in components])
+            best_comp = components[best_idx]
             kept_components = [best_comp]
+            best_scores = self._score_component(best_comp)
+            all_scores[int(best_idx)]["decision"] = "kept_fallback_largest"
         else:
             ranked.sort(key=lambda x: x[0], reverse=True)
             
-            # SPRINT 5: Keep top significant components instead of just one
-            # Target: component_count <= 5, ideally 1-3.
             best_score = ranked[0][0]
-            best_faces = len(ranked[0][1].faces)
+            best_faces = len(ranked[0][2].faces)
             
-            kept_components = [ranked[0][1]]
-            best_scores = ranked[0][2]
+            kept_components = [ranked[0][2]]
+            best_scores = ranked[0][3]
+            all_scores[ranked[0][1]]["decision"] = "kept_primary"
             
-            # Add additional components if they are significant relative to the best one
-            for score, comp, s in ranked[1:5]: # Limit to max 5 total
-                if score > best_score * 0.7 and len(comp.faces) > best_faces * 0.1:
+            # Keep secondary components if they are strong
+            # We are more strict if we have semantic guidance
+            threshold_ratio = 0.75 if isolation_method != "geometric_only" else 0.70
+            
+            for score, idx, comp, s in ranked[1:8]:
+                if score > best_score * threshold_ratio and len(comp.faces) > best_faces * 0.05:
                     kept_components.append(comp)
+                    all_scores[idx]["decision"] = "kept_secondary"
                 else:
-                    removed_islands += 1
+                    all_scores[idx]["decision"] = "rejected_low_score"
+
+        if output_dir:
+            with open(output_dir / "component_scores.json", "w") as f:
+                json.dump(all_scores, f, indent=2)
 
         final_mesh = trimesh.util.concatenate(kept_components) if len(kept_components) > 1 else kept_components[0]
         final_faces = int(len(final_mesh.faces))
         removed_face_ratio = (initial_faces - final_faces) / max(initial_faces, 1)
 
+        # Final Summary Metrics
         stats = {
             "initial_faces": initial_faces,
             "initial_vertices": initial_vertices,
             **plane_stats,
             **support_stats,
-            "component_count": len(kept_components),
+            "kept_component_count": len(kept_components),
             "raw_component_count": len(components),
-            "removed_islands": removed_islands,
+            "rejected_component_count": len(components) - len(kept_components),
             "final_faces": final_faces,
             "final_vertices": int(len(final_mesh.vertices)),
-            "removed_plane_face_share": plane_stats["removed_plane_faces"] / max(initial_faces, 1),
-            "removed_plane_vertex_ratio": plane_stats["removed_plane_vertices"] / max(initial_vertices, 1),
-            "compactness_score": float(best_scores["compactness_score"]),
-            "flatness_score": float(best_scores["flatness_score"]),
-            "selected_component_score": float(best_scores["total_score"]),
-            "aspect_ratio": float(best_scores["aspect_ratio"]),
-            "footprint_dominance": float(best_scores["footprint_dominance"]),
-            
-            # Part 3 Hardening Metrics
+            "removed_face_ratio": float(removed_face_ratio),
             "object_isolation_status": "success" if final_faces > 0 else "failed",
             "object_isolation_method": isolation_method,
-            "raw_mesh_faces": initial_faces,
-            "isolated_mesh_faces": final_faces,
-            "removed_face_ratio": float(removed_face_ratio),
-            "mask_support_ratio": mask_support_metrics.get("mask_support_ratio", 0.0),
-            "point_cloud_support_ratio": pc_support_metrics.get("pc_support_ratio", 0.0),
+            "isolation_confidence": float(best_scores["total_score"]),
+            "mask_support_ratio": float(best_scores.get("mask_score", 0.0)),
+            "point_cloud_support_ratio": float(best_scores.get("pc_score", 0.0)),
+            "supported_view_count": int(mask_supports.get(ranked[0][1], {}).get("supported_view_count", 0)) if ranked else 0,
+            "reason_if_geometric_fallback": reason_if_geometric_fallback,
         }
+
+        # Debug export
+        if output_dir:
+            try:
+                final_mesh.export(str(output_dir / "debug_isolated_mesh.obj"))
+            except Exception: pass
 
         return final_mesh, stats

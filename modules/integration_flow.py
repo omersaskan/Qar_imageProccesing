@@ -54,6 +54,15 @@ class IntegrationFlow:
             if "texture_path" not in input_data:
                 input_data["texture_path"] = cleanup_stats.get("cleaned_texture_path") or cleanup_stats.get("texture_path")
 
+            # Map Semantic Isolation Metrics
+            isolation = cleanup_stats.get("isolation", {})
+            input_data["mask_support_ratio"] = isolation.get("mask_support_ratio", 0.0)
+            input_data["point_cloud_support_ratio"] = isolation.get("point_cloud_support_ratio", 0.0)
+            input_data["supported_view_count"] = isolation.get("supported_view_count", 0)
+            input_data["isolation_confidence"] = isolation.get("isolation_confidence", 0.0)
+            input_data["component_count"] = isolation.get("component_count", 1)
+            input_data["largest_component_share"] = isolation.get("largest_component_share", 1.0)
+
         # 2. Override with final export truth (The Ultimate Truth)
         if export_report:
             input_data.update(export_report)

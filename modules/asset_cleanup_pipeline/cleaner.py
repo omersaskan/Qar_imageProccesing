@@ -197,6 +197,9 @@ class AssetCleaner:
         raw_mesh_path: str,
         profile_type: CleanupProfileType = CleanupProfileType.MOBILE_HIGH,
         raw_texture_path: Optional[str] = None,
+        cameras: Optional[List[Dict]] = None,
+        masks: Optional[Dict[str, np.ndarray]] = None,
+        point_cloud: Optional[trimesh.points.PointCloud] = None,
     ) -> Tuple[NormalizedMetadata, dict, str]:
         if not os.path.exists(raw_mesh_path):
             raise FileNotFoundError(f"Raw mesh not found: {raw_mesh_path}")
@@ -290,12 +293,18 @@ class AssetCleaner:
 
         try:
             # 2) Object Isolation
-            logger.info("[%s] Starting isolation on %s", job_id, work_mesh_path)
+            logger.info("[%s] Starting isolation on %s (guided=%s)", job_id, work_mesh_path, bool(masks))
             mesh = trimesh.load(work_mesh_path, process=False)
             if isinstance(mesh, trimesh.Scene): mesh = mesh.dump(concatenate=True)
             if len(mesh.vertices) == 0: raise ValueError("Empty mesh")
 
-            isolated_mesh, isolation_stats = self.isolator.isolate_product(mesh)
+            isolated_mesh, isolation_stats = self.isolator.isolate_product(
+                mesh, 
+                cameras=cameras, 
+                masks=masks, 
+                point_cloud=point_cloud,
+                output_dir=job_cleaned_dir
+            )
             if len(isolated_mesh.faces) == 0: raise ValueError(f"Isolation failed: {isolation_stats.get('object_isolation_status')}")
             isolated_mesh.export(str(isolation_debug_path))
             logger.info("[%s] Isolation completed. Resulting faces: %d", job_id, len(isolated_mesh.faces))
