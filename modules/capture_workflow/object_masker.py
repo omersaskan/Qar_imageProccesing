@@ -175,6 +175,17 @@ class ObjectMasker:
         if not self.config.enabled:
             backend_name = "heuristic"
             
+        # Feature flag for SAM2 experiment
+        env_method = os.getenv("SEGMENTATION_METHOD", "legacy").lower()
+        if env_method == "sam2":
+            # Check if SAM2 is available before switching
+            from modules.ai_segmentation.sam2_wrapper import HAS_SAM2
+            if HAS_SAM2:
+                logger.info("SAM2 feature flag detected. Using sam2 backend.")
+                backend_name = "sam2"
+            else:
+                logger.warning("SAM2 requested via feature flag but dependencies missing. Falling back to legacy.")
+
         backend = BackendFactory.get_backend(backend_name)
         
         try:
@@ -266,6 +277,7 @@ class ObjectMasker:
             **meta_out,
             "confidence": confidence,
             "mask_confidence": confidence,
+            "segmentation_method": backend_name,
             "purity_score": float(np.clip(purity_score, 0.0, 1.0)),
             "occupancy": float(occupancy),
             "is_clipped": is_clipped,

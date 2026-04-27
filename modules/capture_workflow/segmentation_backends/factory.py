@@ -13,6 +13,9 @@ class BackendFactory:
             elif name == "rembg":
                 from .rembg_backend import RembgBackend
                 cls._instances[name] = RembgBackend()
+            elif name == "sam2":
+                from .sam2_backend import SAM2Backend
+                cls._instances[name] = SAM2Backend()
             else:
                 raise ValueError(f"Unknown segmentation backend: {name}")
         return cls._instances[name]

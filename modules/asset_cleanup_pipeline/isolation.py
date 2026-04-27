@@ -416,6 +416,32 @@ class MeshIsolator:
                 "total_score": scores["total_score"],
                 "decision": "pending"
             }
+            
+        # Detect if SAM2 was used in any mask (experimental flag for gating)
+        used_sam2 = False
+        # Try to find masks dir relative to output_dir (cleanup) or assume it's provided in metadata if available
+        potential_mask_dirs = []
+        if output_dir:
+            # Check for data/captures/<job_id>/frames/masks
+            # job_id is usually extracted from output_dir name
+            job_id = output_dir.name
+            if job_id.endswith("_sam2_experiment"):
+                job_id = job_id.replace("_sam2_experiment", "")
+            
+            # Common structure: data/captures/<id>/frames/masks
+            potential_mask_dirs.append(output_dir.parent.parent / "captures" / job_id / "frames" / "masks")
+            potential_mask_dirs.append(output_dir.parent / "frames" / "masks") # direct parent
+        
+        for mask_meta_dir in potential_mask_dirs:
+            if mask_meta_dir.exists():
+                for meta_file in mask_meta_dir.glob("*.json"):
+                    try:
+                        with open(meta_file, "r") as f:
+                            if json.load(f).get("segmentation_method") == "sam2":
+                                used_sam2 = True
+                                break
+                    except Exception: pass
+                if used_sam2: break
 
         if not ranked:
             # Absolute fallback: keep largest
@@ -491,6 +517,7 @@ class MeshIsolator:
             "object_isolation_status": "success" if final_faces > 0 else "failed",
             "object_isolation_method": isolation_method,
             "isolation_confidence": float(best_scores["total_score"]),
+            "used_sam2": used_sam2,
             "mask_support_ratio": float(best_scores.get("mask_score", 0.0)),
             "point_cloud_support_ratio": float(best_scores.get("pc_score", 0.0)),
             "supported_view_count": int(mask_supports.get(ranked[0][1], {}).get("supported_view_count", 0)) if ranked else 0,

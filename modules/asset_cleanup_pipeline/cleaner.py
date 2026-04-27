@@ -168,6 +168,10 @@ class AssetCleaner:
         if isolation_stats.get("object_isolation_method") == "geometric_only":
             delivery_ready = False # In our internal logic, False means 'review_ready' or 'failed' depending on other flags
 
+        # Phase 6.1: SAM2 outputs must be review_ready
+        if isolation_stats.get("used_sam2"):
+            delivery_ready = False
+
         return {
             "cleanup_mode": "texture_safe_copy",
             "uv_preserved": True,
@@ -385,6 +389,10 @@ class AssetCleaner:
                 delivery_ready = False
             
             if isolation_stats.get("object_isolation_method") == "geometric_only":
+                delivery_ready = False
+            
+            # Phase 6.1: SAM2 outputs must be review_ready
+            if isolation_stats.get("used_sam2"):
                 delivery_ready = False
             
             logger.info("[%s] Cleanup pipeline finished. Output: %s, delivery_ready=%s", job_id, cleaned_mesh_path, delivery_ready)
