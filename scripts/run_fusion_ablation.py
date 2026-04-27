@@ -159,6 +159,32 @@ def main():
     for v in full_report["variants"]:
         print(f"Variant {v['variant']}: {v['status']} | Points: {v.get('fused_point_count', 0)} | Matches: {v.get('filename_matches', 0)}/{v.get('image_count', 0)}")
     
+    # Simple Recommendation Engine
+    a1 = next((v for v in full_report["variants"] if v["variant"] == "A1"), None)
+    a3 = next((v for v in full_report["variants"] if v["variant"] == "A3"), None)
+    
+    print("\n--- Diagnostic Conclusion ---")
+    if a1 and a3 and a1["status"] == "success" and a3["status"] == "success":
+        reduction = (a1["fused_point_count"] - a3["fused_point_count"]) / max(a1["fused_point_count"], 1)
+        print(f"Mask-based point reduction: {reduction:.2%}")
+        
+        if reduction < 0.05:
+            print("OBSERVATION: Dense masks are VALID but have MINIMAL impact on point count.")
+            print("ROOT CAUSE: Segmentation masks are likely too loose (contain too much background).")
+            print("ACTION: Check 'selected_images_masked' previews in cleanup directory.")
+        elif a3["fused_point_count"] > 2000000:
+            print("OBSERVATION: Point cloud is still very large despite masking.")
+            print("ROOT CAUSE: Masks may be correctly pathed but the segmentation is not tight enough.")
+            print("ACTION: Improve segmentation model or check for 'Compatible Neutralization' leakage.")
+        else:
+            print("OBSERVATION: Masks are significantly reducing point count. Pathing is correct.")
+    
+    if a3 and a3["status"] == "failed":
+        if a3.get("filename_matches", 0) == 0:
+            print("CRITICAL: Mask pathing is BROKEN. Zero filename matches in dense/stereo/masks.")
+        else:
+            print("CRITICAL: Fusion failed despite mask matches. Check COLMAP stderr.")
+
     print(f"\nFull report saved to: {output_dir / 'ablation_report.json'}")
 
 if __name__ == "__main__":

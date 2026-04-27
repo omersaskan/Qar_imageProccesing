@@ -702,9 +702,13 @@ class COLMAPAdapter(ReconstructionAdapter):
 
             h, w = img.shape[:2]
             source_mask = self._resolve_source_mask_for_dense_image(effective_masks_dir, img_file)
+            
             mask = None
             if source_mask is not None:
                 mask = self._read_image(source_mask, cv2.IMREAD_GRAYSCALE)
+                stats["dense_mask_exact_matches"] += 1
+            else:
+                log_file.write(f"INFO: No source mask found for {img_file.name}, using white fallback.\n")
 
             if mask is None:
                 stats["dense_mask_fallback_white_count"] += 1
@@ -712,6 +716,9 @@ class COLMAPAdapter(ReconstructionAdapter):
             else:
                 if mask.shape[:2] != (h, w):
                     mask = cv2.resize(mask, (w, h), interpolation=cv2.INTER_NEAREST)
+                else:
+                    stats["dense_mask_dimension_matches"] += 1
+                    
                 _, binary = cv2.threshold(mask, 1, 255, cv2.THRESH_BINARY)
                 binary = cv2.dilate(binary, kernel, iterations=1)
 
@@ -731,25 +738,27 @@ class COLMAPAdapter(ReconstructionAdapter):
             if ok:
                 buff.tofile(str(mask_out))
                 stats["dense_mask_count"] += 1
-                stats["dense_mask_exact_matches"] += 1
-
-                written = self._read_image(mask_out, cv2.IMREAD_GRAYSCALE)
-                if written is not None and written.shape[:2] == (h, w):
-                    stats["dense_mask_dimension_matches"] += 1
 
         stats["dense_mask_fallback_white_ratio"] = float(
             stats["dense_mask_fallback_white_count"] / max(stats["dense_image_count"], 1)
         )
 
         log_file.write("\n--- Dense Masking Summary ---\n")
-        log_file.write("Strategy: resize original feature masks to dense/images dimensions\n")
+        log_file.write(f"Dense masks directory: {stats['dense_masks_dir']}\n")
         log_file.write(f"Dense images: {stats['dense_image_count']}\n")
         log_file.write(f"Dense masks written: {stats['dense_mask_count']}\n")
         log_file.write(f"Exact filename matches: {stats['dense_mask_exact_matches']}\n")
         log_file.write(f"Dimension matches: {stats['dense_mask_dimension_matches']}\n")
         log_file.write(f"Fallback white count: {stats['dense_mask_fallback_white_count']}\n")
         log_file.write(f"Fallback white ratio: {stats['dense_mask_fallback_white_ratio']:.2%}\n")
-        log_file.write(f"Min/Max Occupancy Thresholds: {min_occupancy}/{max_occupancy}\n")
+        
+        if stats["dense_mask_fallback_white_ratio"] > 0.5:
+            log_file.write("ERROR: DENSE_MASK_QUALITY_FAILED. Too many white fallbacks (>50%).\n")
+            stats["quality_status"] = "failed"
+        else:
+            stats["quality_status"] = "pass"
+            
+        log_file.write(f"Quality Status: {stats['quality_status']}\n")
         log_file.write("-----------------------------\n\n")
 
         return stats
@@ -1261,13 +1270,23 @@ class COLMAPAdapter(ReconstructionAdapter):
                 )
                 
                 effective_mask_path = None
+                fusion_mode = "UNMASKED"
+                
                 if is_mask_valid and not force_unmasked_fusion:
                     effective_mask_path = stereo_masks_dir
-                    log_file.write(f"Using validated dense masks for object reconstruction: {effective_mask_path}\n")
+                    fusion_mode = "DENSE_MASKS"
+                elif not force_unmasked_fusion and effective_masks_dir and effective_masks_dir.exists():
+                    # Fallback to feature masks if dense masks failed but feature masks exist
+                    effective_mask_path = effective_masks_dir
+                    fusion_mode = "FEATURE_MASKS_RAW"
+                
+                log_file.write(f"\n--- Stereo Fusion Strategy ---\n")
+                log_file.write(f"Fusion Mode: {fusion_mode}\n")
+                if effective_mask_path:
+                    log_file.write(f"Mask Path: {effective_mask_path}\n")
                 else:
-                    log_file.write("PROCEEDING UNMASKED for stereo_fusion (masks invalid or forced off).\n")
-                    if settings.recon_hybrid_masking:
-                        log_file.write("WARNING: Raw scene geometry will be reconstructed as masks were unavailable.\n")
+                    log_file.write("Reason: Masks invalid or forced off.\n")
+                log_file.write("-----------------------------\n")
 
                 # Load StereoFusion settings
                 sf_min_pix = settings.recon_stereo_fusion_min_num_pixels
