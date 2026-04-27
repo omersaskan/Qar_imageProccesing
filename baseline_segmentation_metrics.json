@@ -1,0 +1,23 @@
+{
+  "status": "success",
+  "sample_count": 3,
+  "avg_iou": 0.3815949012182161,
+  "avg_leakage_ratio": 0.37778566664845825,
+  "per_file_results": [
+    {
+      "file": "cap_29ab6fa1_f0.png",
+      "iou": 0.9007085672218643,
+      "leakage_ratio": 0.10419022888697771
+    },
+    {
+      "file": "cap_29ab6fa1_f10.png",
+      "iou": 0.0,
+      "leakage_ratio": 0.926024080508844
+    },
+    {
+      "file": "cap_29ab6fa1_f20.png",
+      "iou": 0.24407613643278406,
+      "leakage_ratio": 0.10314269054955295
+    }
+  ]
+}
