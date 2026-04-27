@@ -74,7 +74,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate Segmentation Mask Accuracy")
     parser.add_argument("--gt", required=True, help="Ground truth masks directory")
     parser.add_argument("--pred", required=True, help="Predicted masks directory")
+    parser.add_argument("--output", help="Optional path to save metrics JSON")
     args = parser.parse_args()
     
     metrics = evaluate_masks(Path(args.gt), Path(args.pred))
-    print(json.dumps(metrics, indent=2))
+    
+    if args.output:
+        with open(args.output, "w") as f:
+            json.dump(metrics, f, indent=2)
+        print(f"Metrics saved to {args.output}")
+    else:
+        print(json.dumps(metrics, indent=2))

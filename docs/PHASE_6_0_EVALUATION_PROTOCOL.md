@@ -55,12 +55,33 @@ When a new AI module (e.g., SAM2) is introduced:
     *   Quantify compute overhead (latency/GPU usage).
 4.  **Visual Audit**: Side-by-side comparison of GLB outputs focusing on the targeted "gap."
 
-## 5. Acceptance for Phase 6.1
+## 5. Execution Commands
+
+### A. Dataset Validation
+Verify the integrity of the evaluation dataset before running benchmarks:
+```bash
+python scripts/validate_evaluation_dataset.py --root datasets/evaluation
+```
+
+### B. Segmentation Benchmarking
+Evaluate the accuracy of generated masks against ground truth:
+```bash
+python scripts/evaluate_segmentation.py --gt datasets/evaluation/ground_truth_masks --pred data/masks --output metrics.json
+```
+
+### C. Pipeline Baselines
+Establish current performance metrics from existing evidence reports:
+```bash
+python scripts/evaluate_baselines.py --root evidence --output baseline_report.json
+```
+
+## 6. Acceptance for Phase 6.1
 Phase 6.0 is considered complete when:
+- [ ] `python scripts/validate_evaluation_dataset.py` passes (or a specific dev subset is accepted).
 - [ ] 5+ real videos are curated in the dataset.
 - [ ] Ground truth masks are labeled for at least 3 frames per video.
 - [ ] Baseline metrics are calculated for the current main branch.
-- [ ] The `scripts/evaluate_segmentation.py` and `scripts/evaluate_baselines.py` are verified to work.
+- [ ] All evaluation scripts pass their unit tests.
 
 ---
 

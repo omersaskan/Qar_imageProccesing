@@ -72,7 +72,14 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Evaluate Pipeline Baselines")
     parser.add_argument("--root", required=True, help="Root directory containing evidence bundles")
+    parser.add_argument("--output", help="Optional path to save baseline report JSON")
     args = parser.parse_args()
     
     baselines = evaluate_pipeline_baselines(Path(args.root))
-    print(json.dumps(baselines, indent=2))
+    
+    if args.output:
+        with open(args.output, "w") as f:
+            json.dump(baselines, f, indent=2)
+        print(f"Baseline report saved to {args.output}")
+    else:
+        print(json.dumps(baselines, indent=2))
