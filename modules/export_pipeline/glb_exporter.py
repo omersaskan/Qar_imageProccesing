@@ -1,6 +1,7 @@
 import os
 import struct
 import json
+from modules.operations.settings import settings
 import logging
 from typing import Dict, Any, Optional, List, Tuple
 import trimesh

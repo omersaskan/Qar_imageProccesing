@@ -1713,32 +1713,60 @@ class OpenMVSAdapter(COLMAPAdapter):
 
                 log_file.write(f"TextureMesh output check: obj={obj_exists}, mtl={mtl_exists}, tex={texture_exists}\n")
 
-                final_mesh = project_textured_obj
-                # OpenMVS 2.4 generates project_textured_material_*_map_Kd.jpg or .png
-                # We need to discover the real texture path
+                # Robust texture discovery and validation
                 discovered_texture = None
-                for ext in ["*.jpg", "*.png"]:
-                    for p in dense_dir.glob(f"project_textured_material_*_map_Kd{ext}"):
+                for ext in [".jpg", ".png", ".jpeg"]:
+                    # Look for anything that looks like a texture map from OpenMVS
+                    for p in dense_dir.glob(f"{used_output_stem}*_map_Kd{ext}"):
                         discovered_texture = p
                         break
-                    if discovered_texture:
-                        break
+                    if discovered_texture: break
 
-                if not project_textured_obj.exists() or not discovered_texture:
-                    if settings.require_textured_output:
-                        raise RuntimeReconstructionError(
-                            f"Textured output required but missing. mesh_exists={project_textured_obj.exists()}, texture_found={bool(discovered_texture)}"
-                        )
-                    
-                    log_file.write("\nWarning: Texturing failed or produced incomplete results. Falling back to geometry-only mesh.\n")
-                    if project_mesh_ply.exists():
-                        final_mesh = project_mesh_ply
-                        discovered_texture = None
-                    else:
-                        raise RuntimeReconstructionError(
-                            "OpenMVS completed but no mesh output found (textured or untextured)."
-                        )
+                # Fallback: parse MTL for real filename
+                if not discovered_texture:
+                    mtl_file = dense_dir / f"{used_output_stem}.mtl"
+                    if mtl_file.exists():
+                        try:
+                            with open(mtl_file, "r", encoding="utf-8", errors="ignore") as f:
+                                for line in f:
+                                    if line.strip().startswith("map_Kd"):
+                                        parts = line.strip().split(None, 1)
+                                        if len(parts) > 1:
+                                            tex_name = parts[1].strip()
+                                            p = dense_dir / tex_name
+                                            if p.exists():
+                                                discovered_texture = p
+                                                break
+                        except Exception as e:
+                            log_file.write(f"MTL parse failed: {e}\n")
 
+                obj_exists = project_textured_obj.exists()
+                texture_exists = discovered_texture is not None and discovered_texture.exists()
+                
+                # Verify vt lines in OBJ
+                has_uvs = False
+                if obj_exists:
+                    try:
+                        with open(project_textured_obj, "r", encoding="utf-8", errors="ignore") as f:
+                            for i, line in enumerate(f):
+                                if line.startswith("vt "):
+                                    has_uvs = True
+                                    break
+                                if i > 10000: break # Optimism
+                    except Exception: pass
+
+                log_file.write(f"TextureMesh output check: obj={obj_exists}, tex={texture_exists}, uvs={has_uvs}\n")
+
+                if settings.require_textured_output or settings.fail_on_texture_missing:
+                    if not texture_exists:
+                        raise RuntimeReconstructionError("Texture missing from OpenMVS output bundle.")
+                
+                if settings.fail_on_uv_missing:
+                    if not has_uvs:
+                        raise RuntimeReconstructionError("UVs missing from OpenMVS output bundle.")
+
+                final_mesh = project_textured_obj if (obj_exists and texture_exists) else project_mesh_ply
+                
                 stats = self._mesh_stats(str(final_mesh))
 
                 return {
@@ -1753,7 +1781,10 @@ class OpenMVSAdapter(COLMAPAdapter):
                     "mesher_used": "openmvs_reconstruct_mesh",
                     "engine_type": self.engine_type,
                     "textured": bool(discovered_texture),
+                    "texture_applied": bool(discovered_texture and has_uvs),
+                    "has_uv": has_uvs,
                     "selected_sparse_model": best_model["path"].name,
+                    "delivery_ready": bool(discovered_texture and has_uvs),
                     
                     # Part 2 Diagnostics
                     "sfm_mask_mode": "unmasked" if sfm_masks_dir is None else "masked",

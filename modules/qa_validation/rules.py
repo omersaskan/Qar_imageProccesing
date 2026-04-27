@@ -264,6 +264,8 @@ def validate_export_delivery_status(asset_data: Dict[str, Any]) -> Dict[str, str
         results["export_status"] = "pass"
     elif export_status == "failed_texture_application":
         results["export_status"] = "fail"
+    elif export_status == "failed_texture_quality":
+        results["export_status"] = "fail"
     elif export_status == "failed_validation":
         results["export_status"] = "fail"
     else:

@@ -453,11 +453,17 @@ class MeshIsolator:
 
         if not ranked:
             # Absolute fallback: keep largest
-            best_idx = np.argmax([len(c.faces) for c in components])
+            best_idx = int(np.argmax([len(c.faces) for c in components]))
             best_comp = components[best_idx]
             kept_components = [best_comp]
             best_scores = self._score_component(best_comp)
-            all_scores[int(best_idx)]["decision"] = "kept_fallback_largest"
+            if best_idx not in all_scores:
+                all_scores[best_idx] = {
+                    "faces": len(best_comp.faces),
+                    "geometric_score": best_scores["geom_score"],
+                    "total_score": best_scores["total_score"],
+                }
+            all_scores[best_idx]["decision"] = "kept_fallback_largest"
         else:
             ranked.sort(key=lambda x: x[0], reverse=True)
             

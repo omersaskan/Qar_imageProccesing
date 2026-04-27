@@ -1,8 +1,11 @@
+from __future__ import annotations
 import os
+import traceback
 from pathlib import Path
-from typing import Tuple, Dict, Optional, Any
+from typing import Tuple, Dict, Optional, Any, List
 
 import trimesh
+import numpy as np
 
 from modules.operations.logging_config import get_component_logger
 from .profiles import PROFILES, CleanupProfileType
@@ -117,7 +120,7 @@ class AssetCleaner:
             isolated_mesh.export(str(isolated_debug_obj))
             work_mesh = isolated_debug_obj
         except Exception as e:
-            logger.error("Isolation failed during texture_safe_copy: %s", e)
+            logger.error("Isolation failed during texture_safe_copy: %s\n%s", e, traceback.format_exc())
             return {
                 "cleanup_mode": "failed",
                 "object_isolation_status": "failed",
@@ -141,6 +144,17 @@ class AssetCleaner:
             for line in f:
                 if line.startswith("f "): face_count += 1
         
+        has_uv, has_mat = self._inspect_visuals(str(cleaned_mesh_path))
+        texture_applied = bool(has_uv and cleaned_tex_path.exists())
+        
+        # Strict Delivery Gate
+        delivery_ready = True
+        if settings.require_textured_output or settings.fail_on_texture_missing:
+            if not texture_applied:
+                delivery_ready = False
+        if settings.fail_on_uv_missing and not has_uv:
+            delivery_ready = False
+
         return {
             "cleanup_mode": "texture_safe_copy",
             "uv_preserved": True,
@@ -155,6 +169,10 @@ class AssetCleaner:
             "decimation": {"decimation_status": "skipped_safe_copy", "uv_preserved": True, "material_preserved": True},
             "texture_input_mesh_path": str(work_mesh),
             "unsafe_scene_copy_forbidden": False,
+            "has_uv": has_uv,
+            "has_material": has_mat,
+            "texture_applied": texture_applied,
+            "delivery_ready": delivery_ready,
         }
 
     def _safe_align_obj(self, input_path: Path, output_path: Path) -> Tuple[Dict[str, float], Dict[str, float], Dict[str, float]]:
@@ -324,8 +342,17 @@ class AssetCleaner:
             self.normalizer.save_metadata(metadata, str(metadata_path))
 
             has_uv, has_material = self._inspect_visuals(str(cleaned_mesh_path))
+            texture_applied = bool(raw_texture_path and has_uv)
             
-            logger.info("[%s] Cleanup pipeline finished. Output: %s", job_id, cleaned_mesh_path)
+            # Strict Delivery Gate
+            delivery_ready = True
+            if settings.require_textured_output or settings.fail_on_texture_missing:
+                if not raw_texture_path:
+                    delivery_ready = False
+            if settings.fail_on_uv_missing and not has_uv:
+                delivery_ready = False
+            
+            logger.info("[%s] Cleanup pipeline finished. Output: %s, delivery_ready=%s", job_id, cleaned_mesh_path, delivery_ready)
             
             cleanup_stats = {
                 "isolation": isolation_stats,
@@ -343,6 +370,8 @@ class AssetCleaner:
                 "delivery_profile": profile.name,
                 "has_uv": bool(has_uv),
                 "has_material": bool(has_material),
+                "texture_applied": texture_applied,
+                "delivery_ready": delivery_ready,
                 "texture_input_mesh_path": str(isolation_debug_path),
                 "pre_aligned_mesh_path": str(pre_aligned_path),
                 "oversized_raw_mesh": oversized_raw_mesh,
