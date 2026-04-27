@@ -17,9 +17,9 @@
     "removed_face_ratio": 0.4263744033940251,
     "object_isolation_status": "success",
     "object_isolation_method": "mask_guided",
-    "isolation_confidence": 0.4593569662300565,
+    "isolation_confidence": 0.4552426805157708,
     "used_sam2": true,
-    "mask_support_ratio": 0.22514285714285714,
+    "mask_support_ratio": 0.21828571428571428,
     "point_cloud_support_ratio": 0.0,
     "supported_view_count": 0,
     "reason_if_geometric_fallback": null

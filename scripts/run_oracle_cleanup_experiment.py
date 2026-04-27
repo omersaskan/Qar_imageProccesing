@@ -26,15 +26,15 @@ def run_experiment():
     cameras = load_reconstruction_cameras(recon_dir)
     print(f"Loaded {len(cameras)} cameras")
 
-    # Load SAM2 masks
-    mask_dir = Path(f"data/captures/{job_id}/frames/sam2_masks")
+    # Load Oracle masks
+    mask_dir = Path(f"data/captures/{job_id}/frames/oracle_masks")
     masks = {}
     for m_path in mask_dir.glob("*.png"):
         # Map frame_0000.png to the camera name if possible, or just use the name
         # The cameras usually have names like 'frame_0000.jpg'
         masks[m_path.stem + ".jpg"] = cv2.imread(str(m_path), cv2.IMREAD_GRAYSCALE)
         
-    print(f"Loaded {len(masks)} SAM2 masks")
+    print(f"Loaded {len(masks)} Oracle masks")
     
     cleaner = AssetCleaner()
     
