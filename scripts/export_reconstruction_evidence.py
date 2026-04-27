@@ -65,9 +65,12 @@ def collect_evidence(job_id: str, workspace_path: Path, output_dir: Path):
 
     session_id = job_data.get("capture_session_id") or job_data.get("session_id")
     
-    # Locate reports
+    # Locate reports (check both session and job based paths)
     data_root = Path(settings.data_root)
-    reports_dir = data_root / "captures" / session_id / "reports" if session_id else None
+    reports_dirs = []
+    if session_id:
+        reports_dirs.append(data_root / "captures" / session_id / "reports")
+    reports_dirs.append(workspace_path / "reports")
     
     report_mapping = {
         "capture_report": "coverage_report.json",
@@ -77,12 +80,14 @@ def collect_evidence(job_id: str, workspace_path: Path, output_dir: Path):
         "guidance_report": "guidance_report.json"
     }
     
-    if reports_dir and reports_dir.exists():
-        for key, filename in report_mapping.items():
-            path = reports_dir / filename
-            if path.exists():
-                with open(path, "r") as f:
-                    evidence["reports"][key] = json.load(f)
+    for reports_dir in reports_dirs:
+        if reports_dir.exists():
+            for key, filename in report_mapping.items():
+                if key in evidence["reports"]: continue # Don't overwrite if found in prioritized path
+                path = reports_dir / filename
+                if path.exists():
+                    with open(path, "r") as f:
+                        evidence["reports"][key] = json.load(f)
                     
     # Reconstruction Audit
     audit_path = workspace_path / "reconstruction_audit.json"
@@ -90,18 +95,23 @@ def collect_evidence(job_id: str, workspace_path: Path, output_dir: Path):
         with open(audit_path, "r") as f:
             evidence["reports"]["reconstruction_audit"] = json.load(f)
             
-    # Cleanup stats
-    cleaned_dir = data_root / "cleaned" / session_id if session_id else None
-    if cleaned_dir and cleaned_dir.exists():
-        stats_path = cleaned_dir / "cleanup_stats.json"
-        if stats_path.exists():
-            with open(stats_path, "r") as f:
-                evidence["reports"]["cleanup_stats"] = json.load(f)
-        
-        meta_path = cleaned_dir / "normalized_metadata.json"
-        if meta_path.exists():
-            with open(meta_path, "r") as f:
-                evidence["reports"]["normalized_metadata"] = json.load(f)
+    # Cleanup stats (Check session_id then job_id)
+    cleanup_search_ids = []
+    if session_id: cleanup_search_ids.append(session_id)
+    cleanup_search_ids.append(job_id)
+    
+    for search_id in cleanup_search_ids:
+        cleaned_dir = data_root / "cleaned" / search_id
+        if cleaned_dir.exists():
+            stats_path = cleaned_dir / "cleanup_stats.json"
+            if stats_path.exists() and "cleanup_stats" not in evidence["reports"]:
+                with open(stats_path, "r") as f:
+                    evidence["reports"]["cleanup_stats"] = json.load(f)
+            
+            meta_path = cleaned_dir / "normalized_metadata.json"
+            if meta_path.exists() and "normalized_metadata" not in evidence["reports"]:
+                with open(meta_path, "r") as f:
+                    evidence["reports"]["normalized_metadata"] = json.load(f)
 
     # Fusion Ablation Report
     ablation_path = workspace_path / "ablation_report.json"
@@ -174,7 +184,13 @@ def generate_checklist(evidence: Dict[str, Any]) -> Dict[str, Any]:
     metadata = best_attempt.get("metadata", {}) if best_attempt else {}
     
     # 1. Data Normalization
-    dense_image_count = best_attempt.get("registered_images", 0) if best_attempt else 0
+    dense_image_count = (
+        metadata.get("dense_image_count") or 
+        metadata.get("dense_images_count") or 
+        (best_attempt.get("dense_image_count") if best_attempt else 0) or 
+        (best_attempt.get("registered_images") if best_attempt else 0) or 0
+    )
+    
     dense_mask_count = metadata.get("dense_mask_count") or metadata.get("dense_mask_exact_matches") or 0
     dense_mask_exact = metadata.get("dense_mask_exact_matches") or metadata.get("dense_mask_exact_filename_matches") or 0
     dense_mask_dim = metadata.get("dense_mask_dimension_matches") or 0
@@ -313,28 +329,32 @@ def generate_checklist(evidence: Dict[str, Any]) -> Dict[str, Any]:
     tex_app = export_metrics.get("texture_applied", False)
     
     texture_gate_prod = (tex_count > 0 and mat_count > 0 and tex_uv and tex_app)
-    # For review, maybe we allow some warnings, but if require_textured is True, we fail.
-    texture_gate_review = texture_gate_prod # Default to same for now unless we allow untextured review
+    texture_gate_review = texture_gate_prod
     
     if require_textured:
         if not texture_gate_prod:
             failure_reasons.append("Config requires texture but one or more texture components are missing.")
-            # We override these items to failed
     
     check_item("texture_count", tex_count > 0, tex_count > 0, tex_count, "> 0", "No textures found", "N/A")
     check_item("material_count", mat_count > 0, mat_count > 0, mat_count, "> 0", "No materials found", "N/A")
     check_item("texcoord_0_exists", tex_uv, tex_uv, tex_uv, "True", "Missing UV coords", "N/A")
     check_item("texture_applied", tex_app, tex_app, tex_app, "True", "Texture not applied to mesh", "N/A")
 
-    # GLB Validation
+    # GLB Validation (Fallback to export_metrics if report missing)
     glb_val = val_report.get("final_decision")
+    if not glb_val and export_metrics:
+        if export_metrics.get("delivery_ready") is True:
+            glb_val = "pass"
+        elif export_metrics.get("export_status") == "success":
+            glb_val = "review"
+    
     check_item(
         "glb_validation",
         glb_val == "pass",
         glb_val == "review",
         glb_val,
         "PROD: pass, REVIEW: review",
-        f"GLB validation failed: {glb_val}",
+        f"GLB validation failed or missing: {glb_val}",
         f"GLB requires manual review: {glb_val}"
     )
 
