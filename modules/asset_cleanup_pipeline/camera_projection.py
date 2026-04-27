@@ -137,7 +137,9 @@ def load_reconstruction_cameras(workspace_path: Path) -> List[Dict[str, Any]]:
                     
                     for img_id, img in imgs.items():
                         cam = cams.get(img["camera_id"])
-                        if not cam: continue
+                        if not cam:
+                            logger.debug(f"Image {img_id} ({img['name']}) refers to missing camera {img['camera_id']}")
+                            continue
                         
                         # Projection Matrix P = K * [R | t]
                         K = cam["K"]
@@ -156,8 +158,10 @@ def load_reconstruction_cameras(workspace_path: Path) -> List[Dict[str, Any]]:
                         })
                     
                     if cameras_data:
-                        logger.info(f"Loaded {len(cameras_data)} cameras from COLMAP model {model_dir.name}")
+                        logger.info(f"Successfully loaded {len(cameras_data)} cameras from COLMAP model: {model_dir}")
                         return cameras_data
+                    else:
+                        logger.warning(f"No valid camera/image pairs found in COLMAP model: {model_dir}")
                 except Exception as e:
                     logger.warning(f"Failed to read COLMAP bin from {model_dir}: {e}")
             
@@ -203,9 +207,13 @@ def load_reconstruction_masks(workspace_path: Path, camera_names: List[str]) -> 
                             break
                     except Exception:
                         pass
-            if found: break
+            if found:
+                logger.debug(f"Found mask for {name} at {candidates[0 if (d / f'{name}.png').exists() else 1]}")
+                break
             
-    logger.info(f"Loaded {len(masks)} masks for {len(camera_names)} cameras")
+    logger.info(f"Mask loading summary: requested={len(camera_names)}, loaded={len(masks)}")
+    if len(masks) < len(camera_names) * 0.5:
+        logger.warning(f"Low mask coverage: {len(masks)}/{len(camera_names)}. Isolation might be weak.")
     return masks
 
 def project_points(points: np.ndarray, P: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:

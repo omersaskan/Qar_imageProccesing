@@ -678,7 +678,7 @@ class COLMAPAdapter(ReconstructionAdapter):
             "dense_images_dir": str(dense_images_dir),
             "dense_image_count": len(images),
             "dense_mask_count": 0,
-            "dense_mask_exact_matches": 0,
+            "dense_mask_exact_filename_matches": 0,
             "dense_mask_dimension_matches": 0,
             "dense_mask_fallback_white_count": 0,
             "dense_mask_fallback_white_ratio": 1.0,
@@ -711,7 +711,7 @@ class COLMAPAdapter(ReconstructionAdapter):
             mask = None
             if source_mask is not None:
                 mask = self._read_image(source_mask, cv2.IMREAD_GRAYSCALE)
-                stats["dense_mask_exact_matches"] += 1
+                stats["dense_mask_exact_filename_matches"] += 1
             else:
                 log_file.write(f"INFO: No source mask found for {img_file.name}, using white fallback.\n")
 
@@ -752,7 +752,7 @@ class COLMAPAdapter(ReconstructionAdapter):
         log_file.write(f"Dense masks directory: {stats['dense_masks_dir']}\n")
         log_file.write(f"Dense images: {stats['dense_image_count']}\n")
         log_file.write(f"Dense masks written: {stats['dense_mask_count']}\n")
-        log_file.write(f"Exact filename matches: {stats['dense_mask_exact_matches']}\n")
+        log_file.write(f"Exact filename matches: {stats['dense_mask_exact_filename_matches']}\n")
         log_file.write(f"Dimension matches: {stats['dense_mask_dimension_matches']}\n")
         log_file.write(f"Fallback white count: {stats['dense_mask_fallback_white_count']}\n")
         log_file.write(f"Fallback white ratio: {stats['dense_mask_fallback_white_ratio']:.2%}\n")
@@ -793,18 +793,23 @@ class COLMAPAdapter(ReconstructionAdapter):
             log_file.write("WARNING: No undistorted dense images found for mask validation.\n")
             return False
 
-        exact_matches = 0
+        exact_filename_matches = 0
         dimension_matches = 0
         missing_masks = []
         dimension_mismatches = []
 
         for img_path in images:
+            # We expect frame_0000.jpg.png
             expected_mask = dense_masks_dir / f"{img_path.name}.png"
             if not expected_mask.exists():
-                missing_masks.append(expected_mask.name)
-                continue
+                # Fallback check for frame_0000.png
+                if (dense_masks_dir / f"{img_path.stem}.png").exists():
+                    expected_mask = dense_masks_dir / f"{img_path.stem}.png"
+                else:
+                    missing_masks.append(expected_mask.name)
+                    continue
 
-            exact_matches += 1
+            exact_filename_matches += 1
             img = self._read_image(img_path, cv2.IMREAD_UNCHANGED)
             mask = self._read_image(expected_mask, cv2.IMREAD_GRAYSCALE)
 
@@ -833,7 +838,7 @@ class COLMAPAdapter(ReconstructionAdapter):
             "Dense mask validation: "
             f"images={len(images)} "
             f"masks={mask_count} "
-            f"exact_matches={exact_matches} "
+            f"exact_matches={exact_filename_matches} "
             f"dimension_matches={dimension_matches} "
             f"missing={len(missing_masks)} "
             f"dimension_mismatches={len(dimension_mismatches)}\n"
@@ -845,10 +850,10 @@ class COLMAPAdapter(ReconstructionAdapter):
             log_file.write(f"WARNING: Dense mask dimension mismatch sample: {dimension_mismatches[:5]}\n")
 
         # Rigid requirements for asset-quality reconstruction
-        if exact_matches < len(images):
+        if exact_filename_matches < len(images):
             log_file.write(
                 f"ERROR: Missing exact dense mask matches for some images "
-                f"({exact_matches}/{len(images)}). High quality fusion requires all masks.\n"
+                f"({exact_filename_matches}/{len(images)}). High quality fusion requires all masks.\n"
             )
             return False
 

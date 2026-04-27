@@ -24,6 +24,7 @@ ci:
 	pytest tests/asset_cleanup_pipeline -q
 	pytest tests/export_pipeline -q
 	pytest tests/qa_validation -q
+	pytest tests/scripts -q
 
 smoke:
 	python -m pytest modules/tests/test_smoke_flow.py

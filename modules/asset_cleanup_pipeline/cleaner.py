@@ -321,7 +321,8 @@ class AssetCleaner:
 
         try:
             # 2) Object Isolation
-            logger.info("[%s] Starting isolation on %s (guided=%s)", job_id, work_mesh_path, bool(masks))
+            logger.info("[%s] Starting isolation on %s. Data Support: cameras=%s, masks=%s, point_cloud=%s", 
+                        job_id, work_mesh_path, bool(cameras), bool(masks), bool(point_cloud))
             mesh = trimesh.load(work_mesh_path, process=False)
             if isinstance(mesh, trimesh.Scene): mesh = mesh.dump(concatenate=True)
             if len(mesh.vertices) == 0: raise ValueError("Empty mesh")
@@ -335,7 +336,8 @@ class AssetCleaner:
             )
             if len(isolated_mesh.faces) == 0: raise ValueError(f"Isolation failed: {isolation_stats.get('object_isolation_status')}")
             isolated_mesh.export(str(isolation_debug_path))
-            logger.info("[%s] Isolation completed. Resulting faces: %d", job_id, len(isolated_mesh.faces))
+            logger.info("[%s] Isolation completed. Method: %s, faces: %d", 
+                        job_id, isolation_stats.get("object_isolation_method"), len(isolated_mesh.faces))
 
             # 3) Remeshing/Decimation
             logger.info("[%s] Starting remesher (profile=%s)", job_id, profile.name)

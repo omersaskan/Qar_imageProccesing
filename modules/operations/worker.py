@@ -699,6 +699,8 @@ class IngestionWorker:
                 cameras = load_reconstruction_cameras(workspace_path)
                 if cameras:
                     masks = load_reconstruction_masks(workspace_path, [c["name"] for c in cameras])
+                else:
+                    logger.warning("[%s] No cameras found in workspace: %s", session.session_id, workspace_path)
                 
                 fused_path = workspace_path / "dense" / "fused.ply"
                 if fused_path.exists():
@@ -710,7 +712,10 @@ class IngestionWorker:
                     except Exception as pc_err:
                         logger.warning("Could not load fused point cloud for guidance: %s", pc_err)
         except Exception as guide_err:
-            logger.warning("Failed to resolve guidance data for cleanup: %s", guide_err)
+            logger.warning("[%s] Failed to resolve guidance data for cleanup: %s", session.session_id, guide_err)
+        
+        logger.info("[%s] Cleanup Guidance: cameras=%s, masks=%s, point_cloud=%s", 
+                    session.session_id, len(cameras) if cameras else 0, len(masks) if masks else 0, bool(point_cloud))
 
         try:
             metadata, cleanup_stats, cleaned_mesh_path = self.cleaner.process_cleanup(

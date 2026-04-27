@@ -99,6 +99,7 @@ def collect_evidence(job_id: str, workspace_path: Path, output_dir: Path):
     cleanup_search_ids = []
     if session_id: cleanup_search_ids.append(session_id)
     cleanup_search_ids.append(job_id)
+    cleanup_search_ids.append(f"job_{job_id}")
     
     for search_id in cleanup_search_ids:
         cleaned_dir = data_root / "cleaned" / search_id
@@ -191,8 +192,8 @@ def generate_checklist(evidence: Dict[str, Any]) -> Dict[str, Any]:
         (best_attempt.get("registered_images") if best_attempt else 0) or 0
     )
     
-    dense_mask_count = metadata.get("dense_mask_count") or metadata.get("dense_mask_exact_matches") or 0
-    dense_mask_exact = metadata.get("dense_mask_exact_matches") or metadata.get("dense_mask_exact_filename_matches") or 0
+    dense_mask_count = metadata.get("dense_mask_count") or metadata.get("dense_mask_exact_matches") or metadata.get("dense_mask_exact_filename_matches") or 0
+    dense_mask_exact = metadata.get("dense_mask_exact_filename_matches") or metadata.get("dense_mask_exact_matches") or 0
     dense_mask_dim = metadata.get("dense_mask_dimension_matches") or 0
     
     accepted_frames = ext_report.get("saved_count", 0)
@@ -201,8 +202,10 @@ def generate_checklist(evidence: Dict[str, Any]) -> Dict[str, Any]:
     
     points = best_attempt.get("dense_points_fused", 0) if best_attempt else 0
     fallback_ratio = metadata.get("dense_mask_fallback_white_ratio", 1.0)
-    isolation_method = cleanup_stats.get("isolation", {}).get("object_isolation_method")
-    isolation_conf = cleanup_stats.get("isolation", {}).get("isolation_confidence", 0.0)
+    
+    # Support both nested and flat structure
+    isolation_method = cleanup_stats.get("isolation", {}).get("object_isolation_method") or cleanup_stats.get("object_isolation_method")
+    isolation_conf = cleanup_stats.get("isolation", {}).get("isolation_confidence", 0.0) or cleanup_stats.get("isolation_confidence", 0.0)
     
     failure_reasons = []
     warning_reasons = []
