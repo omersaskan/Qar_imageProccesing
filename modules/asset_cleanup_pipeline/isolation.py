@@ -74,15 +74,14 @@ class MeshIsolator:
             return float(self._score_component(mesh)["total_score"])
         return best_score
 
-    def _remove_horizontal_planes(
+    def _remove_horizontal_planes_tracked(
         self,
         mesh: trimesh.Trimesh,
         max_iter: int = 2,
     ) -> Tuple[trimesh.Trimesh, Dict[str, Any]]:
-        """
-        Removes large horizontal-ish face groups, which are likely table/floor planes.
-        """
         working = mesh.copy()
+        if 'face_indices' not in working.metadata:
+            working.metadata['face_indices'] = np.arange(len(working.faces))
 
         stats = {
             "removed_planes": 0,
@@ -91,17 +90,12 @@ class MeshIsolator:
             "plane_candidate_count": 0,
         }
 
-        if len(working.faces) == 0:
-            return working, stats
-
         for _ in range(max_iter):
             if len(working.faces) == 0:
                 break
 
             centers = working.triangles_center
             normals = working.face_normals
-
-            # near-horizontal faces → tables/floors are usually aligned like this
             horizontal_faces = np.abs(normals[:, 2]) > 0.92
             horiz_count = int(np.sum(horizontal_faces))
 
@@ -109,49 +103,34 @@ class MeshIsolator:
                 break
 
             stats["plane_candidate_count"] += 1
-
             z_vals = centers[horizontal_faces, 2]
-            z_min, z_max = float(z_vals.min()), float(z_vals.max())
-            span = max(z_max - z_min, 1e-6)
-
-            bin_count = max(10, min(60, int(np.sqrt(len(z_vals)))))
-            hist, edges = np.histogram(z_vals, bins=bin_count)
-            peak_idx = int(np.argmax(hist))
-            z_lo, z_hi = edges[peak_idx], edges[peak_idx + 1]
-            z_mid = 0.5 * (z_lo + z_hi)
-
-            z_tol = max(0.01, 0.03 * span)
+            z_mid = 0.5 * (float(z_vals.min()) + float(z_vals.max()))
+            z_tol = max(0.01, 0.03 * (float(z_vals.max()) - float(z_vals.min())))
             plane_faces = horizontal_faces & (np.abs(centers[:, 2] - z_mid) <= z_tol)
 
             removed_faces = int(np.sum(plane_faces))
             if removed_faces < max(30, int(0.08 * len(working.faces))):
                 break
 
-            plane_vertex_ids = np.unique(working.faces[plane_faces].reshape(-1))
             stats["removed_planes"] += 1
             stats["removed_plane_faces"] += removed_faces
-            stats["removed_plane_vertices"] += int(len(plane_vertex_ids))
-
-            keep_faces = ~plane_faces
-            working.update_faces(keep_faces)
-            working.remove_unreferenced_vertices()
-
-            logger.info(
-                f"Removed dominant plane candidate: faces={removed_faces}, "
-                f"remaining_faces={len(working.faces)}"
-            )
+            
+            indices_to_keep = np.where(~plane_faces)[0]
+            original_indices = working.metadata['face_indices'][indices_to_keep]
+            working = working.submesh([indices_to_keep], append=True)
+            working.metadata['face_indices'] = original_indices
 
         return working, stats
 
-    def _remove_bottom_support_bands(
+    def _remove_bottom_support_bands_tracked(
         self,
         mesh: trimesh.Trimesh,
         max_iter: int = 2,
     ) -> Tuple[trimesh.Trimesh, Dict[str, Any]]:
-        """
-        Removes large low-z support slabs even when they are not perfectly horizontal.
-        """
         working = mesh.copy()
+        if 'face_indices' not in working.metadata:
+            working.metadata['face_indices'] = np.arange(len(working.faces))
+
         stats = {
             "removed_support_bands": 0,
             "removed_support_faces": 0,
@@ -163,88 +142,47 @@ class MeshIsolator:
                 break
 
             bounds = working.bounds
-            extents = np.maximum(bounds[1] - bounds[0], 1e-8)
-            total_height = float(extents[2])
-            total_footprint = float(extents[0] * extents[1])
-            if total_height <= 1e-8 or total_footprint <= 1e-8:
-                break
-
+            total_height = float(np.maximum(bounds[1] - bounds[0], 1e-8)[2])
+            total_footprint = float(np.prod(np.maximum(bounds[1] - bounds[0], 1e-8)[:2]))
+            
             current_score = self._best_component_score(working)
             centers = working.triangles_center
-            total_faces = max(len(working.faces), 1)
             best_candidate = None
 
             for frac in (0.12, 0.18, 0.24):
                 z_cut = float(bounds[0][2] + total_height * frac)
                 face_indices = np.where(centers[:, 2] <= z_cut)[0]
-                if len(face_indices) < max(40, int(0.06 * total_faces)):
+                if len(face_indices) < max(40, int(0.06 * len(working.faces))):
                     continue
 
-                candidate_band = working.submesh([face_indices], append=True, repair=False)
-                candidate_band = self._ensure_mesh(candidate_band)
-                if len(candidate_band.faces) == 0:
-                    continue
+                candidate_band = working.submesh([face_indices], append=True)
+                if len(candidate_band.faces) == 0: continue
 
                 band_extents = self._bbox_extents(candidate_band)
                 footprint_ratio = float((band_extents[0] * band_extents[1]) / max(total_footprint, 1e-8))
                 thickness_ratio = float(band_extents[2] / max(total_height, 1e-8))
-                flatness_ratio = self._flatness_ratio(candidate_band)
-                face_share = float(len(face_indices) / max(total_faces, 1))
-                wide_band = bool(
-                    band_extents[0] >= extents[0] * 0.55
-                    or band_extents[1] >= extents[1] * 0.55
-                )
-
-                if not (
-                    footprint_ratio >= 0.42
-                    and thickness_ratio <= 0.22
-                    and flatness_ratio <= 0.18
-                    and face_share >= 0.08
-                    and wide_band
-                ):
+                
+                if not (footprint_ratio >= 0.42 and thickness_ratio <= 0.22):
                     continue
 
-                trimmed = working.copy()
-                keep_mask = np.ones(len(working.faces), dtype=bool)
-                keep_mask[face_indices] = False
-                trimmed.update_faces(keep_mask)
-                trimmed.remove_unreferenced_vertices()
+                remaining_indices = np.delete(np.arange(len(working.faces)), face_indices)
+                remaining_mesh = working.submesh([remaining_indices], append=True)
+                
+                after_score = self._best_component_score(remaining_mesh)
+                if after_score > current_score * 0.95:
+                    best_candidate = face_indices
+                    break
 
-                if len(trimmed.faces) == 0:
-                    continue
-
-                trimmed_score = self._best_component_score(trimmed)
-                score_gain = float(trimmed_score - current_score)
-                candidate_quality = (
-                    footprint_ratio * 0.35
-                    + face_share * 0.20
-                    + max(0.0, 0.25 - thickness_ratio) * 1.2
-                    + max(0.0, score_gain) * 1.6
-                )
-
-                if best_candidate is None or candidate_quality > best_candidate["quality"]:
-                    best_candidate = {
-                        "face_indices": face_indices,
-                        "quality": candidate_quality,
-                        "score_gain": score_gain,
-                    }
-
-            if best_candidate is None:
+            if best_candidate is not None:
+                stats["removed_support_bands"] += 1
+                stats["removed_support_faces"] += len(best_candidate)
+                
+                indices_to_keep = np.delete(np.arange(len(working.faces)), best_candidate)
+                original_indices = working.metadata['face_indices'][indices_to_keep]
+                working = working.submesh([indices_to_keep], append=True)
+                working.metadata['face_indices'] = original_indices
+            else:
                 break
-
-            if best_candidate["score_gain"] < 0.05 and len(best_candidate["face_indices"]) < int(0.18 * total_faces):
-                break
-
-            remove_mask = np.zeros(len(working.faces), dtype=bool)
-            remove_mask[best_candidate["face_indices"]] = True
-            removed_vertex_ids = np.unique(working.faces[remove_mask].reshape(-1))
-
-            stats["removed_support_bands"] += 1
-            stats["removed_support_faces"] += int(np.sum(remove_mask))
-            stats["removed_support_vertices"] += int(len(removed_vertex_ids))
-
-            working.update_faces(~remove_mask)
-            working.remove_unreferenced_vertices()
 
         return working, stats
 
@@ -376,7 +314,21 @@ class MeshIsolator:
         point_cloud: Optional[trimesh.points.PointCloud] = None,
         output_dir: Optional[Path] = None
     ) -> Tuple[trimesh.Trimesh, dict]:
+        # SPRINT 5 Fix: Preserve original visuals to re-apply after isolation.
+        # Isolation processing (splitting, plane removal) will use a geom-only copy 
+        # to avoid MemoryError with large textures.
+        original_visual = None
+        if hasattr(mesh, 'visual') and isinstance(mesh.visual, trimesh.visual.TextureVisuals):
+            original_visual = mesh.visual
+
         mesh = self._ensure_mesh(mesh)
+        
+        # Create a geometry-only working copy
+        working_geom = trimesh.Trimesh(vertices=mesh.vertices, faces=mesh.faces, process=False)
+        working_geom.metadata['face_indices'] = np.arange(len(mesh.faces))
+        
+        if isinstance(mesh, trimesh.points.PointCloud):
+            return mesh, {"error": "Input is a point cloud, expected a mesh with faces", "object_isolation_status": "failed"}
 
         if len(mesh.vertices) == 0:
             return mesh, {"error": "Empty mesh", "object_isolation_status": "failed"}
@@ -395,11 +347,25 @@ class MeshIsolator:
             reason_if_geometric_fallback = "Masks missing"
 
         # 1) remove dominant planes (Geometric pre-pass)
-        current_mesh, plane_stats = self._remove_horizontal_planes(mesh)
-        current_mesh, support_stats = self._remove_bottom_support_bands(current_mesh)
+        # We need to track face indices. Let's update _remove_horizontal_planes to use submesh.
+        current_mesh, plane_stats = self._remove_horizontal_planes_tracked(working_geom)
+        current_mesh, support_stats = self._remove_bottom_support_bands_tracked(current_mesh)
 
         # 2) split components
-        components = current_mesh.split(only_watertight=False)
+        # Optimization: trimesh.split() doesn't preserve metadata, so we do it manually
+        if 'face_indices' in current_mesh.metadata:
+            # Get face masks for components
+            from trimesh.graph import connected_components
+            face_groups = connected_components(current_mesh.face_adjacency, nodes=np.arange(len(current_mesh.faces)))
+            components = []
+            for group in face_groups:
+                if len(group) == 0: continue
+                comp = current_mesh.submesh([group], append=True)
+                comp.metadata['face_indices'] = current_mesh.metadata['face_indices'][group]
+                components.append(comp)
+        else:
+            components = current_mesh.split(only_watertight=False)
+
         if not components:
              return current_mesh, {"object_isolation_status": "failed_no_components", "initial_faces": initial_faces}
 
@@ -489,7 +455,24 @@ class MeshIsolator:
             with open(output_dir / "component_scores.json", "w") as f:
                 json.dump(all_scores, f, indent=2)
 
-        final_mesh = trimesh.util.concatenate(kept_components) if len(kept_components) > 1 else kept_components[0]
+        # Concatenate kept components
+        final_geom = trimesh.util.concatenate(kept_components) if len(kept_components) > 1 else kept_components[0]
+        
+        # Re-apply visuals if they existed
+        if original_visual is not None and 'face_indices' in final_geom.metadata:
+            # trimesh.util.concatenate handles metadata if we are lucky, but let's be safe
+            all_face_indices = []
+            for comp in kept_components:
+                if 'face_indices' in comp.metadata:
+                    all_face_indices.extend(comp.metadata['face_indices'])
+            
+            if all_face_indices:
+                final_mesh = trimesh.Trimesh(vertices=final_geom.vertices, faces=final_geom.faces, process=False)
+                final_mesh.visual = original_visual.face_subset(all_face_indices)
+            else:
+                final_mesh = final_geom
+        else:
+            final_mesh = final_geom
         final_faces = int(len(final_mesh.faces))
         removed_face_ratio = (initial_faces - final_faces) / max(initial_faces, 1)
 

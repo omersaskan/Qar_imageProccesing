@@ -98,6 +98,9 @@ class AssetCleaner:
         raw_mesh_path: str,
         raw_texture_path: str,
         output_dir: Path,
+        cameras: Optional[List[Dict]] = None,
+        masks: Optional[Dict[str, np.ndarray]] = None,
+        point_cloud: Optional[trimesh.points.PointCloud] = None,
     ) -> dict:
         raw_mesh = Path(raw_mesh_path)
         raw_tex = Path(raw_texture_path)
@@ -113,7 +116,13 @@ class AssetCleaner:
             mesh = trimesh.load(raw_mesh, process=False)
             if isinstance(mesh, trimesh.Scene):
                 mesh = mesh.dump(concatenate=True)
-            isolated_mesh, isolation_stats = self.isolator.isolate_product(mesh)
+            isolated_mesh, isolation_stats = self.isolator.isolate_product(
+                mesh,
+                cameras=cameras,
+                masks=masks,
+                point_cloud=point_cloud,
+                output_dir=output_dir
+            )
             if isolation_stats.get("object_isolation_status") != "success":
                 raise ValueError(f"Object isolation failed: {isolation_stats.get('object_isolation_status')}")
             isolated_debug_obj = output_dir / "debug_isolated_mesh.obj"
@@ -154,6 +163,10 @@ class AssetCleaner:
                 delivery_ready = False
         if settings.fail_on_uv_missing and not has_uv:
             delivery_ready = False
+        
+        # SPRINT 5 Fix: If isolation is only geometric, it's not production-grade (Review Ready only)
+        if isolation_stats.get("object_isolation_method") == "geometric_only":
+            delivery_ready = False # In our internal logic, False means 'review_ready' or 'failed' depending on other flags
 
         return {
             "cleanup_mode": "texture_safe_copy",
@@ -238,7 +251,14 @@ class AssetCleaner:
             valid, msg, resolved_tex = self._is_valid_textured_obj_bundle(raw_mesh_path, raw_texture_path)
             if not valid:
                 raise ValueError(msg)
-            stats = self._run_texture_safe_copy(raw_mesh_path, resolved_tex, job_cleaned_dir)
+            stats = self._run_texture_safe_copy(
+                raw_mesh_path, 
+                resolved_tex, 
+                job_cleaned_dir,
+                cameras=cameras,
+                masks=masks,
+                point_cloud=point_cloud
+            )
             if stats.get("cleanup_mode") == "failed": raise RuntimeError(f"texture_safe_copy failed: {stats.get('error')}")
             metadata = self.normalizer.generate_metadata(stats["bbox_min"], stats["bbox_max"], stats["pivot_offset"], stats["final_polycount"])
             metadata_path = job_cleaned_dir / "normalized_metadata.json"
