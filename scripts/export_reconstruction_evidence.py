@@ -14,12 +14,24 @@ sys.path.append(str(ROOT))
 from modules.operations.settings import settings
 from modules.utils.file_persistence import atomic_write_json
 
+# Thresholds
+THR_PROD_ACCEPTED_FRAMES = 30
+THR_REVIEW_ACCEPTED_FRAMES = 15
+THR_PROD_DENSE_POINTS = 25000
+THR_REVIEW_DENSE_POINTS = 10000
+THR_PROD_FALLBACK_WHITE = 0.05
+THR_REVIEW_FALLBACK_WHITE = 0.10
+THR_PROD_REG_RATIO = 0.70
+THR_PROD_REG_COUNT = 20
+THR_PROD_ISOLATION_CONF = 0.75
+THR_REVIEW_ISOLATION_CONF = 0.60
+
 def collect_evidence(job_id: str, workspace_path: Path, output_dir: Path):
     output_dir.mkdir(parents=True, exist_ok=True)
     
     evidence = {
         "job_id": job_id,
-        "exported_at": datetime.utcnow().isoformat(),
+        "exported_at": datetime.utcnow().isoformat() + "Z",
         "reports": {},
         "logs": [],
         "artifacts": {}
@@ -43,15 +55,15 @@ def collect_evidence(job_id: str, workspace_path: Path, output_dir: Path):
 
     # Locate job.json
     job_json_path = workspace_path / "job.json"
+    job_data = {}
     if not job_json_path.exists():
         print(f"Warning: job.json not found at {job_json_path}")
-        job_data = {}
     else:
         with open(job_json_path, "r") as f:
             job_data = json.load(f)
             evidence["reports"]["job_config"] = job_data
 
-    session_id = job_data.get("capture_session_id")
+    session_id = job_data.get("capture_session_id") or job_data.get("session_id")
     
     # Locate reports
     data_root = Path(settings.data_root)
@@ -79,7 +91,6 @@ def collect_evidence(job_id: str, workspace_path: Path, output_dir: Path):
             evidence["reports"]["reconstruction_audit"] = json.load(f)
             
     # Cleanup stats
-    # We need to find where cleaned mesh and its stats are.
     cleaned_dir = data_root / "cleaned" / session_id if session_id else None
     if cleaned_dir and cleaned_dir.exists():
         stats_path = cleaned_dir / "cleanup_stats.json"
@@ -92,7 +103,7 @@ def collect_evidence(job_id: str, workspace_path: Path, output_dir: Path):
             with open(meta_path, "r") as f:
                 evidence["reports"]["normalized_metadata"] = json.load(f)
 
-    # Fusion Ablation Report (if exists in workspace or output)
+    # Fusion Ablation Report
     ablation_path = workspace_path / "ablation_report.json"
     if ablation_path.exists():
         with open(ablation_path, "r") as f:
@@ -104,7 +115,10 @@ def collect_evidence(job_id: str, workspace_path: Path, output_dir: Path):
         log_files.extend(list(attempt_dir.glob("*.log")))
         
     for log_path in log_files:
-        rel_path = log_path.relative_to(workspace_path)
+        try:
+            rel_path = log_path.relative_to(workspace_path)
+        except ValueError:
+            rel_path = Path(log_path.name)
         dest = output_dir / "logs" / rel_path
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(log_path, dest)
@@ -117,12 +131,13 @@ def collect_evidence(job_id: str, workspace_path: Path, output_dir: Path):
         if path.is_dir():
             try:
                 for child in sorted(path.iterdir()):
-                    # Avoid infinite recursion or extremely large trees
-                    if child.name == ".git" or child.name == "__pycache__":
+                    if child.name in [".git", "__pycache__", "venv", ".pytest_cache"]:
                         continue
                     build_tree(child, indent + "  ")
             except PermissionError:
                 tree_lines.append(f"{indent}  [Permission Denied]")
+            except Exception as e:
+                tree_lines.append(f"{indent}  [Error: {e}]")
     
     build_tree(workspace_path)
     with open(output_dir / "artifact_tree.txt", "w", encoding="utf-8") as f:
@@ -139,6 +154,7 @@ def collect_evidence(job_id: str, workspace_path: Path, output_dir: Path):
     generate_markdown_report(evidence, output_dir / "evidence_report.md")
     
     print(f"Evidence bundle exported to {output_dir}")
+    print(f"Final Status: {checklist['final_status']}")
 
 def generate_checklist(evidence: Dict[str, Any]) -> Dict[str, Any]:
     reports = evidence.get("reports", {})
@@ -148,6 +164,8 @@ def generate_checklist(evidence: Dict[str, Any]) -> Dict[str, Any]:
     audit = reports.get("reconstruction_audit", {})
     cleanup_stats = reports.get("cleanup_stats", {})
     export_metrics = reports.get("export_metrics", {})
+    config = evidence.get("config_snapshot", {})
+    require_textured = config.get("require_textured_output", False)
     
     best_attempt = None
     if audit and audit.get("attempts") and audit.get("selected_best_index") is not None:
@@ -155,83 +173,210 @@ def generate_checklist(evidence: Dict[str, Any]) -> Dict[str, Any]:
     
     metadata = best_attempt.get("metadata", {}) if best_attempt else {}
     
-    # Checklist criteria
-    checklist = {
-        "capture_status": {
-            "status": cap_report.get("overall_status") in ["sufficient", "warn"],
-            "value": cap_report.get("overall_status"),
-            "required": "PASS or WARN"
-        },
-        "accepted_frames": {
-            "status": ext_report.get("saved_count", 0) >= 15,
-            "value": ext_report.get("saved_count"),
-            "required": ">= 15"
-        },
-        "dense_masks_match": {
-            "status": bool(metadata.get("dense_mask_dimension_matches", False) and metadata.get("dense_mask_exact_filename_matches", False)),
-            "value": f"dim_match={metadata.get('dense_mask_dimension_matches')}, file_match={metadata.get('dense_mask_exact_filename_matches')}",
-            "required": "Exact/Dimension Match"
-        },
-        "fallback_white_ratio": {
-            "status": metadata.get("dense_mask_fallback_white_ratio", 1.0) < 0.3,
-            "value": metadata.get("dense_mask_fallback_white_ratio"),
-            "required": "< 0.3"
-        },
-        "registered_image_count": {
-            "status": best_attempt.get("registered_images", 0) >= 10 if best_attempt else False,
-            "value": best_attempt.get("registered_images") if best_attempt else 0,
-            "required": ">= 10"
-        },
-        "fused_point_count": {
-            "status": best_attempt.get("dense_points_fused", 0) >= 5000 if best_attempt else False,
-            "value": best_attempt.get("dense_points_fused") if best_attempt else 0,
-            "required": ">= 5000"
-        },
-        "object_isolation_method": {
-            "status": cleanup_stats.get("isolation", {}).get("object_isolation_method") in ["mask_guided", "hybrid_pc_mask"],
-            "value": cleanup_stats.get("isolation", {}).get("object_isolation_method"),
-            "required": "mask_guided or hybrid_pc_mask"
-        },
-        "isolation_confidence": {
-            "status": cleanup_stats.get("isolation", {}).get("isolation_confidence", 0.0) >= 0.7,
-            "value": cleanup_stats.get("isolation", {}).get("isolation_confidence"),
-            "required": ">= 0.7"
-        },
-        "texture_count": {
-            "status": export_metrics.get("texture_count", 0) > 0,
-            "value": export_metrics.get("texture_count"),
-            "required": "> 0"
-        },
-        "material_count": {
-            "status": export_metrics.get("material_count", 0) > 0,
-            "value": export_metrics.get("material_count"),
-            "required": "> 0"
-        },
-        "texcoord_0_exists": {
-            "status": export_metrics.get("all_textured_primitives_have_texcoord_0", False),
-            "value": export_metrics.get("all_textured_primitives_have_texcoord_0"),
-            "required": "True"
-        },
-        "texture_applied": {
-            "status": export_metrics.get("texture_applied", False),
-            "value": export_metrics.get("texture_applied"),
-            "required": "True"
-        },
-        "glb_validation": {
-            "status": val_report.get("final_decision") in ["pass", "review"],
-            "value": val_report.get("final_decision"),
-            "required": "PASS or REVIEW"
-        }
-    }
+    # 1. Data Normalization
+    dense_image_count = best_attempt.get("registered_images", 0) if best_attempt else 0
+    dense_mask_count = metadata.get("dense_mask_count") or metadata.get("dense_mask_exact_matches") or 0
+    dense_mask_exact = metadata.get("dense_mask_exact_matches") or metadata.get("dense_mask_exact_filename_matches") or 0
+    dense_mask_dim = metadata.get("dense_mask_dimension_matches") or 0
     
-    return checklist
+    accepted_frames = ext_report.get("saved_count", 0)
+    registered_images = best_attempt.get("registered_images", 0) if best_attempt else 0
+    reg_ratio = registered_images / accepted_frames if accepted_frames > 0 else 0.0
+    
+    points = best_attempt.get("dense_points_fused", 0) if best_attempt else 0
+    fallback_ratio = metadata.get("dense_mask_fallback_white_ratio", 1.0)
+    isolation_method = cleanup_stats.get("isolation", {}).get("object_isolation_method")
+    isolation_conf = cleanup_stats.get("isolation", {}).get("isolation_confidence", 0.0)
+    
+    failure_reasons = []
+    warning_reasons = []
+    
+    items = {}
+    
+    def check_item(key: str, prod_cond: bool, review_cond: bool, value: Any, required: str, fail_msg: str, warn_msg: str):
+        if prod_cond:
+            status = "production_ready"
+        elif review_cond:
+            status = "review_ready"
+            warning_reasons.append(warn_msg)
+        else:
+            status = "failed"
+            failure_reasons.append(fail_msg)
+        
+        items[key] = {
+            "status": status,
+            "value": value,
+            "required": required
+        }
+
+    # 2. Evaluate Items
+    
+    # Capture Status
+    cap_val = cap_report.get("overall_status")
+    check_item(
+        "capture_status",
+        cap_val in ["sufficient", "PASS"],
+        cap_val in ["warn", "REVIEW"],
+        cap_val,
+        "PROD: PASS/sufficient, REVIEW: warn",
+        f"Capture status is {cap_val}",
+        f"Capture status is {cap_val} (Review required)"
+    )
+
+    # Accepted Frames
+    check_item(
+        "accepted_frames",
+        accepted_frames >= THR_PROD_ACCEPTED_FRAMES,
+        accepted_frames >= THR_REVIEW_ACCEPTED_FRAMES,
+        accepted_frames,
+        f"PROD: >= {THR_PROD_ACCEPTED_FRAMES}, REVIEW: >= {THR_REVIEW_ACCEPTED_FRAMES}",
+        f"Too few frames: {accepted_frames}",
+        f"Low frame count: {accepted_frames}"
+    )
+
+    # Dense Masks
+    mask_match_prod = (dense_mask_exact == dense_image_count and dense_mask_dim == dense_image_count and dense_image_count > 0)
+    # User requirement: fail when dense mask counts are nonzero but not equal to dense_image_count
+    # This implies review is not allowed for mismatches.
+    mask_match_review = mask_match_prod 
+    check_item(
+        "dense_masks_integrity",
+        mask_match_prod,
+        mask_match_review,
+        f"exact={dense_mask_exact}, dim={dense_mask_dim}, total={dense_image_count}",
+        "PROD/REVIEW: exact==total and dim==total",
+        f"Dense mask mismatch or missing (exact={dense_mask_exact}/{dense_image_count})",
+        "N/A"
+    )
+
+    # Fallback White Ratio
+    check_item(
+        "fallback_white_ratio",
+        fallback_ratio <= THR_PROD_FALLBACK_WHITE,
+        fallback_ratio <= THR_REVIEW_FALLBACK_WHITE,
+        f"{fallback_ratio:.3f}",
+        f"PROD: <= {THR_PROD_FALLBACK_WHITE}, REVIEW: <= {THR_REVIEW_FALLBACK_WHITE}",
+        f"Excessive mask fallback: {fallback_ratio:.3f}",
+        f"High mask fallback: {fallback_ratio:.3f}"
+    )
+
+    # Registered Images & Ratio
+    reg_prod = (registered_images >= THR_PROD_REG_COUNT and reg_ratio >= THR_PROD_REG_RATIO)
+    reg_review = (registered_images >= 10)
+    check_item(
+        "registered_images",
+        reg_prod,
+        reg_review,
+        f"count={registered_images}, ratio={reg_ratio:.2f}",
+        f"PROD: >= {THR_PROD_REG_COUNT} & {THR_PROD_REG_RATIO:.0%}",
+        f"Low registration: {registered_images} ({reg_ratio:.2%})",
+        f"Moderate registration: {registered_images} ({reg_ratio:.2%})"
+    )
+
+    # Fused Points
+    check_item(
+        "fused_point_count",
+        points >= THR_PROD_DENSE_POINTS,
+        points >= THR_REVIEW_DENSE_POINTS,
+        points,
+        f"PROD: >= {THR_PROD_DENSE_POINTS}, REVIEW: >= {THR_REVIEW_DENSE_POINTS}",
+        f"Insufficient density: {points} pts",
+        f"Moderate density: {points} pts"
+    )
+
+    # Isolation Method
+    check_item(
+        "object_isolation_method",
+        isolation_method in ["mask_guided", "hybrid_pc_mask"],
+        isolation_method == "geometric_only",
+        isolation_method,
+        "PROD: mask_guided/hybrid",
+        f"Unsupported isolation: {isolation_method}",
+        "Geometric-only isolation (Verify background removal)"
+    )
+
+    # Isolation Confidence
+    check_item(
+        "isolation_confidence",
+        isolation_conf >= THR_PROD_ISOLATION_CONF,
+        isolation_conf >= THR_REVIEW_ISOLATION_CONF,
+        f"{isolation_conf:.2f}",
+        f"PROD: >= {THR_PROD_ISOLATION_CONF}, REVIEW: >= {THR_REVIEW_ISOLATION_CONF}",
+        f"Low isolation confidence: {isolation_conf:.2f}",
+        f"Suboptimal isolation confidence: {isolation_conf:.2f}"
+    )
+
+    # Texture Components
+    tex_count = export_metrics.get("texture_count", 0)
+    mat_count = export_metrics.get("material_count", 0)
+    tex_uv = export_metrics.get("all_textured_primitives_have_texcoord_0", False)
+    tex_app = export_metrics.get("texture_applied", False)
+    
+    texture_gate_prod = (tex_count > 0 and mat_count > 0 and tex_uv and tex_app)
+    # For review, maybe we allow some warnings, but if require_textured is True, we fail.
+    texture_gate_review = texture_gate_prod # Default to same for now unless we allow untextured review
+    
+    if require_textured:
+        if not texture_gate_prod:
+            failure_reasons.append("Config requires texture but one or more texture components are missing.")
+            # We override these items to failed
+    
+    check_item("texture_count", tex_count > 0, tex_count > 0, tex_count, "> 0", "No textures found", "N/A")
+    check_item("material_count", mat_count > 0, mat_count > 0, mat_count, "> 0", "No materials found", "N/A")
+    check_item("texcoord_0_exists", tex_uv, tex_uv, tex_uv, "True", "Missing UV coords", "N/A")
+    check_item("texture_applied", tex_app, tex_app, tex_app, "True", "Texture not applied to mesh", "N/A")
+
+    # GLB Validation
+    glb_val = val_report.get("final_decision")
+    check_item(
+        "glb_validation",
+        glb_val == "pass",
+        glb_val == "review",
+        glb_val,
+        "PROD: pass, REVIEW: review",
+        f"GLB validation failed: {glb_val}",
+        f"GLB requires manual review: {glb_val}"
+    )
+
+    # 3. Final Decision
+    final_status = "production_ready"
+    for item in items.values():
+        if item["status"] == "failed":
+            final_status = "failed"
+            break
+        elif item["status"] == "review_ready":
+            final_status = "review_ready"
+            # Keep checking in case a 'failed' exists later
+    
+    # Add extra fields to checklist for report
+    items["final_status"] = final_status
+    items["failure_reasons"] = failure_reasons
+    items["warning_reasons"] = warning_reasons
+    items["dense_image_count"] = dense_image_count
+    items["dense_mask_count"] = dense_mask_count
+    items["dense_mask_exact_matches"] = dense_mask_exact
+    items["dense_mask_dimension_matches"] = dense_mask_dim
+    items["dense_mask_fallback_white_ratio"] = fallback_ratio
+    items["registered_image_ratio"] = reg_ratio
+    items["mask_support_ratio"] = cleanup_stats.get("isolation", {}).get("mask_support_ratio")
+    items["point_cloud_support_ratio"] = cleanup_stats.get("isolation", {}).get("point_cloud_support_ratio")
+
+    return items
 
 def generate_markdown_report(evidence: Dict[str, Any], output_path: Path):
     job_id = evidence["job_id"]
     checklist = evidence.get("delivery_checklist", {})
+    final_status = checklist.get("final_status", "failed")
+    
+    status_colors = {
+        "production_ready": "✅ PRODUCTION READY",
+        "review_ready": "⚠️ REVIEW READY",
+        "failed": "❌ FAILED"
+    }
     
     lines = [
         f"# Reconstruction Evidence Report: {job_id}",
+        f"**Status:** {status_colors.get(final_status, final_status)}",
         f"**Exported At:** {evidence['exported_at']}",
         "",
         "## Delivery Checklist Summary",
@@ -239,20 +384,41 @@ def generate_markdown_report(evidence: Dict[str, Any], output_path: Path):
         "|-----------|--------|-------|----------|",
     ]
     
-    all_pass = True
-    for key, item in checklist.items():
-        status_icon = "✅" if item["status"] else "❌"
-        if not item["status"]:
-            all_pass = False
+    # Filter out non-item fields for the table
+    item_keys = [k for k in checklist.keys() if isinstance(checklist[k], dict) and "status" in checklist[k]]
+    
+    for key in item_keys:
+        item = checklist[key]
+        status_map = {
+            "production_ready": "✅",
+            "review_ready": "⚠️",
+            "failed": "❌"
+        }
+        status_icon = status_map.get(item["status"], "❓")
         lines.append(f"| {key.replace('_', ' ').title()} | {status_icon} | {item['value']} | {item['required']} |")
     
+    if checklist.get("failure_reasons"):
+        lines.append("")
+        lines.append("### ❌ Failure Reasons")
+        for reason in checklist["failure_reasons"]:
+            lines.append(f"- {reason}")
+            
+    if checklist.get("warning_reasons"):
+        lines.append("")
+        lines.append("### ⚠️ Warning Reasons")
+        for reason in checklist["warning_reasons"]:
+            lines.append(f"- {reason}")
+            
     lines.append("")
-    if all_pass:
+    if final_status == "production_ready":
         lines.append("> [!TIP]")
-        lines.append("> Asset is DELIVERY READY.")
+        lines.append("> Asset is PRODUCTION READY. Automated checks passed with high confidence.")
+    elif final_status == "review_ready":
+        lines.append("> [!IMPORTANT]")
+        lines.append("> Asset is REVIEW READY. Manual inspection of geometric quality and background removal is required.")
     else:
         lines.append("> [!CAUTION]")
-        lines.append("> Asset FAILED one or more delivery criteria.")
+        lines.append("> Asset FAILED delivery criteria. Do not deliver without remediation.")
         
     lines.append("")
     lines.append("## Configuration Snapshot")
@@ -260,6 +426,18 @@ def generate_markdown_report(evidence: Dict[str, Any], output_path: Path):
     lines.append(json.dumps(evidence["config_snapshot"], indent=2))
     lines.append("```")
     
+    lines.append("")
+    lines.append("## Detailed Metrics")
+    metrics_fields = [
+        "dense_image_count", "dense_mask_count", "dense_mask_exact_matches", 
+        "dense_mask_dimension_matches", "dense_mask_fallback_white_ratio",
+        "registered_image_ratio", "mask_support_ratio", "point_cloud_support_ratio"
+    ]
+    for field in metrics_fields:
+        val = checklist.get(field)
+        if val is not None:
+            lines.append(f"- **{field.replace('_', ' ').title()}:** {val}")
+
     lines.append("")
     lines.append("## Available Logs")
     for log in evidence["logs"]:
