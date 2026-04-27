@@ -1,0 +1,20 @@
+
+{
+  "video_id": "eval_reflective_bottle_001",
+  "object_class": "Water Bottle",
+  "gap_types": ["reflective", "transparency"],
+  "environment": "studio",
+  "lighting": "uniform",
+  "validation_frames": [
+    {
+      "frame_index": 50,
+      "timestamp": "00:01.6",
+      "gt_mask_path": "ground_truth_masks/eval_reflective_bottle_001_f50.png"
+    },
+    {
+      "frame_index": 150,
+      "timestamp": "00:05.0",
+      "gt_mask_path": "ground_truth_masks/eval_reflective_bottle_001_f150.png"
+    }
+  ]
+}
