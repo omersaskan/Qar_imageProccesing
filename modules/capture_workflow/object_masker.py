@@ -177,21 +177,39 @@ class ObjectMasker:
             backend_name = "heuristic"
             
         # Phase 6.1: Environment-aware feature flag for SAM2 experiment
+        # Safety: SAM2 must never become production default.
+        # The chain of checks is:
+        #   1. Is SEGMENTATION_METHOD=sam2?          (user intent)
+        #   2. Is SAM2_ENABLED=true?                 (kill-switch)
+        #   3. Is the SAM2 wrapper actually available? (deps + checkpoint)
         from modules.operations.settings import settings
         requested_method = settings.segmentation_method
         fallback_used = False
         fallback_reason = None
 
         if requested_method == "sam2":
-            from modules.ai_segmentation.sam2_wrapper import SAM2Wrapper
-            sam2 = SAM2Wrapper()
-            if sam2.is_available():
-                logger.info("SAM2 enabled and available. Using sam2 backend.")
-                backend_name = "sam2"
-            else:
+            if not settings.sam2_enabled:
+                # Kill-switch: SAM2 requested but explicitly disabled
                 fallback_used = True
-                fallback_reason = sam2.get_status().get("sam2_error_reason", "SAM2 unavailable")
-                logger.warning(f"SAM2 requested but fallback triggered: {fallback_reason}")
+                fallback_reason = "SAM2 disabled in settings (SAM2_ENABLED=false)"
+                logger.warning(
+                    f"SAM2 requested but SAM2_ENABLED=false. "
+                    f"Falling back to '{backend_name}'."
+                )
+            else:
+                from modules.ai_segmentation.sam2_wrapper import SAM2Wrapper
+                sam2 = SAM2Wrapper()
+                if sam2.is_available():
+                    logger.info("SAM2 enabled and available. Using sam2 backend.")
+                    backend_name = "sam2"
+                else:
+                    fallback_used = True
+                    fallback_reason = sam2.get_status().get(
+                        "sam2_error_reason", "SAM2 unavailable"
+                    )
+                    logger.warning(
+                        f"SAM2 requested but fallback triggered: {fallback_reason}"
+                    )
 
         backend = BackendFactory.get_backend(backend_name)
         

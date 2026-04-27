@@ -1,55 +1,83 @@
-# Phase 6.1: SAM2 Integration (DEV-SUBSET Plan)
+# Phase 6.1: SAM2 Integration — Hardened DEV-SUBSET Plan
 
-This plan outlines the initial integration of Segment Anything Model v2 (SAM2) for semantic segmentation, targeting a development subset for validation before full production rollout.
+This plan outlines the integration of Segment Anything Model v2 (SAM2) for semantic segmentation, targeting a development subset for validation before any production use.
 
-## 1. Objective
-Replace or augment the legacy deterministic mask generation with SAM2-based temporal segmentation to improve Mask IoU and reduce background leakage, especially in complex lighting or low-feature scenarios.
+## ⚠️ Critical Safety Constraints
+
+1. **Default is always `legacy`.**  `SEGMENTATION_METHOD=legacy` is the default in settings and `.env`.
+2. **SAM2 must NEVER become the production default.**  It requires explicit `SAM2_ENABLED=true`.
+3. **Do NOT commit model weights** (`models/sam2/*.pt`) to the repository.
+4. **torch and segment-anything-2 are NOT hard dependencies.**  They are optional and only imported when `SAM2_ENABLED=true`.  Normal `pip install` of this project does not require them.
+5. **Real SAM2 inference is NOT currently active.**  `sam2_backend.py` raises `NotImplementedError`.  `segment_video()` returns `{}`.  This is intentional.
+6. **User review is required** before implementing real SAM2 inference.
+
+## 1. Env Flags (Phase 6.1)
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `SEGMENTATION_METHOD` | `legacy` | Which segmentation path to request: `legacy` or `sam2` |
+| `SAM2_ENABLED` | `false` | Master kill-switch. Must be `true` to import torch/SAM2 |
+| `SAM2_DEVICE` | `cuda` | torch device for SAM2 inference |
+| `SAM2_MODEL_CFG` | `sam2_hiera_l.yaml` | SAM2 model config YAML |
+| `SAM2_CHECKPOINT` | `models/sam2/sam2_hiera_large.pt` | Path to model weights |
+| `SAM2_FALLBACK_TO_LEGACY` | `true` | Fall back silently on SAM2 failure |
+| `SAM2_REVIEW_ONLY` | `true` | SAM2-produced assets marked review_only |
+| `SAM2_PROMPT_MODE` | `center_box` | Prompt strategy: `center_box`, `center_point`, `auto` |
+| `SAM2_MAX_FRAMES` | `0` | Max frames for SAM2 propagation (0 = unlimited) |
 
 ## 2. Architectural Changes
 
-### A. New Module: `modules/ai_segmentation`
-*   **`sam2_wrapper.py`**: A wrapper for the SAM2 model (Segment Anything 2).
-    *   Input: Video file or frame sequence.
-    *   Output: Binary mask sequence.
-    *   Features: Support for point/box prompts, temporal consistency (tracking).
-*   **`segmentation_factory.py`**: Factory to switch between `legacy` and `sam2` methods.
+### A. `modules/ai_segmentation/sam2_wrapper.py`
+- Reads all SAM2 env/settings values from `settings.py` singleton.
+- Reports full status via `get_status()`:
+  `sam2_enabled`, `sam2_available`, `sam2_model_loaded`, `sam2_inference_ran`,
+  `sam2_error_reason`, `device`, `checkpoint_exists`, `model_cfg`, `checkpoint`.
+- If `SAM2_ENABLED=false`, does NOT attempt torch/SAM2 import.
+- If checkpoint missing, reports exact reason.
+- `segment_video()` returns `None` when unavailable, `{}` when stub runs.
 
-### B. Capture Workflow Updates
-*   Update `FrameExtractor` to support an optional `--segmentation-method` flag.
-*   If `sam2` is selected, the workflow will:
-    1.  Extract a few keyframes.
-    2.  Provide prompts (e.g., center point or bounding box).
-    3.  Propagate masks across the video sequence using SAM2's memory bank.
+### B. `modules/capture_workflow/segmentation_backends/sam2_backend.py`
+- Raises `NotImplementedError` (intentional stub).
+- ObjectMasker catches this and falls back to heuristic backend.
 
-## 3. Evaluation Strategy (DEV-SUBSET)
+### C. `modules/capture_workflow/object_masker.py`
+- Checks `SAM2_ENABLED` kill-switch before importing SAM2Wrapper.
+- Metadata always includes:
+  - `segmentation_method` — actual backend used
+  - `requested_segmentation_method` — what was requested (only if fallback)
+  - `fallback_used` — bool
+  - `fallback_reason` — human-readable reason
 
-### A. Data Preparation
-*   Use the existing `eval_reflective_bottle_001` dataset.
-*   Ensure 3+ ground truth masks are labeled for this specific video.
+### D. `modules/ai_segmentation/segmentation_factory.py`
+- Uses `settings.segmentation_method` (not raw `os.getenv`).
+- Checks `SAM2_ENABLED` kill-switch.
 
-### B. Baseline Benchmarking
-1.  Run the current deterministic pipeline on `eval_reflective_bottle_001`.
-2.  Record IoU and Leakage metrics using `scripts/evaluate_segmentation.py`.
-3.  Generate an evidence report and baseline summary.
+## 3. Oracle Experiments (NOT Real SAM2)
 
-### C. Experimental Comparison
-1.  Run the SAM2-integrated pipeline on the same video.
-2.  Compare results:
-    *   **IoU Gain**: Target > +0.05 improvement over baseline.
-    *   **Leakage Reduction**: Target < 2% total leakage.
-    *   **Compute Latency**: Measure overhead of SAM2 inference.
+The following scripts use ground-truth masks to simulate perfect segmentation. They are NOT real SAM2 inference:
 
-## 4. Safety & Policy Alignment
-*   **Synthesized Mark**: Ensure masks generated by SAM2 are tagged in metadata if they influence geometry.
-*   **Review Gating**: Assets using AI segmentation will default to `review_ready` during the DEV-SUBSET phase.
+- `scripts/simulate_oracle_mask_experiment.py` — Copies GT masks as "oracle" masks
+- `scripts/run_oracle_cleanup_experiment.py` — Runs cleanup with oracle masks
 
-## 5. Next Steps
-1.  **Unblock Data**: Identify or acquire 4 additional real videos to complete the 5-video requirement.
-2.  **Labeling**: Complete manual mask labeling for the evaluation set.
-3.  **Baseline Generation**: Execute the deterministic baseline on the full 5-video set.
-4.  **Prototype Implementation**: Begin `sam2_wrapper.py` development.
+Any `segmentation_method: sam2` metadata in these experiments is synthetic.
+
+## 4. Test Coverage
+
+Tests in `tests/modules/capture_workflow/test_object_masker_sam2_flag.py`:
+- Default env uses legacy
+- `SEGMENTATION_METHOD=sam2 + SAM2_ENABLED=false` → falls back to legacy
+- `SEGMENTATION_METHOD=sam2 + SAM2 unavailable` → falls back to legacy
+- SAM2 wrapper status reports checkpoint missing
+- SAM2 backend `NotImplementedError` does not crash ObjectMasker
+- SAM2-used assets are review_only / delivery_ready=false
+
+## 5. What Is NOT Implemented
+
+- **Depth Anything** — Not in scope. Segmentation is the bottleneck.
+- **Real SAM2 inference** — `build_sam2_video_predictor` call is commented out.
+- **SAM2 as production default** — Explicitly prohibited.
 
 ---
 
 ## 🛑 User Review Required
-**This plan is for the Phase 6.1 DEV-SUBSET only. Implementation will not begin until the Phase 6.0 dataset validation passes.**
+**Real SAM2 inference implementation requires explicit user approval.  The current code is hardened scaffolding only.**

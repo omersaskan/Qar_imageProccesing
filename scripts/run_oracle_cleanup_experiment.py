@@ -1,4 +1,22 @@
 
+"""
+Oracle Cleanup Experiment — Reconstruction with Perfect Masks
+=============================================================
+
+⚠️  This script is NOT real SAM2 inference.
+
+It runs the asset cleanup pipeline using oracle (ground-truth) masks
+that were placed by ``simulate_oracle_mask_experiment.py``.  The goal
+is to measure the upper-bound improvement in isolation quality when
+segmentation is "perfect".
+
+Any ``used_sam2`` flags in the output are artifacts of the experiment's
+detection logic and do NOT indicate that the SAM2 model was loaded or
+ran inference.
+
+See also: scripts/simulate_oracle_mask_experiment.py
+"""
+
 import os
 import cv2
 import numpy as np

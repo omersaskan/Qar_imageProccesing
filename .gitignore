@@ -50,3 +50,10 @@ Thumbs.db
 workspace_fast_smoke/
 workspace_quality_test/
 gpu_test_workspace/
+
+# Model weights (SAM2, etc.) — never commit these
+models/
+*.pt
+*.pth
+*.onnx
+*.safetensors

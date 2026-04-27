@@ -5,6 +5,8 @@ from typing import Optional, List, Dict, Any
 import numpy as np
 from .sam2_wrapper import SAM2Wrapper
 
+from modules.operations.settings import settings
+
 logger = logging.getLogger(__name__)
 
 class SegmentationMethod:
@@ -12,8 +14,8 @@ class SegmentationMethod:
     SAM2 = "sam2"
 
 def get_segmentation_method() -> str:
-    """Gets the segmentation method from environment variable or default."""
-    return os.getenv("SEGMENTATION_METHOD", SegmentationMethod.LEGACY).lower()
+    """Gets the segmentation method from settings (not raw env)."""
+    return settings.segmentation_method.lower()
 
 def run_segmentation(video_path: str, method: Optional[str] = None) -> Optional[Dict[int, np.ndarray]]:
     """
@@ -25,6 +27,11 @@ def run_segmentation(video_path: str, method: Optional[str] = None) -> Optional[
         method = get_segmentation_method()
         
     if method == SegmentationMethod.SAM2:
+        # Phase 6.1: check kill-switch first
+        if not settings.sam2_enabled:
+            logger.warning("SAM2 requested but SAM2_ENABLED=false. Using legacy.")
+            return None
+
         sam2 = SAM2Wrapper()
         if sam2.is_available():
             masks = sam2.segment_video(video_path, prompts=[])

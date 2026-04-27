@@ -1,4 +1,22 @@
 
+"""
+Oracle Mask Experiment — Simulated Perfect Segmentation
+=======================================================
+
+⚠️  This script is NOT real SAM2 inference.
+
+It copies ground-truth (GT) masks into the pipeline's mask directory to
+simulate what "perfect segmentation" would look like.  The purpose is to
+isolate the reconstruction/cleanup pipeline from segmentation quality so
+we can measure the upper-bound improvement achievable by better masks.
+
+The metadata tags ``segmentation_method: sam2`` in this script are
+synthetic labels used only for the experiment's detection logic and do
+NOT represent actual SAM2 model output.
+
+See also: scripts/run_oracle_cleanup_experiment.py
+"""
+
 import os
 import json
 import shutil
