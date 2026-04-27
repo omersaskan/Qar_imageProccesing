@@ -111,10 +111,10 @@ def read_colmap_images_bin(path: Path) -> Dict[int, Any]:
     return images
 
 def load_reconstruction_cameras(workspace_path: Path) -> List[Dict[str, Any]]:
-    \"\"\"
+    """
     Loads camera projection data from a reconstruction workspace.
     Supports COLMAP (sparse model) and potentially OpenMVS.
-    \"\"\"
+    """
     cameras_data = []
     
     # 1. Try COLMAP sparse models
@@ -170,12 +170,12 @@ def load_reconstruction_cameras(workspace_path: Path) -> List[Dict[str, Any]]:
     return cameras_data
 
 def load_reconstruction_masks(workspace_path: Path, camera_names: List[str]) -> Dict[str, np.ndarray]:
-    \"\"\"
+    """
     Loads mask images corresponding to the camera names.
     Expected paths:
     - {workspace_path}/masks/{name}.png
     - {workspace_path}/dense/stereo/masks/{name}.png
-    \"\"\"
+    """
     masks = {}
     search_dirs = [
         workspace_path / "masks",
@@ -209,12 +209,12 @@ def load_reconstruction_masks(workspace_path: Path, camera_names: List[str]) -> 
     return masks
 
 def project_points(points: np.ndarray, P: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-    \"\"\"
+    """
     Project 3D points into 2D image space using projection matrix P.
     Returns:
     - p2d: (N, 2) array of pixel coordinates
     - depth: (N,) array of depths (z in camera coords)
-    \"\"\"
+    """
     # Homogeneous 3D points
     p3d_h = np.hstack([points, np.ones((len(points), 1))])
     
@@ -237,9 +237,9 @@ def compute_component_mask_support(
     masks: Dict[str, np.ndarray],
     sample_size: int = 500
 ) -> Dict[str, Any]:
-    \"\"\"
+    """
     Computes semantic mask support for a mesh component.
-    \"\"\"
+    """
     if not cameras or not masks:
         return {"avg_support": 0.0, "reason": "no_data"}
         

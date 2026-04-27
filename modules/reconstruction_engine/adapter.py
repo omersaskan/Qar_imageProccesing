@@ -314,6 +314,10 @@ class OpenMVSCommandBuilder:
             return str(p.with_suffix(".exe"))
         return str(p)
 
+    def has_bin(self, name: str) -> bool:
+        p = self.bin / name
+        return p.with_suffix(".exe").exists() or p.exists()
+
     def interface_colmap(self, workspace_path: Path, output_mvs: Path) -> List[str]:
         return [
             self._get_bin("InterfaceCOLMAP"),
@@ -1609,6 +1613,23 @@ class OpenMVSAdapter(COLMAPAdapter):
                     dense_dir,
                     log_file,
                 )
+
+                if self.mvs_builder.has_bin("RefineMesh"):
+                    log_file.write("\n--- RefineMesh step ---\n")
+                    mvs_refined = dense_dir / "project_refined.mvs"
+                    try:
+                        self._run_command(
+                            self.mvs_builder.refine_mesh(mvs_dense, mvs_refined),
+                            dense_dir,
+                            log_file,
+                        )
+                        if mvs_refined.exists():
+                            mvs_dense = mvs_refined
+                            log_file.write("RefineMesh successful, using refined scene for texturing.\n")
+                    except Exception as refine_err:
+                        log_file.write(f"Warning: RefineMesh failed: {refine_err}. Continuing with unrefined mesh.\n")
+                else:
+                    log_file.write("\nRefineMesh not found, skipping.\n")
 
                 if not project_mesh_ply.exists():
                     raise RuntimeReconstructionError(

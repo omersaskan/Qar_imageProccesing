@@ -133,6 +133,10 @@ class Settings(BaseSettings):
     openmvs_fail_hard: bool = Field(False, validation_alias="OPENMVS_FAIL_HARD")
     openmvs_textured_output: bool = Field(True, validation_alias="OPENMVS_TEXTURED_OUTPUT")
     require_textured_output: bool = Field(False, validation_alias="REQUIRE_TEXTURED_OUTPUT")
+    fail_on_texture_missing: bool = Field(True, validation_alias="FAIL_ON_TEXTURE_MISSING")
+    fail_on_uv_missing: bool = Field(True, validation_alias="FAIL_ON_UV_MISSING")
+    min_texture_resolution: int = Field(1024, validation_alias="MIN_TEXTURE_RESOLUTION")
+    max_empty_texture_ratio: float = Field(0.2, validation_alias="MAX_EMPTY_TEXTURE_RATIO")
 
     # --- TEXTURE MASK REFINEMENT ---
     texture_mask_erode_px: int = Field(3, validation_alias="TEXTURE_MASK_ERODE_PX")

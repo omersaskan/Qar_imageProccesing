@@ -199,13 +199,23 @@ class GLBExporter:
         texture_success = True
         if texture_path and not texture_applied:
             texture_success = False
+        
+        if inspection["texture_count"] == 0 and (texture_path or settings.require_textured_output):
+            texture_success = False
             
-        delivery_ready = all_accessors and texture_success
+        # Texture Quality Gate
+        texture_quality_pass = True
+        if inspection.get("highest_black_pixel_ratio", 0.0) > settings.max_empty_texture_ratio:
+            texture_quality_pass = False
+            
+        delivery_ready = all_accessors and texture_success and texture_quality_pass
         
         if not all_accessors:
             export_status = "failed_validation"
         elif not texture_success:
             export_status = "failed_texture_application"
+        elif not texture_quality_pass:
+            export_status = "failed_texture_quality"
         else:
             export_status = "success"
 
@@ -320,17 +330,43 @@ class GLBExporter:
 
     def inspect_exported_asset(self, glb_path: str) -> Dict[str, Any]:
         """
-        Combined trimesh + strict JSON inspection.
+        Combined trimesh + strict JSON inspection + texture quality check.
         """
         strict = inspect_glb_primitive_attributes(glb_path)
         
-        # Load for geometry counts
+        # Load for geometry counts and texture extraction
         loaded = trimesh.load(glb_path, force="scene")
         meshes = [g for g in loaded.geometry.values() if isinstance(g, trimesh.Trimesh)]
         
         total_verts = sum(len(m.vertices) for m in meshes)
         total_faces = sum(len(m.faces) for m in meshes)
         
+        # Texture analysis
+        from modules.qa_validation.texture_quality import TextureQualityAnalyzer
+        from modules.operations.settings import settings
+        import numpy as np
+        
+        analyzer = TextureQualityAnalyzer()
+        highest_black_pixel_ratio = 0.0
+        
+        textures = []
+        for m in meshes:
+            if hasattr(m.visual, 'material'):
+                mat = m.visual.material
+                if hasattr(mat, 'baseColorTexture') and mat.baseColorTexture is not None:
+                    textures.append(mat.baseColorTexture)
+                elif hasattr(mat, 'image') and mat.image is not None:
+                    textures.append(mat.image)
+        
+        for tex in textures:
+            try:
+                img_np = np.array(tex.convert("RGB"))
+                img_bgr = img_np[:, :, ::-1].copy()
+                report = analyzer.analyze_image(img_bgr)
+                highest_black_pixel_ratio = max(highest_black_pixel_ratio, report.get("black_pixel_ratio", 0.0))
+            except Exception as e:
+                logger.warning("Failed to analyze texture in GLB: %s", e)
+
         return {
             "final_vertex_count": total_verts,
             "final_face_count": total_faces,
@@ -339,5 +375,6 @@ class GLBExporter:
             "all_primitives_have_position": strict["all_primitives_have_position"],
             "all_primitives_have_normal": strict["all_primitives_have_normal"],
             "all_textured_primitives_have_texcoord_0": strict["all_textured_primitives_have_texcoord_0"],
+            "highest_black_pixel_ratio": highest_black_pixel_ratio,
             "primitive_attribute_report": strict["primitive_attribute_report"]
         }

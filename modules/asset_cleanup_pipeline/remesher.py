@@ -85,19 +85,24 @@ class Remesher:
 
         # FINAL PASS: Hard enforcement if still above limit or if UV-safe decimation was skipped/failed
         if len(mesh.faces) > target_faces:
-            logger.warning(f"Mesh still above limit ({len(mesh.faces)} > {target_faces}). Forced fast_simplification fallback.")
-            try:
-                points = mesh.vertices.astype(np.float32)
-                faces = mesh.faces.astype(np.uint32)
-                # SPRINT 5C: fast_simplification uses REDUCTION ratio in this environment
-                reduction_ratio = 1.0 - (target_faces / max(len(mesh.faces), 1))
-                new_vertices, new_faces = fast_simplification.simplify(points, faces, max(0.0, reduction_ratio))
-                mesh = trimesh.Trimesh(vertices=new_vertices, faces=new_faces, process=False)
-                decimation_status = "success_fallback"
-                # UVs are likely lost or corrupted here if they existed
-                uv_preserved, material_preserved = self._inspect_visuals(mesh)
-            except Exception as e:
-                logger.error(f"Fallback decimation failed: {e}")
+            if has_uv_init:
+                 logger.error(f"Mesh still above limit ({len(mesh.faces)} > {target_faces}) but UV-safe decimation failed. Refusing destructive fallback.")
+                 decimation_status = "failed_uv_preservation"
+            else:
+                logger.warning(f"Mesh still above limit ({len(mesh.faces)} > {target_faces}). Forced fast_simplification fallback.")
+                try:
+                    points = mesh.vertices.astype(np.float32)
+                    faces = mesh.faces.astype(np.uint32)
+                    # SPRINT 5C: fast_simplification uses REDUCTION ratio in this environment
+                    reduction_ratio = 1.0 - (target_faces / max(len(mesh.faces), 1))
+                    new_vertices, new_faces = fast_simplification.simplify(points, faces, max(0.0, reduction_ratio))
+                    mesh = trimesh.Trimesh(vertices=new_vertices, faces=new_faces, process=False)
+                    decimation_status = "success_fallback"
+                    # UVs are likely lost or corrupted here if they existed
+                    uv_preserved, material_preserved = self._inspect_visuals(mesh)
+                except Exception as e:
+                    logger.error(f"Fallback decimation failed: {e}")
+                    decimation_status = f"failed_fallback: {e}"
 
         mesh.export(output_path)
         post_faces = len(mesh.faces)
