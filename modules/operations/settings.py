@@ -171,6 +171,33 @@ class Settings(BaseSettings):
     sam2_prompt_mode: str = Field("center_box", validation_alias="SAM2_PROMPT_MODE")
     sam2_max_frames: int = Field(0, validation_alias="SAM2_MAX_FRAMES")
 
+    # --- PHASE 6.2: DEPTH ANYTHING (scaffold only, disabled) ---
+    depth_anything_enabled: bool = Field(False, validation_alias="DEPTH_ANYTHING_ENABLED")
+    depth_anything_device: str = Field("cuda", validation_alias="DEPTH_ANYTHING_DEVICE")
+    depth_anything_model: str = Field("depth-anything-v2-small", validation_alias="DEPTH_ANYTHING_MODEL")
+    depth_anything_checkpoint: str = Field(
+        "models/depth_anything/depth_anything_v2_small.pth",
+        validation_alias="DEPTH_ANYTHING_CHECKPOINT",
+    )
+    depth_anything_fallback_to_none: bool = Field(True, validation_alias="DEPTH_ANYTHING_FALLBACK_TO_NONE")
+    depth_anything_review_only: bool = Field(True, validation_alias="DEPTH_ANYTHING_REVIEW_ONLY")
+    depth_anything_max_frames: int = Field(0, validation_alias="DEPTH_ANYTHING_MAX_FRAMES")
+
+    # Depth prior quality gates — depth prior is ONLY allowed when
+    # segmentation quality is already high.
+    depth_prior_min_segmentation_iou: float = Field(0.85, validation_alias="DEPTH_PRIOR_MIN_SEGMENTATION_IOU")
+    depth_prior_max_leakage_ratio: float = Field(0.05, validation_alias="DEPTH_PRIOR_MAX_LEAKAGE_RATIO")
+    depth_prior_min_mask_confidence: float = Field(0.75, validation_alias="DEPTH_PRIOR_MIN_MASK_CONFIDENCE")
+
+    # --- AI COMPLETION POLICY (not implemented, thresholds only) ---
+    ai_completion_enabled: bool = Field(False, validation_alias="AI_COMPLETION_ENABLED")
+    min_observed_surface_for_completion: float = Field(0.50, validation_alias="MIN_OBSERVED_SURFACE_FOR_COMPLETION")
+    min_observed_surface_for_production: float = Field(0.70, validation_alias="MIN_OBSERVED_SURFACE_FOR_PRODUCTION")
+    max_synthesized_surface_for_review: float = Field(0.50, validation_alias="MAX_SYNTHESIZED_SURFACE_FOR_REVIEW")
+    max_synthesized_surface_for_production: float = Field(0.20, validation_alias="MAX_SYNTHESIZED_SURFACE_FOR_PRODUCTION")
+    critical_region_completion_allowed: bool = Field(False, validation_alias="CRITICAL_REGION_COMPLETION_ALLOWED")
+    generative_completion_default_status: str = Field("review_ready", validation_alias="GENERATIVE_COMPLETION_DEFAULT_STATUS")
+
     @property
     def is_dev(self) -> bool:
         return self.env == AppEnvironment.LOCAL_DEV

@@ -1,11 +1,11 @@
 
 import os
 import logging
+import time
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 import numpy as np
 
-# We import settings here to read configurations
 from modules.operations.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -46,8 +46,8 @@ class SAM2Wrapper:
     Safety guarantees:
     - If SAM2_ENABLED is false, no import/load of torch or SAM2 is attempted.
     - If the checkpoint file is missing, status reports the exact reason.
-    - segment_video() returns None (not {}) when SAM2 is unavailable,
-      allowing callers to fall back cleanly.
+    - segment_video() returns None when SAM2 is unavailable.
+    - segment_frame() returns None when SAM2 is unavailable.
     - All status fields are always populated for observability.
     """
 
@@ -79,21 +79,17 @@ class SAM2Wrapper:
         # --- Model loading (only if everything is green) ---
         if self.sam2_available:
             try:
-                # Real model loading is gated behind SAM2_ENABLED + valid
-                # checkpoint + installed packages.  The actual call is
-                # commented out until real SAM2 inference is implemented.
-                #
-                # self.predictor = build_sam2_video_predictor(
-                #     self.model_cfg, self.checkpoint, device=self.device
-                # )
-                # self.sam2_model_loaded = True
+                self.predictor = build_sam2_video_predictor(
+                    self.model_cfg, self.checkpoint, device=self.device
+                )
+                self.sam2_model_loaded = True
                 logger.info(
-                    f"SAM2 wrapper initialized (device={self.device}, "
+                    f"SAM2 model loaded (device={self.device}, "
                     f"cfg={self.model_cfg}, ckpt={self.checkpoint})"
                 )
             except Exception as e:
                 self.sam2_error_reason = f"Model load failed: {e}"
-                logger.error(f"Failed to initialize SAM2: {e}")
+                logger.error(f"Failed to load SAM2 model: {e}")
                 self.sam2_available = False
 
     # ------------------------------------------------------------------
@@ -102,12 +98,11 @@ class SAM2Wrapper:
 
     def is_available(self) -> bool:
         """Returns True only when SAM2 is fully ready for inference."""
-        return self.sam2_available
+        return self.sam2_available and self.sam2_model_loaded
 
     def get_status(self) -> Dict[str, Any]:
         """
         Returns a full status dictionary for observability / diagnostics.
-
         All keys are always present regardless of SAM2 state.
         """
         return {
@@ -122,6 +117,77 @@ class SAM2Wrapper:
             "checkpoint": self.checkpoint,
         }
 
+    def segment_frame(
+        self,
+        frame: np.ndarray,
+        prompts: Dict[str, Any],
+    ) -> Optional[np.ndarray]:
+        """
+        Segment a single frame using SAM2 image predictor.
+
+        Args:
+            frame: BGR image as numpy array (H, W, 3).
+            prompts: Dict from prompting.generate_prompts() with
+                     bbox, points, labels.
+
+        Returns:
+            Binary mask (H, W) as uint8 with values 0/255,
+            or None if SAM2 is not available / inference fails.
+        """
+        if not self.is_available():
+            logger.error(
+                f"SAM2 is not available for frame segmentation: "
+                f"{self.sam2_error_reason}"
+            )
+            return None
+
+        try:
+            import cv2
+            t0 = time.time()
+
+            # Convert BGR → RGB for SAM2
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+            # SAM2 image predictor expects specific prompt formats.
+            # This is the real inference path — only reached when
+            # SAM2_ENABLED=true + checkpoint exists + torch+sam2 installed.
+            self.predictor.set_image(rgb)
+
+            point_coords = None
+            point_labels = None
+            box_input = None
+
+            if prompts.get("points"):
+                point_coords = np.array(prompts["points"], dtype=np.float32)
+                point_labels = np.array(
+                    prompts.get("labels", [1] * len(prompts["points"])),
+                    dtype=np.int32,
+                )
+
+            if prompts.get("bbox"):
+                box_input = np.array(prompts["bbox"], dtype=np.float32)
+
+            masks, scores, _ = self.predictor.predict(
+                point_coords=point_coords,
+                point_labels=point_labels,
+                box=box_input,
+                multimask_output=True,
+            )
+
+            # Select the best mask (highest score)
+            best_idx = int(np.argmax(scores))
+            binary = (masks[best_idx] > 0).astype(np.uint8) * 255
+
+            elapsed = time.time() - t0
+            self.sam2_inference_ran = True
+            logger.info(f"SAM2 frame segmentation completed in {elapsed:.2f}s")
+            return binary
+
+        except Exception as e:
+            self.sam2_error_reason = f"Frame inference failed: {e}"
+            logger.error(f"SAM2 frame inference failed: {e}")
+            return None
+
     def segment_video(
         self,
         video_path: str,
@@ -134,27 +200,21 @@ class SAM2Wrapper:
             dict mapping frame index → binary mask, or
             None if SAM2 is not available (callers should fall back).
         """
-        if not self.sam2_available:
+        if not self.is_available():
             logger.error(
                 f"SAM2 is not available: {self.sam2_error_reason}. "
                 "Caller should fall back to legacy."
             )
             return None
 
-        logger.info(f"Running SAM2 segmentation on {video_path}")
+        logger.info(f"Running SAM2 video segmentation on {video_path}")
         self.sam2_inference_ran = True
 
-        # -----------------------------------------------------------
-        # STUB: Real SAM2 inference is NOT implemented yet.
-        # This method currently returns an empty dict which signals
-        # "no masks produced" and triggers the legacy fallback in
-        # ObjectMasker / segmentation_factory.
-        #
-        # Real implementation requires:
-        #   1. SAM2_ENABLED=true in env
-        #   2. Valid checkpoint on disk
-        #   3. User review approval
-        # -----------------------------------------------------------
+        # Video-level propagation requires additional SAM2 API calls.
+        # For now, return empty dict to signal "no masks produced",
+        # which triggers legacy fallback.
+        # Full video propagation will be implemented when DEV-SUBSET
+        # frame-level results justify the investment.
         return {}
 
 
