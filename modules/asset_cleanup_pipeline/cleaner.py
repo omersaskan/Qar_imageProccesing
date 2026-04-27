@@ -226,9 +226,19 @@ class AssetCleaner:
         job_cleaned_dir = self.cleaned_root / job_id
         job_cleaned_dir.mkdir(parents=True, exist_ok=True)
 
+        # SPRINT 5: Auto-switch to TEXTURE_SAFE_COPY if it's a valid textured bundle and not already forced
+        if profile_type != CleanupProfileType.TEXTURE_SAFE_COPY and raw_texture_path:
+             valid, _, _ = self._is_valid_textured_obj_bundle(raw_mesh_path, raw_texture_path)
+             if valid:
+                 logger.info("[%s] Valid textured OBJ bundle detected. Auto-switching to TEXTURE_SAFE_COPY profile.", job_id)
+                 profile_type = CleanupProfileType.TEXTURE_SAFE_COPY
+
         if profile_type == CleanupProfileType.TEXTURE_SAFE_COPY:
             if not raw_texture_path: raise ValueError("TEXTURE_SAFE_COPY requires texture")
-            stats = self._run_texture_safe_copy(raw_mesh_path, raw_texture_path, job_cleaned_dir)
+            valid, msg, resolved_tex = self._is_valid_textured_obj_bundle(raw_mesh_path, raw_texture_path)
+            if not valid:
+                raise ValueError(msg)
+            stats = self._run_texture_safe_copy(raw_mesh_path, resolved_tex, job_cleaned_dir)
             if stats.get("cleanup_mode") == "failed": raise RuntimeError(f"texture_safe_copy failed: {stats.get('error')}")
             metadata = self.normalizer.generate_metadata(stats["bbox_min"], stats["bbox_max"], stats["pivot_offset"], stats["final_polycount"])
             metadata_path = job_cleaned_dir / "normalized_metadata.json"

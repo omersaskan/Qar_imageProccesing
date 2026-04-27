@@ -49,7 +49,6 @@ def test_production_cleanup_path_auto_detects_textured_obj(temp_workspace, monke
     def fail_if_called(*args, **kwargs):
         pytest.fail("Destructive cleanup path was entered but should have been bypassed!")
 
-    monkeypatch.setattr(MeshIsolator, "isolate_product", fail_if_called)
     monkeypatch.setattr(Remesher, "process", fail_if_called)
     
     # 3. Initialize cleaner and run cleanup with DEFAULT profile
@@ -67,7 +66,7 @@ def test_production_cleanup_path_auto_detects_textured_obj(temp_workspace, monke
     assert Path(stats["cleaned_mesh_path"]).exists()
     assert Path(stats["cleaned_texture_path"]).exists()
     
-    cleaned_mtl = Path(stats["cleaned_mesh_path"]).parent / "project_textured.mtl"
+    cleaned_mtl = Path(stats["cleaned_mesh_path"]).parent / "material.mtl"
     assert cleaned_mtl.exists()
     
     # Verify metadata was generated

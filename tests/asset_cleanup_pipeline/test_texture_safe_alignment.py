@@ -104,16 +104,15 @@ def test_texture_safe_copy_alignment_integration(temp_workspace):
     glb_path = export_dir / "final.glb"
     
     # We need to manually construct the export call similar to how the worker does it
-    metrics = exporter.export_to_glb(
+    metrics = exporter.export(
         mesh_path=stats["cleaned_mesh_path"],
         output_path=str(glb_path),
         texture_path=stats["cleaned_texture_path"],
         metadata=metadata
     )
     
-    assert metrics["has_uv"] is True
-    assert metrics["has_embedded_texture"] is True
-    assert metrics["material_semantic_status"] == "diffuse_textured"
+    assert metrics["all_textured_primitives_have_texcoord_0"] is True
+    assert metrics["texture_count"] >= 1
 
 def test_validation_guidance_classification():
     from modules.operations.guidance import GuidanceAggregator

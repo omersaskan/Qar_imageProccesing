@@ -1,0 +1,375 @@
+{
+  "job_id": "job_cap_29ab6fa1",
+  "exported_at": "2026-04-27T13:48:39.898411",
+  "reports": {
+    "job_config": {
+      "job_id": "job_cap_29ab6fa1",
+      "capture_session_id": "cap_29ab6fa1",
+      "product_id": "1",
+      "status": "completed",
+      "input_frames": [
+        "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\captures\\cap_29ab6fa1\\frames\\frame_0000.jpg",
+        "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\captures\\cap_29ab6fa1\\frames\\frame_0001.jpg",
+        "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\captures\\cap_29ab6fa1\\frames\\frame_0002.jpg",
+        "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\captures\\cap_29ab6fa1\\frames\\frame_0003.jpg",
+        "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\captures\\cap_29ab6fa1\\frames\\frame_0004.jpg",
+        "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\captures\\cap_29ab6fa1\\frames\\frame_0005.jpg",
+        "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\captures\\cap_29ab6fa1\\frames\\frame_0006.jpg",
+        "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\captures\\cap_29ab6fa1\\frames\\frame_0007.jpg",
+        "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\captures\\cap_29ab6fa1\\frames\\frame_0008.jpg",
+        "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\captures\\cap_29ab6fa1\\frames\\frame_0009.jpg",
+        "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\captures\\cap_29ab6fa1\\frames\\frame_0010.jpg",
+        "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\captures\\cap_29ab6fa1\\frames\\frame_0011.jpg",
+        "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\captures\\cap_29ab6fa1\\frames\\frame_0012.jpg",
+        "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\captures\\cap_29ab6fa1\\frames\\frame_0013.jpg",
+        "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\captures\\cap_29ab6fa1\\frames\\frame_0014.jpg",
+        "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\captures\\cap_29ab6fa1\\frames\\frame_0015.jpg",
+        "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\captures\\cap_29ab6fa1\\frames\\frame_0016.jpg",
+        "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\captures\\cap_29ab6fa1\\frames\\frame_0017.jpg",
+        "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\captures\\cap_29ab6fa1\\frames\\frame_0018.jpg",
+        "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\captures\\cap_29ab6fa1\\frames\\frame_0019.jpg",
+        "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\captures\\cap_29ab6fa1\\frames\\frame_0020.jpg",
+        "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\captures\\cap_29ab6fa1\\frames\\frame_0021.jpg",
+        "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\captures\\cap_29ab6fa1\\frames\\frame_0022.jpg",
+        "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\captures\\cap_29ab6fa1\\frames\\frame_0023.jpg",
+        "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\captures\\cap_29ab6fa1\\frames\\frame_0024.jpg",
+        "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\captures\\cap_29ab6fa1\\frames\\frame_0025.jpg",
+        "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\captures\\cap_29ab6fa1\\frames\\frame_0026.jpg"
+      ],
+      "job_dir": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_29ab6fa1",
+      "manifest_path": null,
+      "source_video_path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\captures\\cap_29ab6fa1\\video\\raw_video.mp4",
+      "quality_report": {
+        "total_frames_read": 825,
+        "rejection_counts": {
+          "sampling": 770,
+          "quality_or_mask": 24,
+          "redundant_similarity": 4
+        },
+        "saved_count": 27,
+        "frame_mode": "raw_for_reconstruction",
+        "masked_preview_dir": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\captures\\cap_29ab6fa1\\frames\\masked",
+        "masks_dir": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\captures\\cap_29ab6fa1\\frames\\masks",
+        "video_filename": "raw_video.mp4",
+        "timestamp": "2026-04-27T01:46:11.004029"
+      },
+      "coverage_report": {
+        "num_frames": 27,
+        "readable_frames": 27,
+        "unique_views": 17,
+        "diversity": "sufficient",
+        "top_down_captured": true,
+        "center_x_span": 0.3402777777777778,
+        "center_y_span": 0.258203125,
+        "scale_variation": 4.256094822290768,
+        "aspect_variation": 0.3244657280029771,
+        "coverage_score": 1.0,
+        "fallback_frames": 0,
+        "low_confidence_frames": 0,
+        "geometric_info": {
+          "span_x": 0.3402777777777778,
+          "max_gap": 0.07430555555555551,
+          "jump_ratio": 0.07692307692307693,
+          "hard_codes": [],
+          "soft_codes": [],
+          "all_codes": []
+        },
+        "overall_status": "sufficient",
+        "recommended_action": "reconstruct",
+        "hard_reasons": [],
+        "soft_reasons": [],
+        "reasons": []
+      },
+      "failure_reason": null,
+      "created_at": "2026-04-26T22:46:18.553276Z",
+      "started_at": "2026-04-26T22:46:18.577393Z",
+      "completed_at": "2026-04-26T23:14:19.171570Z"
+    },
+    "capture_report": {
+      "num_frames": 27,
+      "readable_frames": 27,
+      "unique_views": 17,
+      "diversity": "sufficient",
+      "top_down_captured": true,
+      "center_x_span": 0.3402777777777778,
+      "center_y_span": 0.258203125,
+      "scale_variation": 4.256094822290768,
+      "aspect_variation": 0.3244657280029771,
+      "coverage_score": 1.0,
+      "fallback_frames": 0,
+      "low_confidence_frames": 0,
+      "geometric_info": {
+        "span_x": 0.3402777777777778,
+        "max_gap": 0.07430555555555551,
+        "jump_ratio": 0.07692307692307693,
+        "hard_codes": [],
+        "soft_codes": [],
+        "all_codes": []
+      },
+      "overall_status": "sufficient",
+      "recommended_action": "reconstruct",
+      "hard_reasons": [],
+      "soft_reasons": [],
+      "reasons": []
+    },
+    "extraction_report": {
+      "total_frames_read": 825,
+      "rejection_counts": {
+        "sampling": 770,
+        "quality_or_mask": 24,
+        "redundant_similarity": 4
+      },
+      "saved_count": 27,
+      "frame_mode": "raw_for_reconstruction",
+      "masked_preview_dir": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\captures\\cap_29ab6fa1\\frames\\masked",
+      "masks_dir": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\captures\\cap_29ab6fa1\\frames\\masks",
+      "video_filename": "raw_video.mp4",
+      "timestamp": "2026-04-27T01:46:11.004029"
+    },
+    "export_metrics": {
+      "format": "GLB",
+      "filesize": 4721188,
+      "profile": "mobile_high",
+      "smoothing_mode": "none",
+      "texture_applied": true,
+      "optimization_hooks": {
+        "meshopt": "skipped_unavailable",
+        "draco": "skipped_unavailable",
+        "gltf_validator": "skipped_unavailable"
+      },
+      "delivery_ready": true,
+      "export_status": "success",
+      "final_vertex_count": 35948,
+      "final_face_count": 45256,
+      "texture_count": 1,
+      "material_count": 1,
+      "all_primitives_have_position": true,
+      "all_primitives_have_normal": true,
+      "all_textured_primitives_have_texcoord_0": true,
+      "primitive_attribute_report": [
+        {
+          "mesh_index": 0,
+          "primitive_index": 0,
+          "attributes": [
+            "POSITION",
+            "TEXCOORD_0",
+            "NORMAL"
+          ],
+          "has_position": true,
+          "has_normal": true,
+          "has_texcoord_0": true,
+          "is_textured": true,
+          "missing_attributes": []
+        }
+      ],
+      "bbox_min": {
+        "x": -9.20107017,
+        "y": -7.62352099,
+        "z": 0.0
+      },
+      "bbox_max": {
+        "x": 11.2519299,
+        "y": 6.62798963,
+        "z": 31.15827656
+      },
+      "final_polycount": 45256
+    },
+    "guidance_report": {
+      "session_id": "cap_29ab6fa1",
+      "status": "captured",
+      "next_action": "Model oluÅŸturma devam ediyor. Bekleyin.",
+      "should_recapture": false,
+      "is_ready_for_review": false,
+      "messages": [
+        {
+          "code": "PROCESSING_RECONSTRUCTION",
+          "message": "Kareler ayrÄ±ÅŸtÄ±rÄ±ldÄ±. 3D model oluÅŸturma iÅŸlemi devam ediyor.",
+          "severity": "info"
+        }
+      ],
+      "coverage_summary": {
+        "num_frames": 27,
+        "readable_frames": 27,
+        "unique_views": 17,
+        "diversity": "sufficient",
+        "top_down_captured": true,
+        "center_x_span": 0.3402777777777778,
+        "center_y_span": 0.258203125,
+        "scale_variation": 4.256094822290768,
+        "aspect_variation": 0.3244657280029771,
+        "coverage_score": 1.0,
+        "fallback_frames": 0,
+        "low_confidence_frames": 0,
+        "geometric_info": {
+          "span_x": 0.3402777777777778,
+          "max_gap": 0.07430555555555551,
+          "jump_ratio": 0.07692307692307693,
+          "hard_codes": [],
+          "soft_codes": [],
+          "all_codes": []
+        },
+        "overall_status": "sufficient",
+        "recommended_action": "reconstruct",
+        "hard_reasons": [],
+        "soft_reasons": [],
+        "reasons": []
+      },
+      "validation_summary": null,
+      "last_updated": "2026-04-26T22:46:13.502772Z"
+    },
+    "reconstruction_audit": {
+      "capture_session_id": "cap_29ab6fa1",
+      "attempts": [
+        {
+          "attempt_type": "default",
+          "status": "weak",
+          "frames_used": 0,
+          "registered_images": 0,
+          "sparse_points": 0,
+          "dense_points_fused": 0,
+          "mesher_used": "none",
+          "mesh_path": null,
+          "log_path": null,
+          "error_message": "Best sparse model too small for densification. model=0, images=3, points=77",
+          "sampling_rate_used": null,
+          "source_video_path": null,
+          "reextracted_frames_dir": null,
+          "metrics_rank_score": -100.0,
+          "metadata": {
+            "attempt_dir": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_29ab6fa1\\attempt_0_default",
+            "density": 0.5,
+            "enforce_masks": true
+          },
+          "timestamp": "2026-04-26T22:46:27.502887Z"
+        },
+        {
+          "attempt_type": "denser_frames",
+          "status": "success",
+          "frames_used": 54,
+          "registered_images": 54,
+          "sparse_points": 4667,
+          "dense_points_fused": 4019287,
+          "mesher_used": "poisson",
+          "mesh_path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_29ab6fa1\\attempt_1_denser_frames\\dense\\meshed-poisson.ply",
+          "log_path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_29ab6fa1\\attempt_1_denser_frames\\reconstruction.log",
+          "error_message": null,
+          "sampling_rate_used": 5,
+          "source_video_path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\captures\\cap_29ab6fa1\\video\\raw_video.mp4",
+          "reextracted_frames_dir": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_29ab6fa1\\attempt_1_denser_frames\\extracted_frames",
+          "metrics_rank_score": 407662.2,
+          "metadata": {
+            "engine": "colmap",
+            "density": 1.0,
+            "enforce_masks": true,
+            "attempt_dir": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_29ab6fa1\\attempt_1_denser_frames",
+            "reextracted_frames_dir": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_29ab6fa1\\attempt_1_denser_frames\\extracted_frames",
+            "sampling_rate_used": 5,
+            "mesh_path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_29ab6fa1\\attempt_1_denser_frames\\dense\\meshed-poisson.ply",
+            "texture_path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_29ab6fa1\\attempt_1_denser_frames\\_no_texture.png",
+            "has_texture_file": false,
+            "mesh_probe_has_uv": false,
+            "mesh_probe_vertex_count": 40823,
+            "mesh_probe_face_count": 78420,
+            "mask_mode": null,
+            "feature_mask_path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_29ab6fa1\\attempt_1_denser_frames\\masks",
+            "stereo_fusion_mask_path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\reconstructions\\job_cap_29ab6fa1\\attempt_1_denser_frames\\dense\\stereo\\masks",
+            "dense_mask_valid": true,
+            "force_unmasked_fusion": false,
+            "dense_mask_count": 54,
+            "dense_mask_dimension_matches": 54,
+            "dense_mask_exact_filename_matches": null,
+            "dense_mask_fallback_white_ratio": 0.0
+          },
+          "timestamp": "2026-04-26T23:14:19.166696Z"
+        }
+      ],
+      "selected_best_index": 1,
+      "final_status": "success",
+      "created_at": "2026-04-26T22:46:19.224517Z"
+    }
+  },
+  "logs": [
+    "attempt_0_default\\reconstruction.log",
+    "attempt_1_denser_frames\\reconstruction.log"
+  ],
+  "artifacts": {},
+  "config_snapshot": {
+    "env": "local_dev",
+    "recon_pipeline": "colmap_dense",
+    "require_textured_output": true,
+    "recon_mesh_budget_faces": 1000000,
+    "recon_mobile_target_faces": 100000
+  },
+  "environment_snapshot": {
+    "os": "nt",
+    "cwd": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing",
+    "python_version": "3.11.9 (tags/v3.11.9:de54cf5, Apr  2 2024, 10:12:12) [MSC v.1938 64 bit (AMD64)]"
+  },
+  "delivery_checklist": {
+    "capture_status": {
+      "status": true,
+      "value": "sufficient",
+      "required": "PASS or WARN"
+    },
+    "accepted_frames": {
+      "status": true,
+      "value": 27,
+      "required": ">= 15"
+    },
+    "dense_masks_match": {
+      "status": false,
+      "value": "dim_match=54, file_match=None",
+      "required": "Exact/Dimension Match"
+    },
+    "fallback_white_ratio": {
+      "status": true,
+      "value": 0.0,
+      "required": "< 0.3"
+    },
+    "registered_image_count": {
+      "status": true,
+      "value": 54,
+      "required": ">= 10"
+    },
+    "fused_point_count": {
+      "status": true,
+      "value": 4019287,
+      "required": ">= 5000"
+    },
+    "object_isolation_method": {
+      "status": false,
+      "value": null,
+      "required": "mask_guided or hybrid_pc_mask"
+    },
+    "isolation_confidence": {
+      "status": false,
+      "value": null,
+      "required": ">= 0.7"
+    },
+    "texture_count": {
+      "status": true,
+      "value": 1,
+      "required": "> 0"
+    },
+    "material_count": {
+      "status": true,
+      "value": 1,
+      "required": "> 0"
+    },
+    "texcoord_0_exists": {
+      "status": true,
+      "value": true,
+      "required": "True"
+    },
+    "texture_applied": {
+      "status": true,
+      "value": true,
+      "required": "True"
+    },
+    "glb_validation": {
+      "status": false,
+      "value": null,
+      "required": "PASS or REVIEW"
+    }
+  }
+}

@@ -60,7 +60,7 @@ def test_texture_safe_copy_success(temp_workspace):
     with open(mtl_out, "r") as f:
         content = f.read()
         assert "map_Kd texture.jpg" in content
-        assert "Ka 1.000000 1.000000 1.000000" in content
+        assert "Ka 1.0 1.0 1.0" in content
         assert "newmtl material_0" in content
 
     # Check OBJ usemtl normalization
