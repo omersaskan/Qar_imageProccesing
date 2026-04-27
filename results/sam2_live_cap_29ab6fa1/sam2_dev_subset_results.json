@@ -1,0 +1,179 @@
+{
+  "sam2_status": {
+    "sam2_enabled": false,
+    "sam2_available": false,
+    "sam2_model_loaded": false,
+    "sam2_inference_ran": false,
+    "sam2_error_reason": "SAM2 disabled in settings (SAM2_ENABLED=false)",
+    "device": "cpu",
+    "checkpoint_exists": false,
+    "model_cfg": "sam2_hiera_l.yaml",
+    "checkpoint": "models/sam2/sam2_hiera_large.pt",
+    "sam2_mode": "image_frame",
+    "temporal_consistency": false,
+    "api_type": "image_predictor"
+  },
+  "legacy_iou": 0.4502,
+  "sam2_iou": 0.0,
+  "iou_gain": -0.4502,
+  "legacy_leakage": 0.5476,
+  "sam2_leakage": 0.0,
+  "leakage_reduction": 0.5476,
+  "sam2_ran": false,
+  "runtime_sec": {
+    "legacy": 19.01,
+    "sam2": 0.0
+  },
+  "gpu_available": false,
+  "temporal_stability": {
+    "legacy": {
+      "mask_area_std": 251906.44979791107,
+      "centroid_jitter": 200.51136136809208,
+      "bbox_center_jitter": 197.69177479435177,
+      "empty_mask_count": 0,
+      "frame_count": 20
+    },
+    "sam2": {
+      "mask_area_std": 0,
+      "centroid_jitter": 0,
+      "bbox_center_jitter": 0,
+      "empty_mask_count": 0,
+      "frame_count": 0
+    }
+  },
+  "frames_evaluated": 20,
+  "gt_masks_available": 3,
+  "gt_frames_matched": [
+    "frame_0000",
+    "frame_0010",
+    "frame_0020"
+  ],
+  "final_recommendation": "sam2_unavailable \u2014 cannot evaluate. Install torch + sam2 and place checkpoint at SAM2_CHECKPOINT path.",
+  "legacy_per_frame": [
+    {
+      "frame": "frame_0000.jpg",
+      "mask_path": "results\\sam2_live_cap_29ab6fa1\\legacy_masks\\frame_0000.jpg.png",
+      "confidence": 1.0,
+      "occupancy": 0.19955717110339505,
+      "iou": 0.9004,
+      "leakage": 0.0952
+    },
+    {
+      "frame": "frame_0001.jpg",
+      "mask_path": "results\\sam2_live_cap_29ab6fa1\\legacy_masks\\frame_0001.jpg.png",
+      "confidence": 1.0,
+      "occupancy": 0.19010187596450617
+    },
+    {
+      "frame": "frame_0002.jpg",
+      "mask_path": "results\\sam2_live_cap_29ab6fa1\\legacy_masks\\frame_0002.jpg.png",
+      "confidence": 1.0,
+      "occupancy": 0.19360978491512346
+    },
+    {
+      "frame": "frame_0003.jpg",
+      "mask_path": "results\\sam2_live_cap_29ab6fa1\\legacy_masks\\frame_0003.jpg.png",
+      "confidence": 1.0,
+      "occupancy": 0.18578281732253085
+    },
+    {
+      "frame": "frame_0004.jpg",
+      "mask_path": "results\\sam2_live_cap_29ab6fa1\\legacy_masks\\frame_0004.jpg.png",
+      "confidence": 1.0,
+      "occupancy": 0.21597969714506174
+    },
+    {
+      "frame": "frame_0005.jpg",
+      "mask_path": "results\\sam2_live_cap_29ab6fa1\\legacy_masks\\frame_0005.jpg.png",
+      "confidence": 1.0,
+      "occupancy": 0.22061993634259258
+    },
+    {
+      "frame": "frame_0006.jpg",
+      "mask_path": "results\\sam2_live_cap_29ab6fa1\\legacy_masks\\frame_0006.jpg.png",
+      "confidence": 1.0,
+      "occupancy": 0.21728383005401233
+    },
+    {
+      "frame": "frame_0007.jpg",
+      "mask_path": "results\\sam2_live_cap_29ab6fa1\\legacy_masks\\frame_0007.jpg.png",
+      "confidence": 1.0,
+      "occupancy": 0.23249638310185186
+    },
+    {
+      "frame": "frame_0008.jpg",
+      "mask_path": "results\\sam2_live_cap_29ab6fa1\\legacy_masks\\frame_0008.jpg.png",
+      "confidence": 1.0,
+      "occupancy": 0.21020845389660495
+    },
+    {
+      "frame": "frame_0009.jpg",
+      "mask_path": "results\\sam2_live_cap_29ab6fa1\\legacy_masks\\frame_0009.jpg.png",
+      "confidence": 1.0,
+      "occupancy": 0.20170801986882717
+    },
+    {
+      "frame": "frame_0010.jpg",
+      "mask_path": "results\\sam2_live_cap_29ab6fa1\\legacy_masks\\frame_0010.jpg.png",
+      "confidence": 1.0,
+      "occupancy": 0.16775209780092593,
+      "iou": 0.0,
+      "leakage": 1.0
+    },
+    {
+      "frame": "frame_0011.jpg",
+      "mask_path": "results\\sam2_live_cap_29ab6fa1\\legacy_masks\\frame_0011.jpg.png",
+      "confidence": 1.0,
+      "occupancy": 0.2116822193287037
+    },
+    {
+      "frame": "frame_0012.jpg",
+      "mask_path": "results\\sam2_live_cap_29ab6fa1\\legacy_masks\\frame_0012.jpg.png",
+      "confidence": 1.0,
+      "occupancy": 0.21064091435185187
+    },
+    {
+      "frame": "frame_0013.jpg",
+      "mask_path": "results\\sam2_live_cap_29ab6fa1\\legacy_masks\\frame_0013.jpg.png",
+      "confidence": 1.0,
+      "occupancy": 0.18879521122685186
+    },
+    {
+      "frame": "frame_0014.jpg",
+      "mask_path": "results\\sam2_live_cap_29ab6fa1\\legacy_masks\\frame_0014.jpg.png",
+      "confidence": 1.0,
+      "occupancy": 0.1985624035493827
+    },
+    {
+      "frame": "frame_0015.jpg",
+      "mask_path": "results\\sam2_live_cap_29ab6fa1\\legacy_masks\\frame_0015.jpg.png",
+      "confidence": 1.0,
+      "occupancy": 0.20794282889660493
+    },
+    {
+      "frame": "frame_0016.jpg",
+      "mask_path": "results\\sam2_live_cap_29ab6fa1\\legacy_masks\\frame_0016.jpg.png",
+      "confidence": 1.0,
+      "occupancy": 0.23350007233796297
+    },
+    {
+      "frame": "frame_0017.jpg",
+      "mask_path": "results\\sam2_live_cap_29ab6fa1\\legacy_masks\\frame_0017.jpg.png",
+      "confidence": 1.0,
+      "occupancy": 0.31077329282407407
+    },
+    {
+      "frame": "frame_0018.jpg",
+      "mask_path": "results\\sam2_live_cap_29ab6fa1\\legacy_masks\\frame_0018.jpg.png",
+      "confidence": 1.0,
+      "occupancy": 0.2650301408179012
+    },
+    {
+      "frame": "frame_0019.jpg",
+      "mask_path": "results\\sam2_live_cap_29ab6fa1\\legacy_masks\\frame_0019.jpg.png",
+      "confidence": 1.0,
+      "occupancy": 0.19142156153549383
+    }
+  ],
+  "sam2_per_frame": []
+}
