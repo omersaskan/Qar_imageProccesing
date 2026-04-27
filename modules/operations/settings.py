@@ -159,6 +159,17 @@ class Settings(BaseSettings):
     min_near_white_ratio_white_cream: float = Field(0.40, validation_alias="MIN_NEAR_WHITE_RATIO_WHITE_CREAM")
     white_cream_max_background_ratio: Optional[float] = Field(None, validation_alias="WHITE_CREAM_MAX_BACKGROUND_RATIO")
     expected_product_color: str = Field("unknown", validation_alias="EXPECTED_PRODUCT_COLOR")
+    
+    # --- PHASE 6.1: SAM2 SEGMENTATION ---
+    segmentation_method: str = Field("legacy", validation_alias="SEGMENTATION_METHOD")
+    sam2_enabled: bool = Field(False, validation_alias="SAM2_ENABLED")
+    sam2_device: str = Field("cuda", validation_alias="SAM2_DEVICE")
+    sam2_model_cfg: str = Field("sam2_hiera_l.yaml", validation_alias="SAM2_MODEL_CFG")
+    sam2_checkpoint: str = Field("models/sam2/sam2_hiera_large.pt", validation_alias="SAM2_CHECKPOINT")
+    sam2_fallback_to_legacy: bool = Field(True, validation_alias="SAM2_FALLBACK_TO_LEGACY")
+    sam2_review_only: bool = Field(True, validation_alias="SAM2_REVIEW_ONLY")
+    sam2_prompt_mode: str = Field("center_box", validation_alias="SAM2_PROMPT_MODE")
+    sam2_max_frames: int = Field(0, validation_alias="SAM2_MAX_FRAMES")
 
     @property
     def is_dev(self) -> bool:

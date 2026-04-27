@@ -176,33 +176,44 @@ class ObjectMasker:
         if not self.config.enabled:
             backend_name = "heuristic"
             
-        # Feature flag for SAM2 experiment
-        env_method = os.getenv("SEGMENTATION_METHOD", "legacy").lower()
-        if env_method == "sam2":
-            # Check if SAM2 is available before switching
-            from modules.ai_segmentation.sam2_wrapper import HAS_SAM2
-            if HAS_SAM2:
-                logger.info("SAM2 feature flag detected. Using sam2 backend.")
+        # Phase 6.1: Environment-aware feature flag for SAM2 experiment
+        from modules.operations.settings import settings
+        requested_method = settings.segmentation_method
+        fallback_used = False
+        fallback_reason = None
+
+        if requested_method == "sam2":
+            from modules.ai_segmentation.sam2_wrapper import SAM2Wrapper
+            sam2 = SAM2Wrapper()
+            if sam2.is_available():
+                logger.info("SAM2 enabled and available. Using sam2 backend.")
                 backend_name = "sam2"
             else:
-                logger.warning("SAM2 requested via feature flag but dependencies missing. Falling back to legacy.")
+                fallback_used = True
+                fallback_reason = sam2.get_status().get("sam2_error_reason", "SAM2 unavailable")
+                logger.warning(f"SAM2 requested but fallback triggered: {fallback_reason}")
 
         backend = BackendFactory.get_backend(backend_name)
         
         try:
             binary, meta_out = backend.segment(frame, self.config)
-        except Exception as e:
+        except (Exception, NotImplementedError) as e:
             logger.error(f"Backend '{backend_name}' failed: {e}")
             if self.config.hard_fail_on_backend_error:
                 raise e
-            if self.config.fallback_backend:
-                logger.warning(f"Falling back to '{self.config.fallback_backend}'")
-                backend = BackendFactory.get_backend(self.config.fallback_backend)
-                binary, meta_out = backend.segment(frame, self.config)
-                meta_out["fallback_used"] = True
-                meta_out["fallback_reason"] = str(e)
-            else:
-                raise ValueError("No fallback backend defined and main backend failed.")
+            
+            # Internal fallback to heuristic if the chosen backend fails
+            fallback_used = True
+            fallback_reason = f"Backend {backend_name} failed: {str(e)}"
+            logger.warning(f"Falling back to 'heuristic' due to: {fallback_reason}")
+            backend = BackendFactory.get_backend("heuristic")
+            binary, meta_out = backend.segment(frame, self.config)
+
+        # Add fallback metadata
+        if fallback_used:
+            meta_out["fallback_used"] = True
+            meta_out["fallback_reason"] = fallback_reason
+            meta_out["requested_segmentation_method"] = requested_method
 
         # Post-processing to standardize format and suppress support band
         binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
