@@ -1,3 +1,10 @@
+"""
+SAM2 Backend — Image-mode segmentation for ObjectMasker
+========================================================
+
+Uses SAM2Wrapper in image mode (SAM2ImagePredictor).
+Does NOT use video predictor API.
+"""
 
 import time
 import numpy as np
@@ -13,15 +20,11 @@ logger = logging.getLogger(__name__)
 
 class SAM2Backend(SegmentationBackend):
     """
-    Segmentation backend that delegates to the SAM2Wrapper.
+    Segmentation backend delegating to SAM2Wrapper (image mode).
 
-    Behavior:
-    - If SAM2 is available AND the model is loaded, runs real inference
-      via SAM2Wrapper.segment_frame() and returns the mask + metadata.
-    - If SAM2 is not available, raises RuntimeError so ObjectMasker
-      can catch it and fall back to the heuristic backend.
-    - If inference fails at runtime, raises RuntimeError (caught by
-      ObjectMasker for fallback).
+    - If SAM2 is available + model loaded → real inference via
+      SAM2Wrapper.segment_frame() (set_image / predict).
+    - If unavailable → raises RuntimeError for ObjectMasker fallback.
     """
 
     def __init__(self):
@@ -39,13 +42,11 @@ class SAM2Backend(SegmentationBackend):
         h, w = frame.shape[:2]
         t0 = time.time()
 
-        # Generate prompt using the configured strategy
         prompt = generate_prompts(
             frame_shape=(h, w),
             mode=settings.sam2_prompt_mode,
         )
 
-        # Run real SAM2 inference
         mask = self.wrapper.segment_frame(frame, prompt)
 
         if mask is None:
@@ -62,6 +63,9 @@ class SAM2Backend(SegmentationBackend):
             "ai_segmentation_used": True,
             "sam2_model_loaded": self.wrapper.sam2_model_loaded,
             "sam2_inference_ran": self.wrapper.sam2_inference_ran,
+            "sam2_mode": self.wrapper.sam2_mode,
+            "temporal_consistency": self.wrapper.temporal_consistency,
+            "api_type": self.wrapper.api_type,
             "prompt_mode": prompt["prompt_mode"],
             "prompt_source": prompt["prompt_source"],
             "inference_ms": elapsed_ms,

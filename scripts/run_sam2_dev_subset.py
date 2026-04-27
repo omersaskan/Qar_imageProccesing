@@ -2,17 +2,17 @@
 SAM2 Dev-Subset Evaluation Script
 ====================================
 
-Compares SAM2 vs legacy segmentation on a dev-subset video.
+Compares SAM2 (image mode) vs legacy segmentation on a dev-subset.
 
 Usage:
-    python scripts/run_sam2_dev_subset.py --capture-id cap_29ab6fa1 --output-dir results/
-    python scripts/run_sam2_dev_subset.py --video data/videos/test.mp4 --output-dir results/
-    python scripts/run_sam2_dev_subset.py --frames-dir data/captures/cap_X/frames/raw --output-dir results/
+    python scripts/run_sam2_dev_subset.py --frames-dir data/frames --output-dir results/
+    python scripts/run_sam2_dev_subset.py --capture-id cap_X --output-dir results/
+    python scripts/run_sam2_dev_subset.py --frames-dir data/frames --gt-dir data/gt --output-dir results/
 
 Decision logic:
 - If SAM2 unavailable: report unavailable, do NOT fail hard.
 - If SAM2 improves IoU by >= 0.05 and leakage decreases: recommend continuing.
-- If SAM2 does not improve segmentation: do NOT proceed to Depth Anything.
+- If SAM2 does not improve: do NOT proceed to Depth Anything.
 """
 
 import argparse
@@ -30,7 +30,6 @@ logger = logging.getLogger("sam2_dev_subset")
 
 
 def compute_iou(pred: np.ndarray, gt: np.ndarray) -> float:
-    """Compute IoU between two binary masks."""
     pred_bin = pred > 0
     gt_bin = gt > 0
     intersection = float(np.sum(pred_bin & gt_bin))
@@ -39,7 +38,6 @@ def compute_iou(pred: np.ndarray, gt: np.ndarray) -> float:
 
 
 def compute_leakage(pred: np.ndarray, gt: np.ndarray) -> float:
-    """Compute leakage ratio (FP pixels / total predicted pixels)."""
     pred_bin = pred > 0
     gt_bin = gt > 0
     fp = float(np.sum(pred_bin & ~gt_bin))
@@ -53,12 +51,16 @@ def run_evaluation(args):
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    sam2_masks_dir = output_dir / "sam2_masks"
+    legacy_masks_dir = output_dir / "legacy_masks"
 
     # Resolve frames
     if args.frames_dir:
         frames_dir = Path(args.frames_dir)
     elif args.capture_id:
-        frames_dir = Path(settings.data_root) / "captures" / args.capture_id / "frames" / "raw"
+        frames_dir = (
+            Path(settings.data_root) / "captures" / args.capture_id / "frames" / "raw"
+        )
     else:
         logger.error("Provide --frames-dir or --capture-id")
         sys.exit(1)
@@ -67,10 +69,15 @@ def run_evaluation(args):
         logger.error(f"Frames directory not found: {frames_dir}")
         sys.exit(1)
 
-    frame_files = sorted(list(frames_dir.glob("*.jpg")) + list(frames_dir.glob("*.png")))
+    frame_files = sorted(
+        list(frames_dir.glob("*.jpg")) + list(frames_dir.glob("*.png"))
+    )
     if not frame_files:
         logger.error(f"No frames found in {frames_dir}")
         sys.exit(1)
+
+    max_frames = min(len(frame_files), 20)  # Cap for dev-subset
+    frame_files = frame_files[:max_frames]
 
     # Load GT masks if provided
     gt_masks = {}
@@ -79,12 +86,13 @@ def run_evaluation(args):
         for gt_file in gt_dir.glob("*.png"):
             gt_masks[gt_file.stem] = cv2.imread(str(gt_file), cv2.IMREAD_GRAYSCALE)
 
-    # SAM2 status check
-    sam2_status = {"sam2_available": False}
+    # --- SAM2 status check ---
+    sam2_status = {"sam2_available": False, "sam2_model_loaded": False}
+    sam2_wrapper = None
     try:
         from modules.ai_segmentation.sam2_wrapper import SAM2Wrapper
-        wrapper = SAM2Wrapper()
-        sam2_status = wrapper.get_status()
+        sam2_wrapper = SAM2Wrapper()
+        sam2_status = sam2_wrapper.get_status()
     except Exception as e:
         sam2_status["sam2_error_reason"] = str(e)
 
@@ -97,40 +105,85 @@ def run_evaluation(args):
         gpu_available = False
 
     # --- Run legacy masks ---
-    logger.info("Running legacy segmentation...")
+    logger.info(f"Running legacy segmentation on {len(frame_files)} frames...")
     legacy_masker = ObjectMasker()
-    legacy_ious = []
-    legacy_leakages = []
+    legacy_masks_dir.mkdir(parents=True, exist_ok=True)
+    legacy_ious, legacy_leakages = [], []
+    legacy_per_frame = []
     t0 = time.time()
 
-    for f_path in frame_files[:20]:  # Cap at 20 for dev-subset
+    for f_path in frame_files:
         frame = cv2.imread(str(f_path))
         if frame is None:
             continue
         mask, meta = legacy_masker.generate_mask(frame)
+        mask_out = legacy_masks_dir / f"{f_path.name}.png"
+        cv2.imwrite(str(mask_out), mask)
+
+        entry = {"frame": f_path.name, "mask_path": str(mask_out)}
         stem = f_path.stem
         if stem in gt_masks:
             iou = compute_iou(mask, gt_masks[stem])
             leak = compute_leakage(mask, gt_masks[stem])
             legacy_ious.append(iou)
             legacy_leakages.append(leak)
+            entry["iou"] = iou
+            entry["leakage"] = leak
+        legacy_per_frame.append(entry)
 
     legacy_time = time.time() - t0
-
     legacy_iou = float(np.mean(legacy_ious)) if legacy_ious else 0.0
     legacy_leakage = float(np.mean(legacy_leakages)) if legacy_leakages else 0.0
+    logger.info(f"Legacy: {len(frame_files)} frames in {legacy_time:.2f}s")
 
     # --- Run SAM2 if available ---
     sam2_iou = 0.0
     sam2_leakage = 0.0
     sam2_time = 0.0
     sam2_ran = False
+    sam2_ious, sam2_leakages = [], []
+    sam2_per_frame = []
 
-    if sam2_status.get("sam2_available") and sam2_status.get("sam2_model_loaded"):
-        logger.info("Running SAM2 segmentation...")
+    if sam2_wrapper and sam2_wrapper.is_available():
+        logger.info("Running SAM2 image-mode segmentation...")
+        sam2_masks_dir.mkdir(parents=True, exist_ok=True)
         sam2_ran = True
-        # SAM2 would be run here via the backend
-        # For now, report that SAM2 framework is ready but metrics TBD
+        t0 = time.time()
+
+        from modules.ai_segmentation.prompting import generate_prompts
+
+        for f_path in frame_files:
+            frame = cv2.imread(str(f_path))
+            if frame is None:
+                continue
+            h, w = frame.shape[:2]
+            prompt = generate_prompts(
+                frame_shape=(h, w), mode=settings.sam2_prompt_mode
+            )
+            mask = sam2_wrapper.segment_frame(frame, prompt)
+            entry = {"frame": f_path.name}
+
+            if mask is not None:
+                mask_out = sam2_masks_dir / f"{f_path.name}.png"
+                cv2.imwrite(str(mask_out), mask)
+                entry["mask_path"] = str(mask_out)
+                stem = f_path.stem
+                if stem in gt_masks:
+                    iou = compute_iou(mask, gt_masks[stem])
+                    leak = compute_leakage(mask, gt_masks[stem])
+                    sam2_ious.append(iou)
+                    sam2_leakages.append(leak)
+                    entry["iou"] = iou
+                    entry["leakage"] = leak
+            else:
+                entry["error"] = sam2_wrapper.sam2_error_reason
+
+            sam2_per_frame.append(entry)
+
+        sam2_time = time.time() - t0
+        sam2_iou = float(np.mean(sam2_ious)) if sam2_ious else 0.0
+        sam2_leakage = float(np.mean(sam2_leakages)) if sam2_leakages else 0.0
+        logger.info(f"SAM2: {len(frame_files)} frames in {sam2_time:.2f}s")
     else:
         logger.warning(
             f"SAM2 not available: {sam2_status.get('sam2_error_reason', 'unknown')}. "
@@ -163,8 +216,10 @@ def run_evaluation(args):
         "gpu_available": gpu_available,
         "checkpoint_exists": sam2_status.get("checkpoint_exists", False),
         "final_recommendation": recommendation,
-        "frames_evaluated": len(legacy_ious),
+        "frames_evaluated": len(frame_files),
         "gt_masks_available": len(gt_masks),
+        "legacy_per_frame": legacy_per_frame,
+        "sam2_per_frame": sam2_per_frame,
     }
 
     out_path = output_dir / "sam2_dev_subset_results.json"
@@ -172,9 +227,11 @@ def run_evaluation(args):
         json.dump(results, f, indent=2, default=str)
 
     logger.info(f"Results written to {out_path}")
-    logger.info(f"Legacy IoU: {legacy_iou:.4f}, SAM2 IoU: {sam2_iou:.4f}")
+    logger.info(
+        f"Legacy IoU: {legacy_iou:.4f} | SAM2 IoU: {sam2_iou:.4f} | "
+        f"Gain: {iou_gain:+.4f}"
+    )
     logger.info(f"Recommendation: {recommendation}")
-
     return results
 
 

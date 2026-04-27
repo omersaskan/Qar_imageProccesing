@@ -1,9 +1,25 @@
+"""
+SAM2 Wrapper — Image-mode (Option A) for DEV-SUBSET
+=====================================================
 
-import os
+API design:
+- Uses build_sam2() + SAM2ImagePredictor for per-frame segmentation.
+- segment_frame() calls predictor.set_image() and predictor.predict().
+- segment_video() remains a stub (video propagation is future Option B).
+
+This is explicitly NOT temporal/video propagation.  The video predictor
+(build_sam2_video_predictor) uses a completely different API
+(init_state / add_new_points_or_box / propagate_in_video) and is NOT
+used here.
+
+⚠️  torch and sam2 are NOT hard dependencies.
+"""
+
 import logging
 import time
 from pathlib import Path
 from typing import Optional, List, Dict, Any
+
 import numpy as np
 
 from modules.operations.settings import settings
@@ -11,48 +27,68 @@ from modules.operations.settings import settings
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
+# Mode constants
+# ---------------------------------------------------------------------------
+SAM2_IMAGE_MODE = "image_frame"
+SAM2_VIDEO_MODE = "video_temporal"
+
+# ---------------------------------------------------------------------------
 # Optional dependency probing
 # ---------------------------------------------------------------------------
-# SAM2 and torch are NOT hard dependencies.  They are imported only when
-# SAM2_ENABLED=true in the environment/settings.  This keeps the normal
-# install lightweight and prevents import-time crashes.
-# ---------------------------------------------------------------------------
-
 HAS_SAM2 = False
 HAS_TORCH = False
 SAM2_IMPORT_ERROR_REASON: Optional[str] = None
 
 if settings.sam2_enabled:
     try:
-        import torch
+        import torch  # noqa: F401
         HAS_TORCH = True
     except ImportError:
         SAM2_IMPORT_ERROR_REASON = "torch not installed"
 
     if HAS_TORCH:
         try:
-            from sam2.build_sam import build_sam2_video_predictor  # noqa: F401
+            # Image-mode: build_sam2 + SAM2ImagePredictor
+            from sam2.build_sam import build_sam2  # noqa: F401
+            from sam2.sam2_image_predictor import SAM2ImagePredictor  # noqa: F401
             HAS_SAM2 = True
         except ImportError:
-            SAM2_IMPORT_ERROR_REASON = "segment-anything-2 (sam2) package not installed"
+            SAM2_IMPORT_ERROR_REASON = (
+                "segment-anything-2 (sam2) package not installed"
+            )
 else:
-    SAM2_IMPORT_ERROR_REASON = "SAM2 disabled in settings (SAM2_ENABLED=false)"
+    SAM2_IMPORT_ERROR_REASON = (
+        "SAM2 disabled in settings (SAM2_ENABLED=false)"
+    )
 
 
 class SAM2Wrapper:
     """
-    Wrapper around Meta's SAM2 video predictor.
+    Wrapper around Meta's SAM2 **image** predictor (Option A).
 
-    Safety guarantees:
-    - If SAM2_ENABLED is false, no import/load of torch or SAM2 is attempted.
-    - If the checkpoint file is missing, status reports the exact reason.
-    - segment_video() returns None when SAM2 is unavailable.
+    API mapping (correct per official SAM2 docs):
+    ┌──────────────────────────────────────────────────────────┐
+    │ Image mode (this wrapper):                               │
+    │   build_sam2() → SAM2ImagePredictor(model)               │
+    │   predictor.set_image(rgb)                               │
+    │   predictor.predict(point_coords, point_labels, box)     │
+    ├──────────────────────────────────────────────────────────┤
+    │ Video mode (NOT used here, future Option B):             │
+    │   build_sam2_video_predictor()                           │
+    │   predictor.init_state(video_path)                       │
+    │   predictor.add_new_points_or_box(...)                   │
+    │   predictor.propagate_in_video(...)                      │
+    └──────────────────────────────────────────────────────────┘
+
+    Safety:
+    - If SAM2_ENABLED is false, no import/load of torch or SAM2.
+    - If checkpoint is missing, status reports exact reason.
     - segment_frame() returns None when SAM2 is unavailable.
-    - All status fields are always populated for observability.
+    - All status fields always populated.
     """
 
     def __init__(self):
-        # --- Status fields (always populated) ---
+        # --- Status fields ---
         self.sam2_enabled: bool = settings.sam2_enabled
         self.sam2_available: bool = HAS_SAM2
         self.sam2_model_loaded: bool = False
@@ -66,6 +102,11 @@ class SAM2Wrapper:
             Path(self.checkpoint).exists() if self.checkpoint else False
         )
 
+        # Mode tracking — image mode for DEV-SUBSET
+        self.sam2_mode: str = SAM2_IMAGE_MODE
+        self.temporal_consistency: bool = False
+        self.api_type: str = "image_predictor"
+
         self.predictor = None
 
         # --- Checkpoint validation ---
@@ -76,16 +117,20 @@ class SAM2Wrapper:
             )
             logger.warning(self.sam2_error_reason)
 
-        # --- Model loading (only if everything is green) ---
+        # --- Model loading (image mode) ---
         if self.sam2_available:
             try:
-                self.predictor = build_sam2_video_predictor(
-                    self.model_cfg, self.checkpoint, device=self.device
+                model = build_sam2(
+                    self.model_cfg,
+                    self.checkpoint,
+                    device=self.device,
                 )
+                self.predictor = SAM2ImagePredictor(model)
                 self.sam2_model_loaded = True
                 logger.info(
-                    f"SAM2 model loaded (device={self.device}, "
-                    f"cfg={self.model_cfg}, ckpt={self.checkpoint})"
+                    f"SAM2 image predictor loaded "
+                    f"(device={self.device}, cfg={self.model_cfg}, "
+                    f"ckpt={self.checkpoint})"
                 )
             except Exception as e:
                 self.sam2_error_reason = f"Model load failed: {e}"
@@ -97,14 +142,11 @@ class SAM2Wrapper:
     # ------------------------------------------------------------------
 
     def is_available(self) -> bool:
-        """Returns True only when SAM2 is fully ready for inference."""
+        """True only when SAM2 image predictor is fully ready."""
         return self.sam2_available and self.sam2_model_loaded
 
     def get_status(self) -> Dict[str, Any]:
-        """
-        Returns a full status dictionary for observability / diagnostics.
-        All keys are always present regardless of SAM2 state.
-        """
+        """Full status dictionary — all keys always present."""
         return {
             "sam2_enabled": self.sam2_enabled,
             "sam2_available": self.sam2_available,
@@ -115,6 +157,9 @@ class SAM2Wrapper:
             "checkpoint_exists": self.checkpoint_exists,
             "model_cfg": self.model_cfg,
             "checkpoint": self.checkpoint,
+            "sam2_mode": self.sam2_mode,
+            "temporal_consistency": self.temporal_consistency,
+            "api_type": self.api_type,
         }
 
     def segment_frame(
@@ -123,20 +168,22 @@ class SAM2Wrapper:
         prompts: Dict[str, Any],
     ) -> Optional[np.ndarray]:
         """
-        Segment a single frame using SAM2 image predictor.
+        Segment a single frame using SAM2ImagePredictor.
+
+        Uses the correct image-mode API:
+            predictor.set_image(rgb)
+            predictor.predict(point_coords, point_labels, box)
 
         Args:
-            frame: BGR image as numpy array (H, W, 3).
-            prompts: Dict from prompting.generate_prompts() with
-                     bbox, points, labels.
+            frame: BGR image (H, W, 3).
+            prompts: Dict from prompting.generate_prompts().
 
         Returns:
-            Binary mask (H, W) as uint8 with values 0/255,
-            or None if SAM2 is not available / inference fails.
+            Binary mask (H, W) uint8 0/255, or None on failure.
         """
         if not self.is_available():
             logger.error(
-                f"SAM2 is not available for frame segmentation: "
+                f"SAM2 not available for frame segmentation: "
                 f"{self.sam2_error_reason}"
             )
             return None
@@ -148,9 +195,9 @@ class SAM2Wrapper:
             # Convert BGR → RGB for SAM2
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-            # SAM2 image predictor expects specific prompt formats.
-            # This is the real inference path — only reached when
-            # SAM2_ENABLED=true + checkpoint exists + torch+sam2 installed.
+            # SAM2ImagePredictor API:
+            #   set_image(image) — encodes image features
+            #   predict(point_coords, point_labels, box, multimask_output)
             self.predictor.set_image(rgb)
 
             point_coords = None
@@ -158,7 +205,9 @@ class SAM2Wrapper:
             box_input = None
 
             if prompts.get("points"):
-                point_coords = np.array(prompts["points"], dtype=np.float32)
+                point_coords = np.array(
+                    prompts["points"], dtype=np.float32
+                )
                 point_labels = np.array(
                     prompts.get("labels", [1] * len(prompts["points"])),
                     dtype=np.int32,
@@ -174,13 +223,16 @@ class SAM2Wrapper:
                 multimask_output=True,
             )
 
-            # Select the best mask (highest score)
+            # Select highest-scoring mask
             best_idx = int(np.argmax(scores))
             binary = (masks[best_idx] > 0).astype(np.uint8) * 255
 
             elapsed = time.time() - t0
             self.sam2_inference_ran = True
-            logger.info(f"SAM2 frame segmentation completed in {elapsed:.2f}s")
+            logger.info(
+                f"SAM2 image-mode segmentation: {elapsed:.2f}s "
+                f"(score={scores[best_idx]:.3f})"
+            )
             return binary
 
         except Exception as e:
@@ -194,33 +246,30 @@ class SAM2Wrapper:
         prompts: List[Dict[str, Any]],
     ) -> Optional[Dict[int, np.ndarray]]:
         """
-        Segments a video using SAM2 given point or box prompts.
+        Video-mode segmentation stub (future Option B).
 
-        Returns:
-            dict mapping frame index → binary mask, or
-            None if SAM2 is not available (callers should fall back).
+        This would use:
+            build_sam2_video_predictor()
+            predictor.init_state(video_path)
+            predictor.add_new_points_or_box(...)
+            predictor.propagate_in_video(...)
+
+        Currently returns empty dict → triggers legacy fallback.
         """
         if not self.is_available():
             logger.error(
-                f"SAM2 is not available: {self.sam2_error_reason}. "
+                f"SAM2 not available: {self.sam2_error_reason}. "
                 "Caller should fall back to legacy."
             )
             return None
 
-        logger.info(f"Running SAM2 video segmentation on {video_path}")
-        self.sam2_inference_ran = True
-
-        # Video-level propagation requires additional SAM2 API calls.
-        # For now, return empty dict to signal "no masks produced",
-        # which triggers legacy fallback.
-        # Full video propagation will be implemented when DEV-SUBSET
-        # frame-level results justify the investment.
+        logger.info(f"SAM2 video-mode not implemented. Path: {video_path}")
         return {}
 
 
 def get_predictor() -> Optional[SAM2Wrapper]:
-    """Convenience factory — returns a wrapper only if SAM2 is available."""
-    predictor = SAM2Wrapper()
-    if predictor.is_available():
-        return predictor
+    """Convenience factory — returns wrapper only if SAM2 is available."""
+    wrapper = SAM2Wrapper()
+    if wrapper.is_available():
+        return wrapper
     return None
