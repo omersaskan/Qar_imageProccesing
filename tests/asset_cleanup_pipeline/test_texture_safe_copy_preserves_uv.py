@@ -40,7 +40,9 @@ def test_texture_safe_copy_preserves_uv_and_mtl(textured_obj, temp_dir):
         job_id="test_safe_copy",
         raw_mesh_path=mesh_path,
         profile_type=CleanupProfileType.TEXTURE_SAFE_COPY,
-        raw_texture_path=tex_path
+        raw_texture_path=tex_path,
+        cameras=[{"name": "test.jpg", "P": np.eye(3, 4)}],
+        masks={"test.jpg": np.ones((100, 100), dtype=np.uint8) * 255}
     )
     
     assert stats["cleanup_mode"] == "texture_safe_copy"

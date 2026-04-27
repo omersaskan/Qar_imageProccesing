@@ -44,7 +44,7 @@ class TestDenseMaskGeneration(unittest.TestCase):
 
         self.assertEqual(stats["dense_image_count"], 3)
         self.assertEqual(stats["dense_mask_count"], 3)
-        self.assertEqual(stats["dense_mask_exact_matches"], 3)
+        self.assertEqual(stats["dense_mask_exact_filename_matches"], 3)
         self.assertEqual(stats["dense_mask_fallback_white_count"], 0)
         self.assertEqual(stats["quality_status"], "pass")
 

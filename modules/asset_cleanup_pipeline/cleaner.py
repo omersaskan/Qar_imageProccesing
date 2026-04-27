@@ -384,6 +384,9 @@ class AssetCleaner:
             if settings.fail_on_uv_missing and not has_uv:
                 delivery_ready = False
             
+            if isolation_stats.get("object_isolation_method") == "geometric_only":
+                delivery_ready = False
+            
             logger.info("[%s] Cleanup pipeline finished. Output: %s, delivery_ready=%s", job_id, cleaned_mesh_path, delivery_ready)
             
             cleanup_stats = {

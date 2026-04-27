@@ -1,0 +1,9 @@
+workspace_phase5_final/
+  job.json
+  reconstruction.log
+  reconstruction_audit.json
+  reports/
+    coverage_report.json
+    export_metrics.json
+    quality_report.json
+    validation_report.json

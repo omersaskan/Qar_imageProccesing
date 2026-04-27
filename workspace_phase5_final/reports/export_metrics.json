@@ -1,0 +1,9 @@
+{
+  "export_status": "success",
+  "delivery_ready": true,
+  "texture_count": 1,
+  "material_count": 1,
+  "all_textured_primitives_have_texcoord_0": true,
+  "texture_applied": true,
+  "final_face_count": 5000
+}
