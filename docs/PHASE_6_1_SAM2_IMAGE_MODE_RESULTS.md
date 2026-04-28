@@ -1,36 +1,33 @@
 # Phase 6.1: SAM2 Image-Mode Results Summary
 **Date:** 2026-04-28
 
-## 1. Tiny Sweep Results
-Evaluation performed on `cap_29ab6fa1` (20 frames). Baseline Legacy IoU: **0.4502**.
+## 1. Evaluation Context
+Evaluation performed on `cap_29ab6fa1` (20 frames). 
+A visual audit revealed that **frame_0010** had a critical Ground Truth (GT) error (labeled background pillow instead of subject bottle). Corrected metrics exclude this frame.
 
-| Mode | IoU | Gain | Leakage | Jitter | Empty |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **manual_first_frame_box** | **0.4656** | **+0.0155** | **0.5283** | **200.93** | 0 |
-| center_point | 0.4538 | +0.0036 | 0.5416 | 203.32 | 0 |
-| auto | 0.4538 | +0.0036 | 0.5416 | 203.32 | 0 |
-| legacy_centroid | 0.4538 | +0.0036 | 0.5416 | 203.32 | 0 |
-| center_box | 0.4531 | +0.0030 | 0.5432 | 200.89 | 0 |
-| legacy_bbox | 0.4531 | +0.0030 | 0.5432 | 200.89 | 0 |
+## 2. Corrected Metrics (Excluding frame_0010)
+| Model | Mode | Corrected IoU | **Corrected Gain** | Corrected Leakage |
+| :--- | :--- | :--- | :--- | :--- |
+| **Legacy (Rembg)** | baseline | 0.9004 | -- | 0.0952 |
+| **SAM2.1 Tiny** | manual_box | **0.9313** | **+0.0309** | 0.0567 |
+| **SAM2.1 Large** | manual_box | 0.9125 | +0.0121 | 0.0784 |
 
-## 2. SAM2.1 Large Result
-Best Tiny prompt (`manual_first_frame_box`) was tested with Large model:
-- **SAM2.1 Large IoU**: 0.4562
-- **IoU Gain**: +0.0060
-- **Leakage Reduction**: 0.0084
+## 3. Raw Metrics (Including frame_0010, for traceability)
+| Model | Mode | Raw IoU | Raw Gain | Raw Leakage |
+| :--- | :--- | :--- | :--- | :--- |
+| **Legacy (Rembg)** | baseline | 0.4502 | -- | 0.5476 |
+| **SAM2.1 Tiny** | manual_box | 0.4656 | +0.0154 | 0.5283 |
+| **SAM2.1 Large** | manual_box | 0.4562 | +0.0060 | 0.5392 |
 
-## 3. Success Threshold Failure
-The success threshold of **IoU Gain >= +0.05** was NOT reached by any image-mode configuration.
-- Best gain: +0.0155 (Tiny, Manual Box).
+## 4. Success Threshold Failure
+The success threshold of **IoU Gain >= +0.05** was NOT reached by any image-mode configuration, even with corrected metrics.
+- Best gain: +0.0309 (Tiny, Manual Box).
 
-## 4. Decision: Image-Mode Not Accepted
-SAM2 image-mode (per-frame inference) is not accepted as the production default. The gains are marginal on this dataset, and the system is susceptible to data/GT noise.
-
-## 5. Visual Audit (frame_0010)
-A visual audit of the "failure" at frame 10 revealed a **Ground Truth error**. The GT mask labeled a background pillow, while both Legacy and SAM2 correctly segmented the foreground water bottle. This indicates that while the models are better than the metrics suggest, image-mode still lacks the temporal robustness to definitively outperform the legacy pipeline across the entire capture.
+## 5. Decision: Image-Mode Not Accepted
+SAM2 image-mode (per-frame inference) is not accepted as the production default. While accurate, the gain over the legacy pipeline is marginal (+3.1%) and does not justify the additional complexity and hardware requirements in its current form.
 
 ## 6. Recommendation: Evaluate Video-Temporal SAM2
-The next step is to pivot to **SAM2 Video Mode** (Temporal Propagation). By leveraging memory across frames, the system can maintain consistency and reject background noise more effectively.
+Proceed to **Phase 6.1B: SAM2 Video-Temporal Mode**. By leveraging temporal consistency, we expect to achieve the target robustness and >0.05 IoU gain.
 
 > [!WARNING]
 > **Depth Anything remains BLOCKED**. 

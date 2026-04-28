@@ -169,6 +169,7 @@ class Settings(BaseSettings):
     sam2_fallback_to_legacy: bool = Field(True, validation_alias="SAM2_FALLBACK_TO_LEGACY")
     sam2_review_only: bool = Field(True, validation_alias="SAM2_REVIEW_ONLY")
     sam2_prompt_mode: str = Field("center_box", validation_alias="SAM2_PROMPT_MODE")
+    sam2_mode: str = Field("image", validation_alias="SAM2_MODE")
     sam2_max_frames: int = Field(0, validation_alias="SAM2_MAX_FRAMES")
 
     # --- PHASE 6.2: DEPTH ANYTHING (scaffold only, disabled) ---
