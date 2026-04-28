@@ -19,6 +19,7 @@ The worker delegates entirely to this service; it does NOT know the internals.
 from __future__ import annotations
 
 import logging
+import json
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
