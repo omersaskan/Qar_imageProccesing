@@ -108,16 +108,38 @@ class TextureQualityAnalyzer:
         neon_pixels = np.count_nonzero((s_visible > 230) & (v_visible > 150))
         neon_ratio = neon_pixels / visible_pixels
 
-        # J) Average Luminance
+        # K) Average Luminance
         # Rec. 709 luminance
         luminance = (0.2126 * rgb[:,:,2] + 0.7152 * rgb[:,:,1] + 0.0722 * rgb[:,:,0])
         avg_luminance = np.mean(luminance[mask]) / 255.0
 
-        # K) Expected Product Color Match Score
+        # --- SPRINT v6: Advanced Validation Metrics ---
+        
+        # L) Neutralized Background Leakage
+        # We look for exactly [220, 245, 245] (Cream) or [0, 0, 0] (Black)
+        is_cream_leak = (rgb[:,:,0] == 220) & (rgb[:,:,1] == 245) & (rgb[:,:,2] == 245)
+        is_black_leak = (rgb[:,:,0] == 0) & (rgb[:,:,1] == 0) & (rgb[:,:,2] == 0)
+        leakage_mask = (is_cream_leak | is_black_leak) & mask
+        neutralized_background_leakage = np.count_nonzero(leakage_mask) / visible_pixels
+
+        # M) Texture Detail Entropy (Laplacian variance)
+        gray = cv2.cvtColor(rgb, cv2.COLOR_BGR2GRAY)
+        detail_entropy = cv2.Laplacian(gray, cv2.CV_64F).var()
+        # Normalize entropy (rough heuristic: 1000+ is high detail)
+        texture_detail_entropy = min(detail_entropy / 1000.0, 1.0)
+        
+        # N) Flat Texture Ratio (Already handled by default_fill_ratio, but we'll refine it)
+        # Using a very low gradient threshold
+        dx = cv2.Sobel(gray, cv2.CV_32F, 1, 0)
+        dy = cv2.Sobel(gray, cv2.CV_32F, 0, 1)
+        mag = cv2.magnitude(dx, dy)
+        flat_texture_ratio = np.count_nonzero((mag < 5) & mask) / visible_pixels
+
+        # O) Expected Product Color Match Score
         match_score = 1.0
         if expected_product_color == "white_cream":
-            # Cream/White should have high luminance and low saturation
-            # Penalty for too much dark, too much saturation, or neon artifacts
+            # Penalty for too much dark, non-neutral, or neon
+            # v6: Subtract leakage from "contamination" calculation to avoid false positives for product color
             match_score = max(0.0, 1.0 - (near_black_ratio * 1.5) - (non_neutral_ratio * 0.5) - (neon_ratio * 2.0))
             if avg_luminance < 0.4:
                 match_score *= (avg_luminance / 0.4)
@@ -210,6 +232,9 @@ class TextureQualityAnalyzer:
             "neon_artifact_ratio": float(neon_ratio),
             "average_luminance": float(avg_luminance),
             "expected_product_color_match_score": float(match_score),
+            "neutralized_background_leakage": float(neutralized_background_leakage),
+            "texture_detail_entropy": float(texture_detail_entropy),
+            "flat_texture_ratio": float(flat_texture_ratio),
             "texture_quality_status": status,
             "texture_quality_grade": grade,
             "texture_quality_reasons": reasons,

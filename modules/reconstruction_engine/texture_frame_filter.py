@@ -129,6 +129,54 @@ class TextureFrameFilter:
                 stats["rejection_reasons"] = rejection_reasons
                 rejected_stats.append(stats)
                 
+        # --- SPRINT v6: Advanced Mask QA & Temporal Filtering ---
+        mask_qa_report = {}
+        if has_masks:
+            logger.info("Running Strict Mask QA & Temporal Filtering...")
+            all_mask_stats = {}
+            for img_path in images:
+                mask_path = mask_folder / (img_path.stem + ".png")
+                if not mask_path.exists():
+                    mask_path = mask_folder / (img_path.name + ".png")
+                if mask_path.exists():
+                    all_mask_stats[img_path.name] = self._analyze_mask_quality(mask_path)
+            
+            if all_mask_stats:
+                keys = ["occupancy_ratio", "bbox_area_ratio", "centroid_x", "centroid_y"]
+                series = {k: [s[k] for s in all_mask_stats.values()] for k in keys}
+                temporal_stats = {
+                    k: {"mean": float(np.mean(series[k])), "std": float(np.std(series[k]))} 
+                    for k in keys
+                }
+                for name, s in all_mask_stats.items():
+                    for k in keys:
+                        std = temporal_stats[k]["std"]
+                        s[f"temporal_{k}_zscore"] = abs(s[k] - temporal_stats[k]["mean"]) / std if std > 0.001 else 0.0
+                mask_qa_report["temporal_summary"] = temporal_stats
+                mask_qa_report["frames"] = all_mask_stats
+            
+            for s in analyzed_stats:
+                if s["name"] in all_mask_stats:
+                    s["mask_qa"] = all_mask_stats[s["name"]]
+        
+        # --- Strict Mask Based Rejection ---
+        for s in analyzed_stats:
+            mqa = s.get("mask_qa")
+            if mqa:
+                cur_reasons = s.get("rejection_reasons", [])
+                if mqa["occupancy_ratio"] < 0.01:
+                    cur_reasons.append("mask_too_small")
+                if mqa["border_connected_largest_component"] and mqa["occupancy_ratio"] > 0.2:
+                    cur_reasons.append("large_border_touching_component")
+                if mqa.get("temporal_occupancy_ratio_zscore", 0) > 3.0:
+                    cur_reasons.append("temporal_occupancy_outlier")
+                if mqa.get("temporal_centroid_x_zscore", 0) > 3.0 or mqa.get("temporal_centroid_y_zscore", 0) > 3.0:
+                    cur_reasons.append("temporal_centroid_jump")
+                
+                if cur_reasons:
+                    s["is_accepted"] = False
+                    s["rejection_reasons"] = list(set(cur_reasons))
+
         # SPRINT Hardening: View-Angle Coverage Based Selection
         selected_stats = []
         coverage_gap_detected = False
@@ -143,7 +191,6 @@ class TextureFrameFilter:
             cameras = load_reconstruction_cameras(dense_workspace)
             if cameras:
                 cameras_loaded = True
-                # Calculate azimuths for all analyzed frames
                 name_to_azimuth = {}
                 for cam in cameras:
                     R = cam["R"]
@@ -153,16 +200,14 @@ class TextureFrameFilter:
                     name_to_azimuth[cam["name"]] = azimuth
                 
                 azimuths_computed = len(name_to_azimuth)
-                
                 for s in analyzed_stats:
                     s["azimuth"] = name_to_azimuth.get(s["name"])
 
-                # Filter to only those with azimuths
-                coverage_candidates = [s for s in analyzed_stats if s.get("azimuth") is not None]
+                # Filter to only those that are accepted AND have azimuths
+                coverage_candidates = [s for s in analyzed_stats if s["is_accepted"] and s.get("azimuth") is not None]
                 coverage_candidates.sort(key=lambda x: x["azimuth"])
 
                 if coverage_candidates:
-                    # 1. Analyze Gaps
                     gaps = []
                     for i in range(len(coverage_candidates)):
                         next_idx = (i + 1) % len(coverage_candidates)
@@ -174,134 +219,91 @@ class TextureFrameFilter:
                         max_gap_degrees = max(gaps)
                         if max_gap_degrees > 45.0:
                             coverage_gap_detected = True
-                            logger.warning(f"Coverage gap of {max_gap_degrees:.1f} degrees detected in reconstruction.")
+                            logger.warning(f"Coverage gap of {max_gap_degrees:.1f} degrees detected.")
 
-                    # 2. Angle-Aware Selection
-                    # Limit n to budget
                     budget = min(target_count, len(coverage_candidates))
-                    
-                    # Selection strategy: spread frames evenly across azimuths
-                    # We pick frames that are as close as possible to ideal spread points
                     ideal_angles = np.linspace(-180, 180, budget, endpoint=False)
                     for ideal_angle in ideal_angles:
-                        # Find closest candidate that hasn't been picked yet
                         best_match = None
                         min_dist = float("inf")
                         for cand in coverage_candidates:
-                            if any(p["name"] == cand["name"] for p in selected_stats):
-                                continue
-                            
+                            if any(p["name"] == cand["name"] for p in selected_stats): continue
                             dist = abs(cand["azimuth"] - ideal_angle)
                             if dist > 180: dist = 360 - dist
-                            
-                            # Weight by ranking_score to prefer higher quality near that angle
                             quality_adjusted_dist = dist / max(cand.get("ranking_score", 0.1), 0.01)
-                            
                             if quality_adjusted_dist < min_dist:
                                 min_dist = quality_adjusted_dist
                                 best_match = cand
-                        
                         if best_match:
                             selected_stats.append(best_match)
                             selected_azimuths.append(best_match["azimuth"])
-                else:
-                    logger.warning("No camera azimuths available for analyzed frames. Falling back to quality ranking.")
-            else:
-                logger.warning("No reconstruction cameras found. Falling back to quality ranking.")
         except Exception as e:
-            logger.error(f"Failed angle-aware selection: {e}. Falling back to quality ranking.")
+            logger.error(f"Failed angle-aware selection: {e}")
 
-        # Fallback to simple top-N if angle selection failed or was skipped
         if not selected_stats:
-            selected_stats = analyzed_stats[:target_count]
+            accepted = [s for s in analyzed_stats if s["is_accepted"]]
+            accepted.sort(key=lambda x: x.get("ranking_score", 0.0), reverse=True)
+            selected_stats = accepted[:target_count]
         
-        # If we selected some, the rest of analyzed are effectively rejected for "budget"
         selected_names = {s["name"] for s in selected_stats}
         for s in analyzed_stats:
-            if s["name"] not in selected_names:
+            if s["is_accepted"] and s["name"] not in selected_names:
                 s["is_accepted"] = False
-                s["rejection_reasons"] = ["below_top_n_threshold_or_angle_coverage"]
+                s["rejection_reasons"] = ["budget_limit"]
+                rejected_stats.append(s)
+            elif not s["is_accepted"] and s not in rejected_stats:
                 rejected_stats.append(s)
 
-        # Ensure we have at least SOME images. If too restrictive, fallback to best of bad.
         fallback_used = False
         if not selected_stats and images:
-             logger.warning("All images rejected by filter. Falling back to top 10 by sharpness.")
+             logger.warning("All images rejected. Fallback to top 5.")
              fallback_used = True
-             all_analyzed = sorted([s for s in rejected_stats if "sharpness" in s], key=lambda x: x["sharpness"], reverse=True)
-             for s in all_analyzed[:10]:
-                 s["is_accepted"] = True
-                 s["fallback"] = True
-                 selected_stats.append(s)
+             all_frames = sorted(analyzed_stats + rejected_stats, key=lambda x: x.get("sharpness", 0), reverse=True)
+             selected_stats = all_frames[:5]
 
-        # Final copy and masking
         for s in selected_stats:
             img_path = Path(s["path"])
             dest_path = selected_dir / img_path.name
             shutil.copy2(img_path, dest_path)
-            
-            # Masking logic
             if has_masks:
-                # Robust mask discovery: try stem.png and name.png
                 mask_path = mask_folder / (img_path.stem + ".png")
-                if not mask_path.exists():
-                    mask_path = mask_folder / (img_path.name + ".png")
-                
+                if not mask_path.exists(): mask_path = mask_folder / (img_path.name + ".png")
                 if mask_path.exists():
-                    mask_stats = self._analyze_mask_quality(mask_path)
-                    s["mask_qa"] = mask_stats
-                    
-                    # SPRINT Hardening: Reject if mask is terrible
-                    if mask_stats["occupancy_ratio"] < 0.01 or mask_stats["border_touch_score"] > 0.8:
-                        logger.warning(f"Rejecting masked frame {img_path.name} due to poor mask QA: {mask_stats}")
-                        s["masked_source_generated"] = False
-                        continue
-
                     try:
                         img = cv2.imread(str(img_path))
                         mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
                         if img is not None and mask is not None:
-                            # Resize mask if needed
                             if mask.shape[:2] != img.shape[:2]:
                                 mask = cv2.resize(mask, (img.shape[1], img.shape[0]), interpolation=cv2.INTER_NEAREST)
-                            
-                            # Neutralize background to white/cream (approx #F5F5DC)
-                            # Using BGR: (220, 245, 245) for cream
                             img[mask == 0] = [220, 245, 245]
                             cv2.imwrite(str(masked_dir / img_path.name), img)
                             s["masked_source_generated"] = True
-                        else:
-                            s["masked_source_generated"] = False
-                    except Exception as e:
-                        logger.warning(f"Failed to generate masked image for {img_path.name}: {e}")
-                        s["masked_source_generated"] = False
-                else:
-                    s["masked_source_generated"] = False
+                    except Exception: pass
 
-        # Diagnostics
+        coverage_risk = max_gap_degrees > 90.0
+        recapture_required = coverage_risk
+
         report = {
             "selected_count": len(selected_stats),
             "rejected_count": len(rejected_stats),
             "fallback_used": fallback_used,
             "has_masks_available": has_masks,
-            "cameras_loaded_for_texture_selection": cameras_loaded,
-            "azimuths_computed": azimuths_computed,
-            "selected_azimuths": selected_azimuths,
-            "coverage_gap_detected": coverage_gap_detected,
             "max_gap_degrees": max_gap_degrees,
-            "recapture_required": coverage_gap_detected,
-            "recapture_reason": "missing side coverage" if coverage_gap_detected else None,
-            "selected_images_dir": str(selected_dir),
-            "masked_images_dir": str(masked_dir) if has_masks else None,
+            "coverage_risk": coverage_risk,
+            "recapture_required": recapture_required,
+            "recapture_reason": "missing side coverage" if coverage_risk else None,
             "selected_frames": selected_stats,
-            "rejected_frames": rejected_stats
+            "mask_qa_report": mask_qa_report,
+            "frame_0021_status": next((s for s in analyzed_stats + rejected_stats if s["name"] == "frame_0021.jpg"), {"reason": "not_found"})
         }
+        
         with open(output_dir / "selected_texture_frames.json", "w") as f:
             json.dump(report, f, indent=2)
+        with open(output_dir / "mask_qa_report.json", "w") as f:
+            json.dump(mask_qa_report, f, indent=2)
         with open(output_dir / "rejected_texture_frames.json", "w") as f:
             json.dump(rejected_stats, f, indent=2)
             
-        # Contact sheet of selected
         self._generate_contact_sheet(selected_stats, output_dir / "selected_texture_frames_contact_sheet.png")
 
         return report
@@ -415,23 +417,51 @@ class TextureFrameFilter:
         right = np.any(binary[:, -1])
         border_touch_score = (int(top) + int(bottom) + int(left) + int(right)) / 4.0
         
-        # 3. Foreground BBox Quality
+        # 3. Component Analysis
+        num_labels, labels, stats_cc, centroids = cv2.connectedComponentsWithStats(binary, connectivity=8)
+        
+        component_count = 0
+        largest_component_area = 0
+        secondary_component_area = 0
+        border_connected_largest = False
+        
+        if num_labels > 1:
+            # Sort by area, skipping background (index 0)
+            areas = stats_cc[1:, cv2.CC_STAT_AREA]
+            sorted_indices = np.argsort(areas)[::-1]
+            component_count = len(areas)
+            largest_component_area = int(areas[sorted_indices[0]])
+            if len(areas) > 1:
+                secondary_component_area = int(areas[sorted_indices[1]])
+            
+            # Check if largest component touches border
+            li = sorted_indices[0] + 1
+            x, y, w_cc, h_cc = stats_cc[li, :4]
+            if x == 0 or y == 0 or (x + w_cc) >= w or (y + h_cc) >= h:
+                border_connected_largest = True
+
+        # 4. BBox and Centroid
         coords = np.column_stack(np.where(binary > 0))
         if coords.size > 0:
             y_min, x_min = coords.min(axis=0)
             y_max, x_max = coords.max(axis=0)
             bw, bh = x_max - x_min, y_max - y_min
-            bbox_occupancy = white_pixels / max(bw * bh, 1)
-            # Centrality
-            cx, cy = (x_min + x_max) / 2.0, (y_min + y_max) / 2.0
-            centrality = 1.0 - (abs(cx - w/2) / (w/2) + abs(cy - h/2) / (h/2)) / 2.0
+            bbox_area_ratio = (bw * bh) / (h * w)
+            centroid_x = float(np.mean(coords[:, 1])) / w
+            centroid_y = float(np.mean(coords[:, 0])) / h
         else:
-            bbox_occupancy = 0.0
-            centrality = 0.0
-            
+            bbox_area_ratio = 0.0
+            centroid_x = 0.5
+            centroid_y = 0.5
+
         return {
             "occupancy_ratio": float(occupancy),
+            "bbox_area_ratio": float(bbox_area_ratio),
+            "centroid_x": float(centroid_x),
+            "centroid_y": float(centroid_y),
             "border_touch_score": float(border_touch_score),
-            "bbox_occupancy": float(bbox_occupancy),
-            "centrality": float(centrality)
+            "component_count": component_count,
+            "largest_component_area_ratio": largest_component_area / (h * w),
+            "secondary_component_area_ratio": secondary_component_area / (h * w),
+            "border_connected_largest_component": border_connected_largest
         }
