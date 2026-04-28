@@ -47,7 +47,13 @@ Assets with < 50% primary component share are now automatically rejected, preven
 
 ## 5. Verification Status
 - **Regression Tests**: Passed.
-- **E2E Job `legacy_cap_29ab6fa1_compare_v3`**: Running (Retrying with denser frames).
+- **E2E Job `legacy_cap_29ab6fa1_compare_v3`**: 
+  - **Status**: Running (`patch_match_stereo`).
+  - **Empirical Evidence**: 
+    - `Source mask dimension matches (pre-resize): 0` (Confirmed mismatch detected).
+    - `Dense mask dimension matches (post-write): 54` (Confirmed auto-resize successful).
+    - `Resized masks: 54` (Confirmed fix applied to all frames).
+  - **Selected Camera Model**: PINHOLE (Undistorted dense).
 
 ---
-*Status: Verification in Progress.*
+*Status: Verification in Progress (Reconstruction Step).*
