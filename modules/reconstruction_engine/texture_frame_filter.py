@@ -17,7 +17,7 @@ class TextureFrameFilter:
         self.max_luminance = 245.0 # avoid blown out
         self.min_mask_coverage = 0.05 # 5% of image
         
-    def filter_session_images(self, image_folder: Path, output_dir: Path, expected_color: str = "unknown") -> Dict[str, Any]:
+    def filter_session_images(self, image_folder: Path, output_dir: Path, expected_color: str = "unknown", target_count: int = 20) -> Dict[str, Any]:
         """
         Analyzes and filters images for texturing.
         Returns path to filtered images directory and metadata.
@@ -129,18 +129,98 @@ class TextureFrameFilter:
                 stats["rejection_reasons"] = rejection_reasons
                 rejected_stats.append(stats)
                 
-        # SPRINT 5C: Rank and select top N
-        analyzed_stats.sort(key=lambda x: x.get("ranking_score", 0.0), reverse=True)
-        
-        # Hard limit: top 20 frames to avoid over-sampling background
-        target_count = 20
-        selected_stats = analyzed_stats[:target_count]
+        # SPRINT Hardening: View-Angle Coverage Based Selection
+        selected_stats = []
+        coverage_gap_detected = False
+        max_gap_degrees = 0.0
+
+        try:
+            from modules.asset_cleanup_pipeline.camera_projection import load_reconstruction_cameras
+            # Try to load cameras from the same job structure
+            # output_dir is likely the job_dir or a subfolder of it
+            recon_root = output_dir
+            if not (recon_root / "sparse").exists() and not (recon_root / "dense").exists():
+                # Try parent if we are in a subfolder
+                recon_root = output_dir.parent
+            
+            cameras = load_reconstruction_cameras(recon_root)
+            if cameras:
+                # Calculate azimuths for all analyzed frames
+                name_to_azimuth = {}
+                for cam in cameras:
+                    R = cam["R"]
+                    t = cam["t"]
+                    C = -R.T @ t
+                    azimuth = float(np.degrees(np.arctan2(C[0], C[2])))
+                    name_to_azimuth[cam["name"]] = azimuth
+                
+                for s in analyzed_stats:
+                    s["azimuth"] = name_to_azimuth.get(s["name"])
+
+                # Filter to only those with azimuths
+                coverage_candidates = [s for s in analyzed_stats if s.get("azimuth") is not None]
+                coverage_candidates.sort(key=lambda x: x["azimuth"])
+
+                if coverage_candidates:
+                    # 1. Analyze Gaps
+                    gaps = []
+                    for i in range(len(coverage_candidates)):
+                        next_idx = (i + 1) % len(coverage_candidates)
+                        diff = coverage_candidates[next_idx]["azimuth"] - coverage_candidates[i]["azimuth"]
+                        if diff < 0: diff += 360
+                        gaps.append(diff)
+                    
+                    if gaps:
+                        max_gap_degrees = max(gaps)
+                        if max_gap_degrees > 45.0:
+                            coverage_gap_detected = True
+                            logger.warning(f"Coverage gap of {max_gap_degrees:.1f} degrees detected in reconstruction.")
+
+                    # 2. Angle-Aware Selection
+                    # Limit n to budget
+                    budget = min(target_count, len(coverage_candidates))
+                    
+                    # Selection strategy: spread frames evenly across azimuths
+                    # We pick frames that are as close as possible to ideal spread points
+                    ideal_angles = np.linspace(-180, 180, budget, endpoint=False)
+                    for ideal_angle in ideal_angles:
+                        # Find closest candidate that hasn't been picked yet
+                        best_match = None
+                        min_dist = float("inf")
+                        for cand in coverage_candidates:
+                            if any(p["name"] == cand["name"] for p in selected_stats):
+                                continue
+                            
+                            dist = abs(cand["azimuth"] - ideal_angle)
+                            if dist > 180: dist = 360 - dist
+                            
+                            # Weight by ranking_score to prefer higher quality near that angle
+                            quality_adjusted_dist = dist / max(cand.get("ranking_score", 0.1), 0.01)
+                            
+                            if quality_adjusted_dist < min_dist:
+                                min_dist = quality_adjusted_dist
+                                best_match = cand
+                        
+                        if best_match:
+                            selected_stats.append(best_match)
+                else:
+                    logger.warning("No camera azimuths available for analyzed frames. Falling back to quality ranking.")
+            else:
+                logger.warning("No reconstruction cameras found. Falling back to quality ranking.")
+        except Exception as e:
+            logger.error(f"Failed angle-aware selection: {e}. Falling back to quality ranking.")
+
+        # Fallback to simple top-N if angle selection failed or was skipped
+        if not selected_stats:
+            selected_stats = analyzed_stats[:target_count]
         
         # If we selected some, the rest of analyzed are effectively rejected for "budget"
-        for s in analyzed_stats[target_count:]:
-            s["is_accepted"] = False
-            s["rejection_reasons"] = ["below_top_n_threshold"]
-            rejected_stats.append(s)
+        selected_names = {s["name"] for s in selected_stats}
+        for s in analyzed_stats:
+            if s["name"] not in selected_names:
+                s["is_accepted"] = False
+                s["rejection_reasons"] = ["below_top_n_threshold_or_angle_coverage"]
+                rejected_stats.append(s)
 
         # Ensure we have at least SOME images. If too restrictive, fallback to best of bad.
         fallback_used = False
@@ -203,6 +283,10 @@ class TextureFrameFilter:
             "rejected_count": len(rejected_stats),
             "fallback_used": fallback_used,
             "has_masks_available": has_masks,
+            "coverage_gap_detected": coverage_gap_detected,
+            "max_gap_degrees": max_gap_degrees,
+            "recapture_required": coverage_gap_detected,
+            "recapture_reason": "missing side coverage" if coverage_gap_detected else None,
             "selected_images_dir": str(selected_dir),
             "masked_images_dir": str(masked_dir) if has_masks else None,
             "selected_frames": selected_stats,

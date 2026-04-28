@@ -238,18 +238,13 @@ class OpenMVSTexturer:
             else:
                 from .texture_frame_filter import TextureFrameFilter
                 filter = TextureFrameFilter()
-                filter_results = filter.filter_session_images(image_folder, output_dir, expected_color=expected_color)
+                filter_results = filter.filter_session_images(image_folder, output_dir, expected_color=expected_color, target_count=top_n or max_selected_frames)
                 
                 selected_frames = filter_results.get("selected_frames", [])
                 has_masks_available = filter_results.get("has_masks_available", False)
                 masked_images_dir = Path(filter_results["masked_images_dir"]) if filter_results.get("masked_images_dir") else None
                 
-                limit_n = top_n or max_selected_frames
-                if len(selected_frames) > limit_n:
-                    log_file.write(f"Limiting to top {limit_n} frames for compatible folder.\n")
-                    selected_names = [s["name"] for s in selected_frames[:limit_n]]
-                else:
-                    selected_names = [s["name"] for s in selected_frames]
+                selected_names = [s["name"] for s in selected_frames]
                 
                 self._create_compatible_image_folder(
                     original_images_dir=image_folder,

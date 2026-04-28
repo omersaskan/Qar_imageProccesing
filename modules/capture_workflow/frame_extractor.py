@@ -161,7 +161,7 @@ class FrameExtractor:
         import hashlib
         
         # Calculate manifest hash for retry safety
-        manifest_data = f"{video_path}_{self.thresholds.min_similarity_score}_{self.thresholds.min_sharpness_score}"
+        manifest_data = f"{video_path}_{self.thresholds.min_similarity_score}_{self.thresholds.min_blur_score}"
         current_hash = hashlib.md5(manifest_data.encode()).hexdigest()
         
         if os.getenv("SKIP_EXTRACTION") == "true":
