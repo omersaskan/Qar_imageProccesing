@@ -463,24 +463,28 @@ class MeshIsolator:
             best_faces = len(ranked[0][2].faces)
             total_faces_ranked = sum(len(r[2].faces) for r in ranked)
             
-            # SPRINT Hardening: min_face_share guard (1%)
-            # If top-score component is < 1% of final mesh, and we have a much larger component
+            # SPRINT Hardening: primary_assignment guard
+            # If top-score component is a tiny fragment (< 5% of ranked faces), 
+            # check if there's a significantly larger component that is also strong.
             primary_idx_in_ranked = 0
             primary_assignment_result = "normal"
             
-            if best_faces < total_faces_ranked * 0.01:
-                # Find largest
+            if best_faces < total_faces_ranked * 0.05:
+                # Find largest component
                 largest_idx_in_ranked = int(np.argmax([len(r[2].faces) for r in ranked]))
                 largest_faces = len(ranked[largest_idx_in_ranked][2].faces)
+                largest_score = ranked[largest_idx_in_ranked][0]
                 
-                if largest_faces > total_faces_ranked * 0.50:
-                    # Conflict! Tiny fragment has higher score than the main body.
+                if largest_faces > best_faces * 10 and largest_score > 0.40:
+                    # Conflict! Tiny fragment has higher score but large component exists.
                     primary_assignment_result = "primary_assignment_conflict"
                     logger.warning(f"Primary assignment conflict: Tiny component (idx={ranked[0][1]}, faces={best_faces}) has higher score than main body (idx={ranked[largest_idx_in_ranked][1]}, faces={largest_faces}). Swapping primary.")
                     primary_idx_in_ranked = largest_idx_in_ranked
             
             primary_comp = ranked[primary_idx_in_ranked][2]
             best_scores = ranked[primary_idx_in_ranked][3]
+            best_score = ranked[primary_idx_in_ranked][0]
+            best_faces = len(primary_comp.faces)
             kept_components = [primary_comp]
             all_scores[ranked[primary_idx_in_ranked][1]]["decision"] = "kept_primary"
             
