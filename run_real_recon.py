@@ -19,6 +19,7 @@ from modules.export_pipeline.glb_exporter import GLBExporter
 from modules.qa_validation.validator import AssetValidator
 from modules.integration_flow import IntegrationFlow
 from modules.shared_contracts.models import ReconstructionJob
+from modules.operations.texturing_service import TexturingService
 import trimesh
 from modules.asset_cleanup_pipeline.camera_projection import load_reconstruction_cameras, load_reconstruction_masks
 
@@ -92,7 +93,8 @@ def run():
     logger.info("--- 3. Running Cleanup ---")
     
     # Load guidance data from the successful attempt
-    best_attempt_dir = Path(manifest.mesh_path).parent.parent
+    # Fix: selected_attempt_dir is the parent of the mesh file
+    best_attempt_dir = Path(manifest.mesh_path).parent
     logger.info(f"Loading guidance data from: {best_attempt_dir}")
     
     cameras = load_reconstruction_cameras(best_attempt_dir)
@@ -103,22 +105,26 @@ def run():
     point_cloud = None
     # For OpenMVS, use project_dense.ply; for COLMAP, use fused.ply
     pc_paths = [
-        best_attempt_dir / "dense" / "project_dense.ply",
-        best_attempt_dir / "dense" / "fused.ply"
+        best_attempt_dir / "dense" / "fused.ply",
+        best_attempt_dir / "dense" / "project_dense.ply"
     ]
     for pc_path in pc_paths:
         if pc_path.exists():
             try:
                 point_cloud = trimesh.load(str(pc_path))
-                logger.info(f"Loaded guidance point cloud: {pc_path.name}")
-                break
+                if isinstance(point_cloud, trimesh.points.PointCloud):
+                    logger.info(f"Loaded guidance point cloud: {pc_path.name}")
+                    break
+                else:
+                    point_cloud = None
             except Exception as pc_err:
                 logger.warning(f"Failed to load point cloud {pc_path.name}: {pc_err}")
 
+    logger.info("Cleanup Guidance: cameras=%s, masks=%s, point_cloud=%s", 
+                len(cameras) if cameras else 0, len(masks) if masks else 0, bool(point_cloud))
+
     cleaner = AssetCleaner(data_root=str(ROOT / "data"))
     try:
-        # Use OpenMVS output directly
-        # If it was textured, OpenMVS output is textured.
         metadata, cleanup_stats, cleaned_mesh_path = cleaner.process_cleanup(
             job_id,
             manifest.mesh_path,
@@ -128,11 +134,45 @@ def run():
             masks=masks,
             point_cloud=point_cloud
         )
-        logger.info("Cleanup successful.")
+        logger.info(f"Cleanup successful. Isolation Method: {cleanup_stats.get('isolation', {}).get('object_isolation_method')}")
     except Exception as e:
         logger.error(f"Cleanup failed: {e}")
         return
+
+    # 3.1. Texturing (Task 5)
+    logger.info("--- 3.1. Running Texturing ---")
+    texturing_service = TexturingService()
+    texturing_result = texturing_service.run(
+        manifest=manifest,
+        cleanup_stats=cleanup_stats,
+        pivot_offset=metadata.pivot_offset,
+        cleaned_mesh_path=cleaned_mesh_path,
+        expected_color=settings.expected_product_color
+    )
+    manifest = texturing_result.manifest
+    cleaned_mesh_path = texturing_result.cleaned_mesh_path
     
+    # Task 6: Fail explicitly if REQUIRE_TEXTURED_OUTPUT=true and texturing failed
+    if settings.require_textured_output and texturing_result.texturing_status in ["degraded", "absent"]:
+        reason = f"TEXTURING_REQUIRED_BUT_MISSING: Status '{texturing_result.texturing_status}'"
+        log_path = manifest.texturing_log_path or "unknown"
+        logger.error(f"{reason} (Log: {log_path})")
+        return
+
+    # Task 7: Strict Gating
+    isolation_method = cleanup_stats.get("isolation", {}).get("object_isolation_method")
+    if isolation_method == "geometric_only":
+        logger.error("Gating: ABORTED - Isolation fell back to geometric_only because no guidance.")
+        return
+        
+    texture_count = 0
+    if texturing_result.texturing_status == "real" and texturing_result.texture_atlas_paths:
+        texture_count = len(texturing_result.texture_atlas_paths)
+    
+    if settings.require_textured_output and texture_count == 0:
+        logger.error("Gating: ABORTED - texture_count=0 while REQUIRE_TEXTURED_OUTPUT=true")
+        return
+
     # 4. Export
     logger.info("--- 4. Running Export ---")
     exporter = GLBExporter()
@@ -140,12 +180,21 @@ def run():
     export_dir.mkdir(parents=True, exist_ok=True)
     export_output = export_dir / f"{job_id}.glb"
     
+    primary_texture = manifest.texture_atlas_paths[0] if manifest.texture_atlas_paths else manifest.texture_path
+    texture_path = cleanup_stats.get("cleaned_texture_path") or primary_texture
+    
     export_report = exporter.export(
         cleaned_mesh_path,
         str(export_output),
         profile_name="mobile_high",
-        texture_path=cleanup_stats.get("cleaned_texture_path")
+        texture_path=texture_path if (texture_path and Path(texture_path).exists()) else None,
+        metadata=metadata
     )
+    
+    if export_report.get("export_status") not in ["success", "review"]:
+        logger.error(f"Gating: ABORTED - Export status '{export_report.get('export_status')}' is invalid.")
+        return
+        
     logger.info("Export complete.")
     
     # 5. Validation
@@ -154,8 +203,7 @@ def run():
     validator_input = IntegrationFlow.map_metadata_to_validator_input(
         metadata,
         cleanup_stats=cleanup_stats,
-        export_report=export_report,
-        filtering_status="object_isolated"
+        export_report=export_report
     )
     
     validation_report = validator.validate(job_id, validator_input)
@@ -171,3 +219,4 @@ def run():
 
 if __name__ == "__main__":
     run()
+

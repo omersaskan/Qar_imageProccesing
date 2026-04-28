@@ -694,7 +694,7 @@ class IngestionWorker:
         point_cloud = None
         
         try:
-            workspace_path = Path(manifest.mesh_path).parent.parent
+            workspace_path = Path(manifest.mesh_path).parent
             if workspace_path.exists():
                 cameras = load_reconstruction_cameras(workspace_path)
                 if cameras:
