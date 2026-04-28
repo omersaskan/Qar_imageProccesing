@@ -42,6 +42,7 @@ def run():
     parser.add_argument("--capture-id", type=str, default="cap_29ab6fa1")
     parser.add_argument("--job-id", type=str)
     parser.add_argument("--session-id", type=str, default="real_session_001")
+    parser.add_argument("--skip-extraction", action="store_true", help="Skip extraction if frames already exist")
     args = parser.parse_args()
 
     capture_id = args.capture_id
@@ -57,14 +58,18 @@ def run():
     
     # 1. Extraction
     logger.info("--- 1. Extracting Frames ---")
-    extractor = FrameExtractor()
     frames_dir = work_dir / "frames"
-    try:
-        frames, extraction_report = extractor.extract_keyframes(video_path, str(frames_dir))
-        logger.info(f"Extracted {len(frames)} frames. Report saved to denser_extraction_report.json")
-    except Exception as e:
-        logger.error(f"Extraction failed: {e}")
-        return
+    if args.skip_extraction and frames_dir.exists() and any(frames_dir.glob("*.jpg")):
+        logger.info("Found existing frames and --skip-extraction is set. Skipping extraction.")
+        frames = sorted([str(f) for f in frames_dir.glob("*.jpg")])
+    else:
+        extractor = FrameExtractor()
+        try:
+            frames, extraction_report = extractor.extract_keyframes(video_path, str(frames_dir))
+            logger.info(f"Extracted {len(frames)} frames. Report saved to denser_extraction_report.json")
+        except Exception as e:
+            logger.error(f"Extraction failed: {e}")
+            return
     
     # 2. Reconstruction
     logger.info("--- 2. Running Reconstruction ---")

@@ -157,6 +157,14 @@ class FrameExtractor:
         )
 
     def extract_keyframes(self, video_path: str, output_dir: str) -> tuple[List[str], Dict[str, Any]]:
+        import os
+        if os.getenv("SKIP_EXTRACTION") == "true":
+            output_path = Path(output_dir)
+            existing_frames = sorted([str(f) for f in output_path.glob("*.jpg")])
+            if existing_frames:
+                logger.info(f"SKIP_EXTRACTION=true: Found {len(existing_frames)} existing frames in {output_dir}. Skipping extraction.")
+                return existing_frames, {"status": "skipped", "count": len(existing_frames)}
+
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
             raise ValueError(f"Could not open video file: {video_path}")
