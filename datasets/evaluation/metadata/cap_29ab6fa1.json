@@ -1,4 +1,3 @@
-
 {
   "video_id": "cap_29ab6fa1",
   "object_class": "Water Bottle",
@@ -9,17 +8,21 @@
     {
       "frame_index": 0,
       "timestamp": "00:00.0",
-      "gt_mask_path": "ground_truth_masks/cap_29ab6fa1_f0.png"
+      "gt_mask_path": "ground_truth_masks/cap_29ab6fa1_f0.png",
+      "is_valid": true
     },
     {
       "frame_index": 10,
       "timestamp": "00:00.3",
-      "gt_mask_path": "ground_truth_masks/cap_29ab6fa1_f10.png"
+      "gt_mask_path": "ground_truth_masks/cap_29ab6fa1_f10.png",
+      "is_valid": false,
+      "invalid_reason": "wrong_gt_mask_background_pillow"
     },
     {
       "frame_index": 20,
       "timestamp": "00:00.6",
-      "gt_mask_path": "ground_truth_masks/cap_29ab6fa1_f20.png"
+      "gt_mask_path": "ground_truth_masks/cap_29ab6fa1_f20.png",
+      "is_valid": true
     }
   ]
 }

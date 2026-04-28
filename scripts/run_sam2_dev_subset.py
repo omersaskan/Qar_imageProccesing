@@ -5,15 +5,10 @@ SAM2 Dev-Subset Evaluation Script
 Compares SAM2 (image mode) vs legacy segmentation on a dev-subset.
 Supports prompt strategy sweeps and automated reporting.
 
-Usage:
-    python scripts/run_sam2_dev_subset.py --frames-dir data/captures/cap_29ab6fa1/frames \
-        --gt-dir datasets/evaluation/ground_truth_masks \
-        --output-dir results/sam2_live_cap_29ab6fa1 --sweep
-
-Decision logic:
-- If SAM2 unavailable: report unavailable, do NOT fail hard.
-- If SAM2 improves IoU by >= 0.05 and leakage decreases: recommend continuing.
-- If SAM2 does not improve: do NOT proceed to Depth Anything.
+Features:
+- GT Metadata awareness: excludes invalid frames from corrected metrics.
+- Phase isolation: forces settings for legacy/SAM2 phases.
+- Sweep support: tests multiple prompt modes.
 """
 
 import argparse
@@ -80,10 +75,8 @@ def compute_temporal_stability(masks_list):
     bbox_centers = [mask_bbox_center(m) for m in masks_list]
     empty_count = sum(1 for a in areas if a == 0)
 
-    # Area std
     area_std = float(np.std(areas)) if len(areas) > 1 else 0.0
 
-    # Centroid jitter (mean frame-to-frame distance)
     centroid_dists = []
     for i in range(1, len(centroids)):
         if centroids[i] is not None and centroids[i - 1] is not None:
@@ -92,7 +85,6 @@ def compute_temporal_stability(masks_list):
             centroid_dists.append(float(np.sqrt(dx ** 2 + dy ** 2)))
     centroid_jitter = float(np.mean(centroid_dists)) if centroid_dists else 0.0
 
-    # Bbox center jitter
     bbox_dists = []
     for i in range(1, len(bbox_centers)):
         if bbox_centers[i] is not None and bbox_centers[i - 1] is not None:
@@ -111,13 +103,20 @@ def compute_temporal_stability(masks_list):
 
 
 # -------------------------------------------------------------------
-# GT name mapping
+# GT Metadata handling
 # -------------------------------------------------------------------
 
+def load_gt_metadata(capture_id: str, gt_dir: Path) -> Dict[str, Any]:
+    """Load GT metadata for a capture to identify invalid frames."""
+    meta_path = gt_dir.parent / "metadata" / f"{capture_id}.json"
+    if meta_path.exists():
+        with open(meta_path, "r") as f:
+            return json.load(f)
+    return {}
+
+
 def build_gt_map(gt_dir: Path):
-    """
-    Build mapping from frame stem (e.g. 'frame_0000') to GT mask.
-    """
+    """Build mapping from frame stem (e.g. 'frame_0000') to GT mask."""
     gt_masks = {}
     for gt_file in sorted(gt_dir.glob("*.png")):
         m = re.search(r"_f(\d+)\.png$", gt_file.name)
@@ -125,7 +124,7 @@ def build_gt_map(gt_dir: Path):
             idx = int(m.group(1))
             frame_stem = f"frame_{idx:04d}"
             gt_masks[frame_stem] = cv2.imread(str(gt_file), cv2.IMREAD_GRAYSCALE)
-            logger.info(f"GT mapped: {gt_file.name} → {frame_stem}")
+            logger.info(f"GT mapped: {gt_file.name} \u2192 {frame_stem}")
     return gt_masks
 
 
@@ -149,11 +148,21 @@ def run_evaluation(args):
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     
+    # Resolve capture ID
+    capture_id = args.capture_id
+    if not capture_id and args.frames_dir:
+        # Try to infer capture_id from frames_dir path: .../captures/<id>/...
+        parts = Path(args.frames_dir).parts
+        if "captures" in parts:
+            idx = parts.index("captures")
+            if idx + 1 < len(parts):
+                capture_id = parts[idx + 1]
+
     # Resolve frames directory
     if args.frames_dir:
         frames_dir = Path(args.frames_dir)
-    elif args.capture_id:
-        frames_dir = Path(settings.data_root) / "captures" / args.capture_id / "frames"
+    elif capture_id:
+        frames_dir = Path(settings.data_root) / "captures" / capture_id / "frames"
     else:
         logger.error("Provide --frames-dir or --capture-id")
         sys.exit(1)
@@ -163,19 +172,27 @@ def run_evaluation(args):
         sys.exit(1)
 
     frame_files = sorted(list(frames_dir.glob("*.jpg")) + list(frames_dir.glob("*.png")))
-    if not frame_files:
-        logger.error(f"No frames found in {frames_dir}")
-        sys.exit(1)
-
-    max_frames = min(len(frame_files), 20)
+    max_frames = min(len(frame_files), args.max_frames)
     frame_files = frame_files[:max_frames]
-    logger.info(f"Evaluating {len(frame_files)} frames from {frames_dir}")
+    logger.info(f"Evaluating {len(frame_files)} frames from {frames_dir} (Capture: {capture_id})")
 
-    # Load GT masks
+    # Load GT masks and Metadata
     gt_masks = {}
+    gt_metadata = {}
+    invalid_frames = []
     if args.gt_dir:
-        gt_masks = build_gt_map(Path(args.gt_dir))
-    logger.info(f"GT masks available: {len(gt_masks)} ({list(gt_masks.keys())})")
+        gt_dir = Path(args.gt_dir)
+        gt_masks = build_gt_map(gt_dir)
+        if capture_id:
+            gt_metadata = load_gt_metadata(capture_id, gt_dir)
+            
+            # Identify invalid frames
+            for frame_info in gt_metadata.get("validation_frames", []):
+                if not frame_info.get("is_valid", True):
+                    f_idx = frame_info["frame_index"]
+                    f_stem = f"frame_{f_idx:04d}"
+                    invalid_frames.append(f_stem)
+                    logger.warning(f"GT Frame {f_stem} marked INVALID: {frame_info.get('invalid_reason')}")
 
     # Deriving manual prompt from frame_0000 GT if available
     manual_first_frame_box = None
@@ -191,15 +208,14 @@ def run_evaluation(args):
 
     all_sweep_results = []
 
-    # --- PHASE 1: LEGACY BASELINE (Run once) ---
+    # --- PHASE 1: LEGACY BASELINE ---
     logger.info("Running legacy baseline...")
     with patch.object(settings, "segmentation_method", "legacy"), \
          patch.object(settings, "sam2_enabled", False):
         
         legacy_masker = ObjectMasker()
-        legacy_ious, legacy_leakages = [], []
-        legacy_mask_list = []
         legacy_per_frame = []
+        legacy_mask_list = []
         t0 = time.time()
 
         for f_path in frame_files:
@@ -212,46 +228,34 @@ def run_evaluation(args):
             if stem in gt_masks:
                 iou = compute_iou(mask, gt_masks[stem])
                 leak = compute_leakage(mask, gt_masks[stem])
-                legacy_ious.append(iou)
-                legacy_leakages.append(leak)
                 entry["iou"] = round(iou, 4)
                 entry["leakage"] = round(leak, 4)
+                entry["gt_valid"] = stem not in invalid_frames
+                if stem in invalid_frames:
+                    entry["invalid_reason"] = next((f.get("invalid_reason") for f in gt_metadata.get("validation_frames", []) if f["frame_index"] == int(stem.split("_")[1])), "unknown")
             legacy_per_frame.append(entry)
 
         legacy_time = time.time() - t0
-        legacy_iou = float(np.mean(legacy_ious)) if legacy_ious else 0.0
-        legacy_leakage = float(np.mean(legacy_leakages)) if legacy_leakages else 0.0
-        legacy_stability = compute_temporal_stability(legacy_mask_list)
 
     # --- PHASE 2: SAM2 SWEEP ---
     for mode in prompt_modes:
         logger.info(f"--- Testing SAM2 mode: {mode} ---")
-        
         with patch.object(settings, "segmentation_method", "sam2"), \
              patch.object(settings, "sam2_enabled", True):
             
             try:
                 from modules.ai_segmentation.sam2_wrapper import SAM2Wrapper
                 sam2_wrapper = SAM2Wrapper()
-                if not sam2_wrapper.is_available():
-                    logger.warning(f"SAM2 unavailable for mode {mode}: {sam2_wrapper.sam2_error_reason}")
-                    continue
-            except Exception as e:
-                logger.error(f"SAM2Wrapper init failed: {e}")
-                continue
+                if not sam2_wrapper.is_available(): continue
+            except Exception: continue
 
             sam2_mask_list = []
-            sam2_ious, sam2_leakages = [], []
             sam2_per_frame = []
             t0 = time.time()
 
             for i, f_path in enumerate(frame_files):
                 frame = cv2.imread(str(f_path))
                 h, w = frame.shape[:2]
-                
-                # Resolve prompt strategy for this mode
-                current_legacy_mask = legacy_mask_list[i]
-                current_legacy_meta = legacy_per_frame[i]
                 
                 manual_prompt = None
                 if mode == "manual_first_frame_box" and i == 0 and manual_first_frame_box:
@@ -260,8 +264,8 @@ def run_evaluation(args):
                 prompt = generate_prompts(
                     frame_shape=(h, w),
                     mode=mode if mode != "manual_first_frame_box" else "center_box",
-                    legacy_mask=current_legacy_mask,
-                    legacy_meta=current_legacy_meta,
+                    legacy_mask=legacy_mask_list[i],
+                    legacy_meta=legacy_per_frame[i],
                     manual_prompt=manual_prompt
                 )
                 
@@ -274,10 +278,9 @@ def run_evaluation(args):
                     if stem in gt_masks:
                         iou = compute_iou(mask, gt_masks[stem])
                         leak = compute_leakage(mask, gt_masks[stem])
-                        sam2_ious.append(iou)
-                        sam2_leakages.append(leak)
                         entry["iou"] = round(iou, 4)
                         entry["leakage"] = round(leak, 4)
+                        entry["gt_valid"] = stem not in invalid_frames
                 else:
                     sam2_mask_list.append(np.zeros((h, w), dtype=np.uint8))
                     entry["error"] = sam2_wrapper.sam2_error_reason
@@ -285,85 +288,89 @@ def run_evaluation(args):
                 sam2_per_frame.append(entry)
 
             sam2_time = time.time() - t0
-            sam2_iou = float(np.mean(sam2_ious)) if sam2_ious else 0.0
-            sam2_leakage = float(np.mean(sam2_leakages)) if sam2_leakages else 0.0
-            sam2_stability = compute_temporal_stability(sam2_mask_list)
-            
-            # Refresh sam2_status after inference
             sam2_status = sam2_wrapper.get_status()
+
+            # Helper to calculate metrics
+            def summarize(per_frame, include_invalid=True):
+                ious = [e["iou"] for e in per_frame if "iou" in e and (include_invalid or e.get("gt_valid", True))]
+                leaks = [e["leakage"] for e in per_frame if "leakage" in e and (include_invalid or e.get("gt_valid", True))]
+                return (float(np.mean(ious)) if ious else 0.0), (float(np.mean(leaks)) if leaks else 0.0)
+
+            l_iou_raw, l_leak_raw = summarize(legacy_per_frame, True)
+            l_iou_corr, l_leak_corr = summarize(legacy_per_frame, False)
+            s_iou_raw, s_leak_raw = summarize(sam2_per_frame, True)
+            s_iou_corr, s_leak_corr = summarize(sam2_per_frame, False)
+            
+            sam2_stability = compute_temporal_stability(sam2_mask_list)
+            legacy_stability = compute_temporal_stability(legacy_mask_list)
 
             res = {
                 "prompt_mode": mode,
-                "verification": {
-                    "legacy_method_verified": True,
-                    "sam2_method_verified": True,
-                    "legacy_ai_segmentation_used": False,
-                    "sam2_ai_segmentation_used": True,
+                "metrics_raw": {
+                    "legacy_iou": round(l_iou_raw, 4),
+                    "sam2_iou": round(s_iou_raw, 4),
+                    "iou_gain": round(s_iou_raw - l_iou_raw, 4),
+                    "legacy_leakage": round(l_leak_raw, 4),
+                    "sam2_leakage": round(s_leak_raw, 4),
                 },
+                "metrics_corrected": {
+                    "legacy_iou": round(l_iou_corr, 4),
+                    "sam2_iou": round(s_iou_corr, 4),
+                    "iou_gain": round(s_iou_corr - l_iou_corr, 4),
+                    "legacy_leakage": round(l_leak_corr, 4),
+                    "sam2_leakage": round(s_leak_corr, 4),
+                },
+                "invalid_gt_frames": invalid_frames,
                 "sam2_status": sam2_status,
-                "legacy_iou": round(legacy_iou, 4),
-                "sam2_iou": round(sam2_iou, 4),
-                "iou_gain": round(sam2_iou - legacy_iou, 4),
-                "legacy_leakage": round(legacy_leakage, 4),
-                "sam2_leakage": round(sam2_leakage, 4),
-                "leakage_reduction": round(legacy_leakage - sam2_leakage, 4),
                 "runtime_sec": {"legacy": round(legacy_time, 2), "sam2": round(sam2_time, 2)},
                 "temporal_stability": {"legacy": legacy_stability, "sam2": sam2_stability},
                 "empty_mask_count": sam2_stability["empty_mask_count"],
-                "gt_frame_metrics": {
-                    f: next((e for e in sam2_per_frame if e["frame"] == f"{f}.jpg"), {})
-                    for f in ["frame_0000", "frame_0010", "frame_0020"]
-                }
             }
             all_sweep_results.append(res)
 
-    # --- Reporting ---
-    if not all_sweep_results:
-        logger.error("No SAM2 modes were successfully evaluated.")
-        sys.exit(1)
-
-    # Ranking
-    ranked = sorted(all_sweep_results, key=lambda x: (x["sam2_iou"], -x["sam2_leakage"]), reverse=True)
-    best = ranked[0]
+    # --- Ranking & Reporting ---
+    if not all_sweep_results: sys.exit(1)
+    
+    ranked = sorted(all_sweep_results, key=lambda x: x["metrics_corrected"]["sam2_iou"], reverse=True)
     
     summary_table = []
-    summary_table.append("| Mode | IoU | Gain | Leakage | Jitter | Empty |")
+    summary_table.append("| Mode | Corr IoU | Corr Gain | Corr Leak | Jitter | Status |")
     summary_table.append("| :--- | :--- | :--- | :--- | :--- | :--- |")
     for r in ranked:
+        m = r["metrics_corrected"]
+        gain_str = f"{m['iou_gain']:+.4f}"
         summary_table.append(
-            f"| {r['prompt_mode']} | {r['sam2_iou']:.4f} | {r['iou_gain']:+.4f} | "
-            f"{r['sam2_leakage']:.4f} | {r['temporal_stability']['sam2']['centroid_jitter']:.2f} | "
-            f"{r['empty_mask_count']} |"
+            f"| {r['prompt_mode']} | {m['sam2_iou']:.4f} | {gain_str} | "
+            f"{m['sam2_leakage']:.4f} | {r['temporal_stability']['sam2']['centroid_jitter']:.2f} | "
+            f"{'PASS' if m['iou_gain'] >= 0.05 else 'FAIL'} |"
         )
 
     final_results = {
         "sweep_results": all_sweep_results,
-        "best_mode": best["prompt_mode"],
+        "best_mode": ranked[0]["prompt_mode"],
         "summary_table": summary_table,
-        "recommendation": "Check IoU gain and leakage reduction.",
+        "invalid_frames_audited": invalid_frames,
     }
 
-    out_path = output_dir / "sam2_sweep_results.json"
+    out_path = output_dir / "sam2_sweep_results_corrected.json"
     with open(out_path, "w") as f:
         json.dump(final_results, f, indent=2, default=str)
 
-    logger.info(f"Sweep results written to {out_path}")
-    for line in summary_table:
-        print(line)
-    
+    logger.info(f"Results written to {out_path}")
+    for line in summary_table: print(line)
     return final_results
 
 
 def main():
-    parser = argparse.ArgumentParser(description="SAM2 Dev-Subset Sweep")
-    parser.add_argument("--capture-id", type=str, help="Capture ID")
-    parser.add_argument("--frames-dir", type=str, help="Pre-extracted frames dir")
-    parser.add_argument("--gt-dir", type=str, help="Ground truth masks dir")
-    parser.add_argument("--output-dir", type=str, default="results/sam2_sweep")
-    parser.add_argument("--sweep", action="store_true", help="Run prompt strategy sweep")
+    parser = argparse.ArgumentParser(description="SAM2 Dev-Subset Sweep Corrected")
+    parser.add_argument("--capture-id", type=str)
+    parser.add_argument("--frames-dir", type=str)
+    parser.add_argument("--gt-dir", type=str)
+    parser.add_argument("--output-dir", type=str, default="results/sam2_sweep_corrected")
+    parser.add_argument("--sweep", action="store_true")
+    parser.add_argument("--max-frames", type=int, default=20)
     args = parser.parse_args()
     run_evaluation(args)
-
 
 if __name__ == "__main__":
     main()
