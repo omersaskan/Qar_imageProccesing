@@ -1,12 +1,18 @@
 import cv2
 import numpy as np
 from pathlib import Path
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 import logging
 import json
 import shutil
+from enum import Enum
 
 logger = logging.getLogger("texture_frame_filter")
+
+class ProductProfileType(str, Enum):
+    BOTTLE = "bottle"
+    BOX = "box"
+    GENERIC = "generic"
 
 class TextureFrameFilter:
     def __init__(self, thresholds=None):
@@ -17,11 +23,25 @@ class TextureFrameFilter:
         self.max_luminance = 245.0 # avoid blown out
         self.min_mask_coverage = 0.05 # 5% of image
         
-    def filter_session_images(self, image_folder: Path, output_dir: Path, dense_workspace: Path, expected_color: str = "unknown", target_count: int = 20) -> Dict[str, Any]:
+    def filter_session_images(
+        self, 
+        image_folder: Path, 
+        output_dir: Path, 
+        dense_workspace: Path,
+        expected_color: str = "unknown",
+        target_count: int = 20,
+        product_profile: ProductProfileType = ProductProfileType.GENERIC
+    ) -> Dict[str, Any]:
         """
         Analyzes and filters images for texturing.
         Returns path to filtered images directory and metadata.
         """
+        # Apply profile-specific thresholds
+        if product_profile == ProductProfileType.BOTTLE:
+            self.min_mask_coverage = 0.02
+        elif product_profile == ProductProfileType.BOX:
+            self.min_mask_coverage = 0.10
+
         images = sorted(list(image_folder.glob("*.jpg")) + list(image_folder.glob("*.png")))
         
         selected_dir = output_dir / "selected_images"
@@ -280,8 +300,35 @@ class TextureFrameFilter:
                             s["masked_source_generated"] = True
                     except Exception: pass
 
+        # --- v6 Early Gates & Decision Logic ---
+        
+        # 1. Coverage Gate
         coverage_risk = max_gap_degrees > 90.0
-        recapture_required = coverage_risk
+        # Profile-specific thresholds
+        gap_threshold = 45.0
+        if product_profile == ProductProfileType.BOTTLE:
+            gap_threshold = 40.0 # Bottles need strict 360
+        elif product_profile == ProductProfileType.BOX:
+            gap_threshold = 60.0 # Boxes can have larger gaps between faces
+            
+        recapture_required = max_gap_degrees > gap_threshold
+        recapture_reason = None
+        if recapture_required:
+            recapture_reason = f"missing_side_coverage (gap: {max_gap_degrees:.1f}° > {gap_threshold}°)"
+
+        # 2. Blur Gate
+        avg_sharpness = np.mean([s["sharpness"] for s in selected_stats]) if selected_stats else 0
+        if not fallback_used and avg_sharpness < 20.0:
+            recapture_required = True
+            recapture_reason = "blurry_capture"
+
+        # 3. Mask Quality / SAM2 Recommendation
+        try_sam2_masks = False
+        bad_mask_count = sum(1 for s in analyzed_stats if s.get("mask_qa", {}).get("occupancy_ratio", 0) < 0.05)
+        if bad_mask_count > len(analyzed_stats) * 0.3 and not recapture_required:
+            # If coverage is good but masks are bad, recommend SAM2
+            if max_gap_degrees < gap_threshold:
+                try_sam2_masks = True
 
         report = {
             "selected_count": len(selected_stats),
@@ -291,7 +338,8 @@ class TextureFrameFilter:
             "max_gap_degrees": max_gap_degrees,
             "coverage_risk": coverage_risk,
             "recapture_required": recapture_required,
-            "recapture_reason": "missing side coverage" if coverage_risk else None,
+            "recapture_reason": recapture_reason,
+            "try_sam2_masks": try_sam2_masks,
             "selected_frames": selected_stats,
             "mask_qa_report": mask_qa_report,
             "frame_0021_status": next((s for s in analyzed_stats + rejected_stats if s["name"] == "frame_0021.jpg"), {"reason": "not_found"})
