@@ -140,8 +140,12 @@ class TextureFrameFilter:
             # output_dir is likely the job_dir or a subfolder of it
             recon_root = output_dir
             if not (recon_root / "sparse").exists() and not (recon_root / "dense").exists():
-                # Try parent if we are in a subfolder
+                # Try parent (we might be in 'texturing' subfolder)
                 recon_root = output_dir.parent
+                
+            if not (recon_root / "sparse").exists() and not (recon_root / "dense").exists():
+                # Try grandparent (we might be in 'texturing/retry_X' subfolder)
+                recon_root = output_dir.parent.parent
             
             cameras = load_reconstruction_cameras(recon_root)
             if cameras:
