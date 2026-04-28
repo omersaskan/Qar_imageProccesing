@@ -66,8 +66,10 @@ class TextureFrameFilter:
             dim_matches = 0
             
             image_stems = {img.stem for img in images}
+            image_names = {img.name for img in images}
             for mask_path in mask_files[:20]: # Sample first 20 for speed
-                if mask_path.stem in image_stems:
+                # Try direct stem match OR stem-without-extension match
+                if mask_path.stem in image_stems or mask_path.stem in image_names:
                     stem_matches += 1
                     # Check dimension if it matches stem
                     if sample_img is not None:
@@ -82,8 +84,12 @@ class TextureFrameFilter:
             logger.info(f"Mask candidate: {p} | exists=True | count={mask_count} | stem_matches={stem_matches}/{sample_size} | dim_matches={dim_matches}/{sample_size}")
             
             # Selection criteria: high stem match and some dimension matches
-            if match_ratio > 0.5 and match_ratio >= best_match_score:
-                best_match_score = match_ratio
+            # Add a small boost for dimension matches to break ties
+            dim_ratio = dim_matches / sample_size if sample_size > 0 else 0
+            final_score = match_ratio + (dim_ratio * 0.1)
+            
+            if match_ratio > 0.5 and final_score > best_match_score:
+                best_match_score = final_score
                 best_mask_folder = p
         
         mask_folder = best_mask_folder
@@ -155,7 +161,11 @@ class TextureFrameFilter:
             
             # Masking logic
             if has_masks:
+                # Robust mask discovery: try stem.png and name.png
                 mask_path = mask_folder / (img_path.stem + ".png")
+                if not mask_path.exists():
+                    mask_path = mask_folder / (img_path.name + ".png")
+                
                 if mask_path.exists():
                     try:
                         img = cv2.imread(str(img_path))
