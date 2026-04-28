@@ -1,6 +1,6 @@
 # Reconstruction Evidence Report: legacy_cap_29ab6fa1_compare
 **Status:** ❌ FAILED
-**Exported At:** 2026-04-28T02:42:45.781002Z
+**Exported At:** 2026-04-28T03:16:47.606319Z
 
 ## Delivery Checklist Summary
 | Criterion | Status | Value | Required |

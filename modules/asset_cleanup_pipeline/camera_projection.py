@@ -120,8 +120,12 @@ def load_reconstruction_cameras(workspace_path: Path) -> List[Dict[str, Any]]:
     # 1. Try COLMAP sparse models
     sparse_dir = workspace_path / "sparse"
     if sparse_dir.exists():
-        # Find best model (usually '0')
-        model_dirs = sorted([d for d in sparse_dir.iterdir() if d.is_dir()], key=lambda x: x.name)
+        # Find best model (usually the largest one)
+        def get_model_size(d: Path) -> int:
+            img_bin = d / "images.bin"
+            return img_bin.stat().st_size if img_bin.exists() else 0
+
+        model_dirs = sorted([d for d in sparse_dir.iterdir() if d.is_dir()], key=get_model_size, reverse=True)
         if not model_dirs:
             # Check if sparse files are directly in sparse_dir
             model_dirs = [sparse_dir]
