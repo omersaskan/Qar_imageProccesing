@@ -39,7 +39,7 @@ import argparse
 
 def run():
     parser = argparse.ArgumentParser(description="Real End-to-End Reconstruction")
-    parser.add_argument("--capture-id", type=str, default="cap_50ab7977")
+    parser.add_argument("--capture-id", type=str, default="cap_29ab6fa1")
     parser.add_argument("--job-id", type=str)
     parser.add_argument("--session-id", type=str, default="real_session_001")
     args = parser.parse_args()
@@ -93,8 +93,13 @@ def run():
     logger.info("--- 3. Running Cleanup ---")
     
     # Load guidance data from the successful attempt
-    # Fix: selected_attempt_dir is the parent of the mesh file
-    best_attempt_dir = Path(manifest.mesh_path).parent
+    # Fix: selected_attempt_dir resolution
+    mesh_path = Path(manifest.mesh_path)
+    if mesh_path.parent.name == "dense":
+        best_attempt_dir = mesh_path.parent.parent
+    else:
+        best_attempt_dir = mesh_path.parent
+    dense_dir = best_attempt_dir / "dense"
     logger.info(f"Loading guidance data from: {best_attempt_dir}")
     
     cameras = load_reconstruction_cameras(best_attempt_dir)
@@ -105,8 +110,8 @@ def run():
     point_cloud = None
     # For OpenMVS, use project_dense.ply; for COLMAP, use fused.ply
     pc_paths = [
-        best_attempt_dir / "dense" / "fused.ply",
-        best_attempt_dir / "dense" / "project_dense.ply"
+        dense_dir / "fused.ply",
+        dense_dir / "project_dense.ply"
     ]
     for pc_path in pc_paths:
         if pc_path.exists():
@@ -152,6 +157,22 @@ def run():
     manifest = texturing_result.manifest
     cleaned_mesh_path = texturing_result.cleaned_mesh_path
     
+    # Mirror worker cleanup_stats updates (Task 5-6)
+    if texturing_result.texturing_status == "real" and texturing_result.texture_atlas_paths:
+        atlas_path = texturing_result.texture_atlas_paths[0]
+        cleanup_stats["cleaned_texture_path"] = atlas_path
+        cleanup_stats["texture_path"] = atlas_path
+        cleanup_stats["has_uv"] = True
+        cleanup_stats["has_material"] = True
+        cleanup_stats["textured_mesh_path"] = texturing_result.cleaned_mesh_path
+        cleanup_stats["texture_integrity_status"] = "complete"
+        cleanup_stats["material_semantic_status"] = "diffuse_textured"
+        
+        if "decimation" in cleanup_stats:
+            cleanup_stats["decimation"]["uv_preserved"] = True
+            cleanup_stats["decimation"]["material_preserved"] = True
+            cleanup_stats["decimation"]["texture_preserved"] = True
+
     # Task 6: Fail explicitly if REQUIRE_TEXTURED_OUTPUT=true and texturing failed
     if settings.require_textured_output and texturing_result.texturing_status in ["degraded", "absent"]:
         reason = f"TEXTURING_REQUIRED_BUT_MISSING: Status '{texturing_result.texturing_status}'"
@@ -219,4 +240,5 @@ def run():
 
 if __name__ == "__main__":
     run()
+
 
