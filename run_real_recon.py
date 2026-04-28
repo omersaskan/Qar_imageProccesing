@@ -43,6 +43,7 @@ def run():
     parser.add_argument("--job-id", type=str)
     parser.add_argument("--session-id", type=str, default="real_session_001")
     parser.add_argument("--skip-extraction", action="store_true", help="Skip extraction if frames already exist")
+    parser.add_argument("--product-profile", type=str, default="generic", choices=["bottle", "box", "generic"], help="Product profile for texturing thresholds")
     args = parser.parse_args()
 
     capture_id = args.capture_id
@@ -163,7 +164,8 @@ def run():
         cleanup_stats=cleanup_stats,
         pivot_offset=metadata.pivot_offset,
         cleaned_mesh_path=cleaned_mesh_path,
-        expected_color=settings.expected_product_color
+        expected_color=settings.expected_product_color,
+        product_profile=args.product_profile
     )
     manifest = texturing_result.manifest
     cleaned_mesh_path = texturing_result.cleaned_mesh_path

@@ -76,6 +76,7 @@ class TexturingService:
         pivot_offset: Dict[str, float],
         cleaned_mesh_path: str,
         expected_color: str = "unknown",
+        product_profile: str = "generic"
     ) -> TexturingResult:
         """
         Execute texturing if the manifest indicates a COLMAP reconstruction.
@@ -145,6 +146,7 @@ class TexturingService:
             pivot_offset=pivot_offset,
             cleaned_mesh_path=cleaned_mesh_path,
             expected_color=expected_color,
+            product_profile=product_profile,
         )
 
     # ------------------------------------------------------------------
@@ -159,6 +161,7 @@ class TexturingService:
         pivot_offset: Dict[str, float],
         cleaned_mesh_path: str,
         expected_color: str = "unknown",
+        product_profile: str = "generic",
     ) -> TexturingResult:
         from modules.reconstruction_engine.openmvs_texturer import OpenMVSTexturer
 
@@ -174,6 +177,7 @@ class TexturingService:
                 output_dir=texturing_dir,
                 expected_color=expected_color,
                 neutralization_type=settings.texture_neutralization_type,
+                product_profile=product_profile,
             )
         except Exception as exc:
             logger.warning(f"OpenMVS texturing failed (degraded): {exc}")

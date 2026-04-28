@@ -213,6 +213,7 @@ class OpenMVSTexturer:
         image_folder_override: Optional[Path] = None,
         top_n: Optional[int] = None,
         neutralization_type: str = "cream",
+        product_profile: str = "generic",
     ) -> Dict[str, Any]:
         """
         Runs InterfaceCOLMAP and then TextureMesh with a retry ladder.
@@ -289,7 +290,8 @@ class OpenMVSTexturer:
                     output_dir, 
                     dense_workspace=dense_workspace,
                     expected_color=expected_color, 
-                    target_count=top_n or max_selected_frames
+                    target_count=top_n or max_selected_frames,
+                    product_profile=product_profile
                 )
                 
                 selected_frames = filter_results.get("selected_frames", [])
