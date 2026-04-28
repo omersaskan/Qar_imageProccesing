@@ -22,6 +22,7 @@ import re
 import sys
 import time
 from pathlib import Path
+from unittest.mock import patch
 
 import cv2
 import numpy as np
@@ -178,135 +179,161 @@ def run_evaluation(args):
         gt_masks = build_gt_map(Path(args.gt_dir))
     logger.info(f"GT masks available: {len(gt_masks)} ({list(gt_masks.keys())})")
 
-    # --- SAM2 status ---
-    sam2_wrapper = None
+    # Metrics state
+    legacy_iou = 0.0
+    sam2_iou = 0.0
+    legacy_leakage = 0.0
+    sam2_leakage = 0.0
+    legacy_time = 0.0
+    sam2_time = 0.0
+    sam2_ran = False
+    legacy_per_frame = []
+    sam2_per_frame = []
+    legacy_stability = {}
+    sam2_stability = {}
+    
+    legacy_method_verified = False
+    sam2_method_verified = False
+    legacy_ai_used = False
+    sam2_ai_used = False
+    legacy_backends = []
+    sam2_backends = []
+
     sam2_status = {
         "sam2_available": False,
         "sam2_model_loaded": False,
         "sam2_error_reason": "not checked yet",
     }
-    try:
-        from modules.ai_segmentation.sam2_wrapper import SAM2Wrapper
-        sam2_wrapper = SAM2Wrapper()
-        sam2_status = sam2_wrapper.get_status()
-    except Exception as e:
-        sam2_status["sam2_error_reason"] = str(e)
-
     gpu_available = False
-    try:
-        import torch
-        gpu_available = torch.cuda.is_available()
-    except ImportError:
-        pass
 
-    # --- Run legacy ---
-    logger.info("Running legacy segmentation...")
-    legacy_masker = ObjectMasker()
-    legacy_masks_dir.mkdir(parents=True, exist_ok=True)
-    legacy_ious, legacy_leakages = [], []
-    legacy_per_frame = []
-    legacy_mask_list = []
-    t0 = time.time()
-
-    for f_path in frame_files:
-        frame = cv2.imread(str(f_path))
-        if frame is None:
-            continue
-        mask, meta = legacy_masker.generate_mask(frame)
-        out_path = legacy_masks_dir / f"{f_path.name}.png"
-        cv2.imwrite(str(out_path), mask)
-        legacy_mask_list.append(mask)
-
-        entry = {
-            "frame": f_path.name,
-            "mask_path": str(out_path),
-            "confidence": meta.get("confidence", 0),
-            "occupancy": meta.get("occupancy", 0),
-        }
-        stem = f_path.stem
-        if stem in gt_masks:
-            iou = compute_iou(mask, gt_masks[stem])
-            leak = compute_leakage(mask, gt_masks[stem])
-            legacy_ious.append(iou)
-            legacy_leakages.append(leak)
-            entry["iou"] = round(iou, 4)
-            entry["leakage"] = round(leak, 4)
-        legacy_per_frame.append(entry)
-
-    legacy_time = time.time() - t0
-    legacy_iou = float(np.mean(legacy_ious)) if legacy_ious else 0.0
-    legacy_leakage = float(np.mean(legacy_leakages)) if legacy_leakages else 0.0
-    legacy_stability = compute_temporal_stability(legacy_mask_list)
-    logger.info(
-        f"Legacy: {len(frame_files)} frames in {legacy_time:.2f}s, "
-        f"IoU={legacy_iou:.4f}, leakage={legacy_leakage:.4f}"
-    )
-
-    # --- Run SAM2 if available ---
-    sam2_iou = 0.0
-    sam2_leakage = 0.0
-    sam2_time = 0.0
-    sam2_ran = False
-    sam2_ious, sam2_leakages = [], []
-    sam2_per_frame = []
-    sam2_stability = {
-        "mask_area_std": 0, "centroid_jitter": 0,
-        "bbox_center_jitter": 0, "empty_mask_count": 0, "frame_count": 0,
-    }
-
-    if sam2_wrapper and sam2_wrapper.is_available():
-        logger.info("Running SAM2 image-mode segmentation...")
-        sam2_masks_dir.mkdir(parents=True, exist_ok=True)
-        sam2_ran = True
-        sam2_mask_list = []
+    # --- Run legacy phase ---
+    logger.info("Running legacy segmentation phase (Forcing isolation)...")
+    with patch.object(settings, "segmentation_method", "legacy"), \
+         patch.object(settings, "sam2_enabled", False):
+        
+        legacy_masker = ObjectMasker()
+        legacy_masks_dir.mkdir(parents=True, exist_ok=True)
+        legacy_ious, legacy_leakages = [], []
+        legacy_mask_list = []
         t0 = time.time()
-
-        from modules.ai_segmentation.prompting import generate_prompts
 
         for f_path in frame_files:
             frame = cv2.imread(str(f_path))
             if frame is None:
                 continue
-            h, w = frame.shape[:2]
-            prompt = generate_prompts(
-                frame_shape=(h, w), mode=settings.sam2_prompt_mode
-            )
-            mask = sam2_wrapper.segment_frame(frame, prompt)
-            entry = {"frame": f_path.name}
+            mask, meta = legacy_masker.generate_mask(frame)
+            out_path = legacy_masks_dir / f"{f_path.name}.png"
+            cv2.imwrite(str(out_path), mask)
+            legacy_mask_list.append(mask)
 
-            if mask is not None:
-                out_path = sam2_masks_dir / f"{f_path.name}.png"
-                cv2.imwrite(str(out_path), mask)
-                sam2_mask_list.append(mask)
-                entry["mask_path"] = str(out_path)
-                stem = f_path.stem
-                if stem in gt_masks:
-                    iou = compute_iou(mask, gt_masks[stem])
-                    leak = compute_leakage(mask, gt_masks[stem])
-                    sam2_ious.append(iou)
-                    sam2_leakages.append(leak)
-                    entry["iou"] = round(iou, 4)
-                    entry["leakage"] = round(leak, 4)
-            else:
-                sam2_mask_list.append(np.zeros((h, w), dtype=np.uint8))
-                entry["error"] = sam2_wrapper.sam2_error_reason
+            backend_name = meta.get("backend_name", "unknown")
+            legacy_backends.append(backend_name)
+            if meta.get("ai_segmentation_used"):
+                legacy_ai_used = True
 
-            sam2_per_frame.append(entry)
+            entry = {
+                "frame": f_path.name,
+                "mask_path": str(out_path),
+                "confidence": meta.get("confidence", 0),
+                "occupancy": meta.get("occupancy", 0),
+                "backend": backend_name,
+            }
+            stem = f_path.stem
+            if stem in gt_masks:
+                iou = compute_iou(mask, gt_masks[stem])
+                leak = compute_leakage(mask, gt_masks[stem])
+                legacy_ious.append(iou)
+                legacy_leakages.append(leak)
+                entry["iou"] = round(iou, 4)
+                entry["leakage"] = round(leak, 4)
+            legacy_per_frame.append(entry)
 
-        sam2_time = time.time() - t0
-        sam2_iou = float(np.mean(sam2_ious)) if sam2_ious else 0.0
-        sam2_leakage = float(np.mean(sam2_leakages)) if sam2_leakages else 0.0
-        sam2_stability = compute_temporal_stability(sam2_mask_list)
+        legacy_time = time.time() - t0
+        legacy_iou = float(np.mean(legacy_ious)) if legacy_ious else 0.0
+        legacy_leakage = float(np.mean(legacy_leakages)) if legacy_leakages else 0.0
+        legacy_stability = compute_temporal_stability(legacy_mask_list)
+        legacy_method_verified = not legacy_ai_used
         logger.info(
-            f"SAM2: {len(frame_files)} frames in {sam2_time:.2f}s, "
-            f"IoU={sam2_iou:.4f}, leakage={sam2_leakage:.4f}"
+            f"Legacy phase complete: IoU={legacy_iou:.4f}, leakage={legacy_leakage:.4f}, "
+            f"ai_used={legacy_ai_used}"
         )
-    else:
-        logger.warning(
-            f"SAM2 not available: "
-            f"{sam2_status.get('sam2_error_reason', 'unknown')}. "
-            "Legacy-only results."
-        )
+
+    # --- Run SAM2 phase ---
+    logger.info("Running SAM2 phase (Forcing isolation)...")
+    with patch.object(settings, "segmentation_method", "sam2"), \
+         patch.object(settings, "sam2_enabled", True):
+        
+        try:
+            from modules.ai_segmentation.sam2_wrapper import SAM2Wrapper
+            sam2_wrapper = SAM2Wrapper()
+            sam2_status = sam2_wrapper.get_status()
+        except Exception as e:
+            sam2_status["sam2_error_reason"] = str(e)
+            sam2_wrapper = None
+
+        try:
+            import torch
+            gpu_available = torch.cuda.is_available()
+        except ImportError:
+            pass
+
+        if sam2_wrapper and sam2_wrapper.is_available():
+            sam2_masks_dir.mkdir(parents=True, exist_ok=True)
+            sam2_ran = True
+            sam2_mask_list = []
+            sam2_ious, sam2_leakages = [], []
+            t0 = time.time()
+
+            from modules.ai_segmentation.prompting import generate_prompts
+
+            for f_path in frame_files:
+                frame = cv2.imread(str(f_path))
+                if frame is None:
+                    continue
+                h, w = frame.shape[:2]
+                prompt = generate_prompts(
+                    frame_shape=(h, w), mode=settings.sam2_prompt_mode
+                )
+                mask = sam2_wrapper.segment_frame(frame, prompt)
+                entry = {"frame": f_path.name}
+
+                if mask is not None:
+                    out_path = sam2_masks_dir / f"{f_path.name}.png"
+                    cv2.imwrite(str(out_path), mask)
+                    sam2_mask_list.append(mask)
+                    entry["mask_path"] = str(out_path)
+                    entry["backend"] = "sam2"
+                    sam2_backends.append("sam2")
+                    sam2_ai_used = True
+                    stem = f_path.stem
+                    if stem in gt_masks:
+                        iou = compute_iou(mask, gt_masks[stem])
+                        leak = compute_leakage(mask, gt_masks[stem])
+                        sam2_ious.append(iou)
+                        sam2_leakages.append(leak)
+                        entry["iou"] = round(iou, 4)
+                        entry["leakage"] = round(leak, 4)
+                else:
+                    sam2_mask_list.append(np.zeros((h, w), dtype=np.uint8))
+                    entry["error"] = sam2_wrapper.sam2_error_reason
+                    sam2_backends.append("error")
+
+                sam2_per_frame.append(entry)
+
+            sam2_time = time.time() - t0
+            sam2_iou = float(np.mean(sam2_ious)) if sam2_ious else 0.0
+            sam2_leakage = float(np.mean(sam2_leakages)) if sam2_leakages else 0.0
+            sam2_stability = compute_temporal_stability(sam2_mask_list)
+            sam2_method_verified = sam2_ai_used
+            logger.info(
+                f"SAM2 phase complete: IoU={sam2_iou:.4f}, leakage={sam2_leakage:.4f}, "
+                f"ai_used={sam2_ai_used}"
+            )
+        else:
+            logger.warning(
+                f"SAM2 not available for phase 2: "
+                f"{sam2_status.get('sam2_error_reason', 'unknown')}"
+            )
 
     # --- Decision ---
     iou_gain = sam2_iou - legacy_iou
@@ -338,6 +365,14 @@ def run_evaluation(args):
         recommendation = "sam2_mixed — review manually before proceeding"
 
     results = {
+        "verification": {
+            "legacy_method_verified": legacy_method_verified,
+            "sam2_method_verified": sam2_method_verified,
+            "legacy_ai_segmentation_used": legacy_ai_used,
+            "sam2_ai_segmentation_used": sam2_ai_used,
+            "legacy_backends_detected": list(set(legacy_backends)),
+            "sam2_backends_detected": list(set(sam2_backends)),
+        },
         "sam2_status": sam2_status,
         "legacy_iou": round(legacy_iou, 4),
         "sam2_iou": round(sam2_iou, 4),

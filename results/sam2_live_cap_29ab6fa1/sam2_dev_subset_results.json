@@ -1,13 +1,13 @@
 {
   "sam2_status": {
-    "sam2_enabled": false,
+    "sam2_enabled": true,
     "sam2_available": false,
     "sam2_model_loaded": false,
     "sam2_inference_ran": false,
-    "sam2_error_reason": "SAM2 disabled in settings (SAM2_ENABLED=false)",
-    "device": "cpu",
-    "checkpoint_exists": false,
-    "model_cfg": "sam2_hiera_l.yaml",
+    "sam2_error_reason": "Model load failed: Error in call to target 'sam2.modeling.position_encoding.PositionEmbeddingSine':\nRuntimeError('CUDA error: no kernel image is available for execution on the device\\nCUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.\\nFor debugging consider passing CUDA_LAUNCH_BLOCKING=1\\nCompile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.\\n')\nfull_key: model.image_encoder.neck.position_encoding",
+    "device": "cuda",
+    "checkpoint_exists": true,
+    "model_cfg": "configs/sam2/sam2_hiera_l.yaml",
     "checkpoint": "models/sam2/sam2_hiera_large.pt",
     "sam2_mode": "image_frame",
     "temporal_consistency": false,
@@ -21,10 +21,10 @@
   "leakage_reduction": 0.5476,
   "sam2_ran": false,
   "runtime_sec": {
-    "legacy": 19.01,
+    "legacy": 40.48,
     "sam2": 0.0
   },
-  "gpu_available": false,
+  "gpu_available": true,
   "temporal_stability": {
     "legacy": {
       "mask_area_std": 251906.44979791107,

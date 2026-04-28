@@ -18,7 +18,7 @@ used here.
 import logging
 import time
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 
 import numpy as np
 
@@ -32,34 +32,34 @@ logger = logging.getLogger(__name__)
 SAM2_IMAGE_MODE = "image_frame"
 SAM2_VIDEO_MODE = "video_temporal"
 
-# ---------------------------------------------------------------------------
-# Optional dependency probing
-# ---------------------------------------------------------------------------
-HAS_SAM2 = False
-HAS_TORCH = False
-SAM2_IMPORT_ERROR_REASON: Optional[str] = None
 
-if settings.sam2_enabled:
+def probe_sam2_availability() -> Tuple[bool, bool, Optional[str]]:
+    """
+    Probes for torch and sam2 dependencies based on current settings.
+    Returns: (has_sam2, has_torch, error_reason)
+    """
+    has_sam2 = False
+    has_torch = False
+    error_reason = None
+
+    if not settings.sam2_enabled:
+        return False, False, "SAM2 disabled in settings (SAM2_ENABLED=false)"
+
     try:
         import torch  # noqa: F401
-        HAS_TORCH = True
+        has_torch = True
     except ImportError:
-        SAM2_IMPORT_ERROR_REASON = "torch not installed"
+        return False, False, "torch not installed"
 
-    if HAS_TORCH:
-        try:
-            # Image-mode: build_sam2 + SAM2ImagePredictor
-            from sam2.build_sam import build_sam2  # noqa: F401
-            from sam2.sam2_image_predictor import SAM2ImagePredictor  # noqa: F401
-            HAS_SAM2 = True
-        except ImportError:
-            SAM2_IMPORT_ERROR_REASON = (
-                "segment-anything-2 (sam2) package not installed"
-            )
-else:
-    SAM2_IMPORT_ERROR_REASON = (
-        "SAM2 disabled in settings (SAM2_ENABLED=false)"
-    )
+    try:
+        # Image-mode: build_sam2 + SAM2ImagePredictor
+        from sam2.build_sam import build_sam2  # noqa: F401
+        from sam2.sam2_image_predictor import SAM2ImagePredictor  # noqa: F401
+        has_sam2 = True
+    except ImportError:
+        error_reason = "segment-anything-2 (sam2) package not installed"
+
+    return has_sam2, has_torch, error_reason
 
 
 class SAM2Wrapper:
@@ -88,14 +88,18 @@ class SAM2Wrapper:
     """
 
     def __init__(self):
+        # --- Dynamic Dependency Probing ---
+        # We probe at init time to allow runtime settings toggling (e.g. for eval)
+        has_sam2, has_torch, error_reason = probe_sam2_availability()
+
         # --- Status fields ---
         self.sam2_enabled: bool = settings.sam2_enabled
-        self.sam2_available: bool = HAS_SAM2
+        self.sam2_available: bool = has_sam2
         self.sam2_model_loaded: bool = False
         self.sam2_inference_ran: bool = False
-        self.sam2_error_reason: Optional[str] = SAM2_IMPORT_ERROR_REASON
+        self.sam2_error_reason: Optional[str] = error_reason
 
-        self.device: str = settings.sam2_device if HAS_TORCH else "cpu"
+        self.device: str = settings.sam2_device if has_torch else "cpu"
         self.checkpoint: str = settings.sam2_checkpoint
         self.model_cfg: str = settings.sam2_model_cfg
         self.checkpoint_exists: bool = (
@@ -120,6 +124,10 @@ class SAM2Wrapper:
         # --- Model loading (image mode) ---
         if self.sam2_available:
             try:
+                # Local imports for builders to prevent global dependency issues
+                from sam2.build_sam import build_sam2
+                from sam2.sam2_image_predictor import SAM2ImagePredictor
+
                 model = build_sam2(
                     self.model_cfg,
                     self.checkpoint,
