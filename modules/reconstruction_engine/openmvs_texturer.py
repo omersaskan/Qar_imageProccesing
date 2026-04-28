@@ -7,6 +7,7 @@ from typing import Dict, Any, List, Optional
 import trimesh
 import cv2
 import numpy as np
+import json
 from .failures import TexturingFailed
 
 

@@ -179,7 +179,7 @@ def run():
         reasons.append("Failed color match but low background leakage. Validation is too strict for white product.")
     
     # 5. Improvement
-    if validation_report.status == "pass":
+    if validation_report.final_decision == "pass":
         classification = "improved"
         reasons.append("V6 diagnostic measures resolved the issues.")
 
