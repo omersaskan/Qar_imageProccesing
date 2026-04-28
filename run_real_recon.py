@@ -105,7 +105,13 @@ def run():
     cameras = load_reconstruction_cameras(best_attempt_dir)
     masks = None
     if cameras:
-        masks = load_reconstruction_masks(best_attempt_dir, [c["name"] for c in cameras])
+        cam0 = cameras[0]
+        masks = load_reconstruction_masks(
+            best_attempt_dir, 
+            [c["name"] for c in cameras],
+            expected_width=cam0["width"],
+            expected_height=cam0["height"],
+        )
     
     point_cloud = None
     # For OpenMVS, use project_dense.ply; for COLMAP, use fused.ply
@@ -167,6 +173,7 @@ def run():
         cleanup_stats["textured_mesh_path"] = texturing_result.cleaned_mesh_path
         cleanup_stats["texture_integrity_status"] = "complete"
         cleanup_stats["material_semantic_status"] = "diffuse_textured"
+        cleanup_stats["texture_applied"] = True
         
         if "decimation" in cleanup_stats:
             cleanup_stats["decimation"]["uv_preserved"] = True

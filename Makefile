@@ -27,6 +27,7 @@ ci:
 	python -m pytest tests/scripts -q
 	python -m pytest tests/test_phase5_safe_copy_isolation.py -q
 	python -m pytest tests/modules/capture_workflow/test_object_masker_sam2_flag.py -q
+	python -m pytest tests/test_legacy_root_cause_fixes.py -q
 
 smoke:
 	python -m pytest modules/tests/test_smoke_flow.py

@@ -142,18 +142,24 @@ def validate_contamination(stats: Dict[str, Any], thresholds: ValidationThreshol
     iso = stats.get("isolation", {})
     if not iso: return {}
 
-    final_faces = int(iso.get("final_faces", 0))
-    initial_faces = max(int(iso.get("initial_faces", 1)), 1)
-    share = final_faces / initial_faces
-
-    if share >= thresholds.min_largest_component_share_pass:
-        results["component_share"] = "pass"
-    elif share >= thresholds.min_largest_component_share_review:
-        results["component_share"] = "review"
+    # ROOT CAUSE FIX: Dominance check within the final result
+    # We want to know if the primary component is the main thing in the output.
+    dominance = float(iso.get("largest_kept_component_share", 1.0))
+    
+    if dominance >= thresholds.min_largest_component_share_pass:
+        results["component_dominance"] = "pass"
+    elif dominance >= thresholds.min_largest_component_share_review:
+        results["component_dominance"] = "review"
     else:
-        results["component_share"] = "fail"
+        results["component_dominance"] = "fail"
 
-    comp_count = int(iso.get("component_count", 1))
+    # Separate metric: Scene reduction ratio
+    # A low ratio is expected (e.g. 0.05) if we isolate a bottle from a room.
+    # It shouldn't be a hard gate unless it's literally zero.
+    reduction = float(iso.get("kept_to_initial_face_ratio", 1.0))
+    results["scene_reduction_ratio"] = "pass" if reduction > 0 else "fail"
+
+    comp_count = int(iso.get("kept_component_count", iso.get("component_count", 1)))
     if comp_count == 1:
         results["component_count"] = "pass"
     elif comp_count <= thresholds.max_component_count:

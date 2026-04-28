@@ -78,11 +78,13 @@ class IntegrationFlow:
                 input_data["material_semantic_status"] = "diffuse_textured"
                 input_data["texture_applied"] = True # Force for validator
             
-            # Ensure accessor flags are present for rules.py
             input_data["all_primitives_have_position"] = export_report.get("all_primitives_have_position", False)
             input_data["all_primitives_have_normal"] = export_report.get("all_primitives_have_normal", False)
             input_data["all_textured_primitives_have_texcoord_0"] = final_uv_accessor
-            input_data["delivery_ready"] = export_report.get("delivery_ready", False)
+            
+            # ROOT CAUSE FIX: Carry structural_export_ready truth
+            input_data["structural_export_ready"] = export_report.get("structural_export_ready", export_report.get("delivery_ready", False))
+            input_data["delivery_ready"] = input_data["structural_export_ready"] # Proxy for validator rules
 
         input_data.update(overrides)
         

@@ -15,10 +15,13 @@ The legacy photogrammetry pipeline was producing malformed, blob-like GLB assets
 - **Fix**: Expanded search paths in `load_reconstruction_masks` to include `stereo/masks` and added automatic nearest-neighbor resizing if mask dimensions differ from the camera model.
 - **Impact**: Semantic guidance is now consistently loaded and correctly scaled.
 
-### C. Semantic Quality Gate
-- **Problem**: The pipeline would export assets even if isolation failed semantically (e.g., retaining the table/background).
-- **Fix**: Added a post-cleanup quality gate in `cleaner.py` that rejects assets where the primary component share is < 50% or fragmentation is too high.
-- **Impact**: Prevents contaminated assets from reaching the delivery stage.
+### C. Semantic Quality Gate & Validation Refinement
+- **Problem**: The pipeline would export assets even if isolation failed semantically. Furthermore, validation was incorrectly penalizing small clean objects for being a minor part of a large original scene.
+- **Fix**: 
+  - Added a post-cleanup quality gate in `cleaner.py` (reject if `primary_face_share` < 50%).
+  - Refined `rules.py` to use `largest_kept_component_share` (dominance within output) as the primary gate.
+  - Decoupled `kept_to_initial_face_ratio` as an informational metric.
+- **Impact**: Prevents contaminated assets from reaching delivery while allowing small, clean isolates to pass validation.
 
 ## 3. Files Changed
 - `modules/asset_cleanup_pipeline/camera_projection.py`: Corrected loader logic and added auto-resize.

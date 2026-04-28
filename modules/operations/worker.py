@@ -797,6 +797,7 @@ class IngestionWorker:
             cleanup_stats["textured_mesh_path"] = texturing_result.cleaned_mesh_path
             cleanup_stats["texture_integrity_status"] = "complete"
             cleanup_stats["material_semantic_status"] = "diffuse_textured"
+            cleanup_stats["texture_applied"] = True # ROOT CAUSE FIX: Synchronize
             
             # Decimation flags might be stale if texturing happened after
             if "decimation" in cleanup_stats:

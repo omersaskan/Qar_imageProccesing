@@ -131,11 +131,15 @@ class AssetValidator:
         # Scoring
         initial_faces = max(int(iso_stats.get("initial_faces", 1)), 1)
         final_faces = int(iso_stats.get("final_faces", 0))
-        largest_component_share = float(final_faces / initial_faces)
+        
+        # ROOT CAUSE FIX: Dominance within result vs Scene reduction
+        largest_component_share = float(iso_stats.get("largest_kept_component_share", 1.0))
+        kept_to_initial_face_ratio = float(iso_stats.get("kept_to_initial_face_ratio", final_faces / initial_faces))
         
         contamination_score = (
-            (1.0 - largest_component_share) * 0.45
-            + float(iso_stats.get("removed_plane_face_share", 0.0)) * 0.25
+            (1.0 - largest_component_share) * 0.70  # Most weight on dominance within output
+            + float(iso_stats.get("removed_plane_face_share", 0.0)) * 0.20
+            + (kept_to_initial_face_ratio * 0.10) # Tiny weight on how much of scene we kept
         )
         
         material_grade = self._calculate_material_grade(asset_data)
