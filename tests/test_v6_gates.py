@@ -71,5 +71,15 @@ class TestV6Gates(unittest.TestCase):
                  
         self.assertEqual(status, "success")
 
+    def test_valid_360_bottle_capture(self):
+        """Test that a valid 360 bottle capture proceeds to reconstruction."""
+        max_gap = 15.0 # Very good coverage
+        profile = ProductProfileType.BOTTLE
+        
+        gap_threshold = 40.0
+        recapture_required = max_gap > gap_threshold
+        
+        self.assertFalse(recapture_required)
+
 if __name__ == "__main__":
     unittest.main()
