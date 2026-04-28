@@ -174,6 +174,15 @@ def validate_contamination(stats: Dict[str, Any], thresholds: ValidationThreshol
     selected_score = float(iso.get("selected_component_score", 0.0))
     results["selection_quality"] = "pass" if selected_score >= thresholds.min_selected_component_score else "review"
 
+    # ROOT CAUSE FIX: Check for explicit quality failures from isolation logic
+    iso_quality = str(iso.get("quality_status", "pass")).lower()
+    if iso_quality == "fail":
+        results["isolation_quality"] = "fail"
+    elif iso_quality == "review":
+        results["isolation_quality"] = "review"
+    else:
+        results["isolation_quality"] = "pass"
+
     return results
 
 
@@ -253,11 +262,13 @@ def validate_delivery_mesh(asset_data: Dict[str, Any], thresholds: ValidationThr
 
 def validate_export_delivery_status(asset_data: Dict[str, Any]) -> Dict[str, str]:
     """
-    Validates export_status and delivery_ready flags from the exporter.
+    Validates export_status and structural_export_ready flags from the exporter.
     """
     results: Dict[str, str] = {}
     export_status = str(asset_data.get("export_status", "unknown")).lower()
-    delivery_ready = bool(asset_data.get("delivery_ready", False))
+    
+    # Support both old and new key for backward compatibility during transition
+    structural_ready = bool(asset_data.get("structural_export_ready", asset_data.get("delivery_ready", False)))
     profile = str(asset_data.get("delivery_profile", "raw_archive")).lower()
     
     if export_status in ["success", "unknown"]:
@@ -271,9 +282,9 @@ def validate_export_delivery_status(asset_data: Dict[str, Any]) -> Dict[str, str
     else:
         results["export_status"] = "review"
         
-    # mobile profiles must be delivery_ready
+    # mobile profiles must be structural_export_ready
     if profile in ["mobile_preview", "mobile_high", "desktop_high"]:
-        results["export_delivery_gate"] = "pass" if delivery_ready else "fail"
+        results["export_delivery_gate"] = "pass" if structural_ready else "fail"
     else:
         results["export_delivery_gate"] = "pass"
         

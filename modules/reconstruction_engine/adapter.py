@@ -1263,7 +1263,9 @@ class COLMAPAdapter(ReconstructionAdapter):
                     "dense_image_count": 0,
                     "dense_mask_count": 0,
                     "dense_mask_exact_filename_matches": 0,
+                    "source_mask_dimension_matches": 0,
                     "dense_mask_dimension_matches": 0,
+                    "dense_mask_resize_count": 0,
                     "dense_mask_fallback_white_count": 0,
                     "dense_mask_fallback_white_ratio": 1.0,
                     "dense_mask_generation_mode": "none",
@@ -1817,6 +1819,7 @@ class OpenMVSAdapter(COLMAPAdapter):
                     "dense_mask_count": len(input_frames) if dense_masks_source_dir else 0,
                     "dense_image_count": len(input_frames),
                     "dense_mask_exact_matches": len(input_frames) if dense_masks_source_dir else 0,
+                    "source_mask_dimension_matches": 0, # Not tracked in proxy mode
                     "dense_mask_dimension_matches": len(input_frames) if dense_masks_source_dir else 0,
                     "dense_mask_fallback_white_ratio": 0.0 if dense_masks_source_dir else 1.0,
                 }
