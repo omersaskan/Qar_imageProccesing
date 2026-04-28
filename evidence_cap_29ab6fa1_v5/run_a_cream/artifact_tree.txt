@@ -156,8 +156,6 @@ cap_29ab6fa1_v5_cream/
     attempt_1_denser_frames/
       database.db
       dense/
-        fused.ply
-        fused.ply.vis
         images/
           frame_0000.jpg
           frame_0001.jpg
@@ -213,7 +211,6 @@ cap_29ab6fa1_v5_cream/
           frame_0051.jpg
           frame_0052.jpg
           frame_0053.jpg
-        meshed-poisson.ply
         run-colmap-geometric.sh
         run-colmap-photometric.sh
         sparse/
@@ -225,114 +222,40 @@ cap_29ab6fa1_v5_cream/
         stereo/
           consistency_graphs/
           depth_maps/
-            frame_0000.jpg.geometric.bin
             frame_0000.jpg.photometric.bin
-            frame_0001.jpg.geometric.bin
             frame_0001.jpg.photometric.bin
-            frame_0002.jpg.geometric.bin
             frame_0002.jpg.photometric.bin
-            frame_0003.jpg.geometric.bin
             frame_0003.jpg.photometric.bin
-            frame_0004.jpg.geometric.bin
             frame_0004.jpg.photometric.bin
-            frame_0005.jpg.geometric.bin
             frame_0005.jpg.photometric.bin
-            frame_0006.jpg.geometric.bin
             frame_0006.jpg.photometric.bin
-            frame_0007.jpg.geometric.bin
             frame_0007.jpg.photometric.bin
-            frame_0008.jpg.geometric.bin
             frame_0008.jpg.photometric.bin
-            frame_0009.jpg.geometric.bin
             frame_0009.jpg.photometric.bin
-            frame_0010.jpg.geometric.bin
             frame_0010.jpg.photometric.bin
-            frame_0011.jpg.geometric.bin
             frame_0011.jpg.photometric.bin
-            frame_0012.jpg.geometric.bin
             frame_0012.jpg.photometric.bin
-            frame_0013.jpg.geometric.bin
             frame_0013.jpg.photometric.bin
-            frame_0014.jpg.geometric.bin
             frame_0014.jpg.photometric.bin
-            frame_0015.jpg.geometric.bin
             frame_0015.jpg.photometric.bin
-            frame_0016.jpg.geometric.bin
             frame_0016.jpg.photometric.bin
-            frame_0017.jpg.geometric.bin
             frame_0017.jpg.photometric.bin
-            frame_0018.jpg.geometric.bin
             frame_0018.jpg.photometric.bin
-            frame_0019.jpg.geometric.bin
             frame_0019.jpg.photometric.bin
-            frame_0020.jpg.geometric.bin
             frame_0020.jpg.photometric.bin
-            frame_0021.jpg.geometric.bin
             frame_0021.jpg.photometric.bin
-            frame_0022.jpg.geometric.bin
             frame_0022.jpg.photometric.bin
-            frame_0023.jpg.geometric.bin
             frame_0023.jpg.photometric.bin
-            frame_0024.jpg.geometric.bin
             frame_0024.jpg.photometric.bin
-            frame_0025.jpg.geometric.bin
             frame_0025.jpg.photometric.bin
-            frame_0026.jpg.geometric.bin
             frame_0026.jpg.photometric.bin
-            frame_0027.jpg.geometric.bin
             frame_0027.jpg.photometric.bin
-            frame_0028.jpg.geometric.bin
             frame_0028.jpg.photometric.bin
-            frame_0029.jpg.geometric.bin
             frame_0029.jpg.photometric.bin
-            frame_0030.jpg.geometric.bin
             frame_0030.jpg.photometric.bin
-            frame_0031.jpg.geometric.bin
             frame_0031.jpg.photometric.bin
-            frame_0032.jpg.geometric.bin
             frame_0032.jpg.photometric.bin
-            frame_0033.jpg.geometric.bin
             frame_0033.jpg.photometric.bin
-            frame_0034.jpg.geometric.bin
-            frame_0034.jpg.photometric.bin
-            frame_0035.jpg.geometric.bin
-            frame_0035.jpg.photometric.bin
-            frame_0036.jpg.geometric.bin
-            frame_0036.jpg.photometric.bin
-            frame_0037.jpg.geometric.bin
-            frame_0037.jpg.photometric.bin
-            frame_0038.jpg.geometric.bin
-            frame_0038.jpg.photometric.bin
-            frame_0039.jpg.geometric.bin
-            frame_0039.jpg.photometric.bin
-            frame_0040.jpg.geometric.bin
-            frame_0040.jpg.photometric.bin
-            frame_0041.jpg.geometric.bin
-            frame_0041.jpg.photometric.bin
-            frame_0042.jpg.geometric.bin
-            frame_0042.jpg.photometric.bin
-            frame_0043.jpg.geometric.bin
-            frame_0043.jpg.photometric.bin
-            frame_0044.jpg.geometric.bin
-            frame_0044.jpg.photometric.bin
-            frame_0045.jpg.geometric.bin
-            frame_0045.jpg.photometric.bin
-            frame_0046.jpg.geometric.bin
-            frame_0046.jpg.photometric.bin
-            frame_0047.jpg.geometric.bin
-            frame_0047.jpg.photometric.bin
-            frame_0048.jpg.geometric.bin
-            frame_0048.jpg.photometric.bin
-            frame_0049.jpg.geometric.bin
-            frame_0049.jpg.photometric.bin
-            frame_0050.jpg.geometric.bin
-            frame_0050.jpg.photometric.bin
-            frame_0051.jpg.geometric.bin
-            frame_0051.jpg.photometric.bin
-            frame_0052.jpg.geometric.bin
-            frame_0052.jpg.photometric.bin
-            frame_0053.jpg.geometric.bin
-            frame_0053.jpg.photometric.bin
           fusion.cfg
           masks/
             frame_0000.jpg.png
@@ -390,114 +313,40 @@ cap_29ab6fa1_v5_cream/
             frame_0052.jpg.png
             frame_0053.jpg.png
           normal_maps/
-            frame_0000.jpg.geometric.bin
             frame_0000.jpg.photometric.bin
-            frame_0001.jpg.geometric.bin
             frame_0001.jpg.photometric.bin
-            frame_0002.jpg.geometric.bin
             frame_0002.jpg.photometric.bin
-            frame_0003.jpg.geometric.bin
             frame_0003.jpg.photometric.bin
-            frame_0004.jpg.geometric.bin
             frame_0004.jpg.photometric.bin
-            frame_0005.jpg.geometric.bin
             frame_0005.jpg.photometric.bin
-            frame_0006.jpg.geometric.bin
             frame_0006.jpg.photometric.bin
-            frame_0007.jpg.geometric.bin
             frame_0007.jpg.photometric.bin
-            frame_0008.jpg.geometric.bin
             frame_0008.jpg.photometric.bin
-            frame_0009.jpg.geometric.bin
             frame_0009.jpg.photometric.bin
-            frame_0010.jpg.geometric.bin
             frame_0010.jpg.photometric.bin
-            frame_0011.jpg.geometric.bin
             frame_0011.jpg.photometric.bin
-            frame_0012.jpg.geometric.bin
             frame_0012.jpg.photometric.bin
-            frame_0013.jpg.geometric.bin
             frame_0013.jpg.photometric.bin
-            frame_0014.jpg.geometric.bin
             frame_0014.jpg.photometric.bin
-            frame_0015.jpg.geometric.bin
             frame_0015.jpg.photometric.bin
-            frame_0016.jpg.geometric.bin
             frame_0016.jpg.photometric.bin
-            frame_0017.jpg.geometric.bin
             frame_0017.jpg.photometric.bin
-            frame_0018.jpg.geometric.bin
             frame_0018.jpg.photometric.bin
-            frame_0019.jpg.geometric.bin
             frame_0019.jpg.photometric.bin
-            frame_0020.jpg.geometric.bin
             frame_0020.jpg.photometric.bin
-            frame_0021.jpg.geometric.bin
             frame_0021.jpg.photometric.bin
-            frame_0022.jpg.geometric.bin
             frame_0022.jpg.photometric.bin
-            frame_0023.jpg.geometric.bin
             frame_0023.jpg.photometric.bin
-            frame_0024.jpg.geometric.bin
             frame_0024.jpg.photometric.bin
-            frame_0025.jpg.geometric.bin
             frame_0025.jpg.photometric.bin
-            frame_0026.jpg.geometric.bin
             frame_0026.jpg.photometric.bin
-            frame_0027.jpg.geometric.bin
             frame_0027.jpg.photometric.bin
-            frame_0028.jpg.geometric.bin
             frame_0028.jpg.photometric.bin
-            frame_0029.jpg.geometric.bin
             frame_0029.jpg.photometric.bin
-            frame_0030.jpg.geometric.bin
             frame_0030.jpg.photometric.bin
-            frame_0031.jpg.geometric.bin
             frame_0031.jpg.photometric.bin
-            frame_0032.jpg.geometric.bin
             frame_0032.jpg.photometric.bin
-            frame_0033.jpg.geometric.bin
             frame_0033.jpg.photometric.bin
-            frame_0034.jpg.geometric.bin
-            frame_0034.jpg.photometric.bin
-            frame_0035.jpg.geometric.bin
-            frame_0035.jpg.photometric.bin
-            frame_0036.jpg.geometric.bin
-            frame_0036.jpg.photometric.bin
-            frame_0037.jpg.geometric.bin
-            frame_0037.jpg.photometric.bin
-            frame_0038.jpg.geometric.bin
-            frame_0038.jpg.photometric.bin
-            frame_0039.jpg.geometric.bin
-            frame_0039.jpg.photometric.bin
-            frame_0040.jpg.geometric.bin
-            frame_0040.jpg.photometric.bin
-            frame_0041.jpg.geometric.bin
-            frame_0041.jpg.photometric.bin
-            frame_0042.jpg.geometric.bin
-            frame_0042.jpg.photometric.bin
-            frame_0043.jpg.geometric.bin
-            frame_0043.jpg.photometric.bin
-            frame_0044.jpg.geometric.bin
-            frame_0044.jpg.photometric.bin
-            frame_0045.jpg.geometric.bin
-            frame_0045.jpg.photometric.bin
-            frame_0046.jpg.geometric.bin
-            frame_0046.jpg.photometric.bin
-            frame_0047.jpg.geometric.bin
-            frame_0047.jpg.photometric.bin
-            frame_0048.jpg.geometric.bin
-            frame_0048.jpg.photometric.bin
-            frame_0049.jpg.geometric.bin
-            frame_0049.jpg.photometric.bin
-            frame_0050.jpg.geometric.bin
-            frame_0050.jpg.photometric.bin
-            frame_0051.jpg.geometric.bin
-            frame_0051.jpg.photometric.bin
-            frame_0052.jpg.geometric.bin
-            frame_0052.jpg.photometric.bin
-            frame_0053.jpg.geometric.bin
-            frame_0053.jpg.photometric.bin
           patch-match.cfg
       denser_extraction_report.json
       extracted_frames/
@@ -720,7 +569,6 @@ cap_29ab6fa1_v5_cream/
           frame_0052.png
           frame_0053.json
           frame_0053.png
-      fusion_diagnostics.json
       images/
         frame_0000.jpg
         frame_0001.jpg
@@ -847,5 +695,4 @@ cap_29ab6fa1_v5_cream/
           points3D.bin
           project.ini
           rigs.bin
-    manifest.json
     reconstruction_audit.json

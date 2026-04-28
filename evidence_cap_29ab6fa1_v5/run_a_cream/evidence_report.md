@@ -1,6 +1,6 @@
 # Reconstruction Evidence Report: cap_29ab6fa1_v5_cream
 **Status:** ❌ FAILED
-**Exported At:** 2026-04-28T12:16:09.121863Z
+**Exported At:** 2026-04-28T12:33:15.088588Z
 
 ## Delivery Checklist Summary
 | Criterion | Status | Value | Required |
