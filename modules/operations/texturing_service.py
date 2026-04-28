@@ -25,6 +25,7 @@ from typing import Any, Dict, Optional, Tuple
 from modules.operations.logging_config import get_component_logger
 from modules.reconstruction_engine.output_manifest import OutputManifest
 from modules.utils.file_persistence import atomic_write_json, calculate_checksum
+from modules.operations.settings import settings
 import trimesh
 
 logger = get_component_logger("texturing_service")

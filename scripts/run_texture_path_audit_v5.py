@@ -16,8 +16,7 @@ def run_experiment(name, env_vars, capture_id, job_id, evidence_dir):
     cmd_recon = [
         "py", "run_real_recon.py",
         "--capture-id", capture_id,
-        "--job-id", job_id,
-        "--skip-extraction" # Speed up since frames already exist for cap_29ab6fa1
+        "--job-id", job_id
     ]
     print(f"Executing: {' '.join(cmd_recon)}")
     subprocess.run(cmd_recon, cwd=str(ROOT), env=env, check=True)
