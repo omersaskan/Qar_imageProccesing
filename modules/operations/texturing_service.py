@@ -203,13 +203,14 @@ class TexturingService:
             primary_atlas = generated_textures[0]
             repair_results = repair_service.repair_atlas(primary_atlas, expected_color=expected_color)
             
-            # Check for background contamination failure
+            # Check for background contamination failure (v6: use neutralized leakage)
             stats = repair_results.get("repaired_stats") or repair_results.get("stats") or {}
-            bg_ratio = stats.get("dominant_background_color_ratio", 0.0)
+            leakage = stats.get("neutralized_background_leakage", 0.0)
             
             # If fail due to background contamination, try stricter retry
-            if bg_ratio > 0.25: # Hard limit for white_cream
-                logger.warning(f"Excessive background contamination ({bg_ratio:.3f} > 0.25). Retrying with stricter frames...")
+            # SPRINT v6: Only retry if leakage is actually high, not just dominant color
+            if leakage > 0.15: # 15% leakage threshold for v6
+                logger.warning(f"Excessive background leakage ({leakage:.3f} > 0.15). Retrying with stricter frames...")
                 
                 # Retry 1: Top 12 frames
                 try:
@@ -226,9 +227,9 @@ class TexturingService:
                         primary_atlas = retry_results["texture_atlas_paths"][0]
                         repair_results = repair_service.repair_atlas(primary_atlas, expected_color=expected_color)
                         stats = repair_results.get("repaired_stats") or repair_results.get("stats") or {}
-                        bg_ratio = stats.get("dominant_background_color_ratio", 0.0)
+                        leakage = stats.get("neutralized_background_leakage", 0.0)
                         
-                        if bg_ratio <= 0.25:
+                        if leakage <= 0.15:
                             logger.info("Retry with Top 12 frames successful.")
                             texture_results = retry_results
                             generated_textures = retry_results["texture_atlas_paths"]
@@ -253,9 +254,9 @@ class TexturingService:
                                     primary_atlas = retry_masked_results["texture_atlas_paths"][0]
                                     repair_results = repair_service.repair_atlas(primary_atlas, expected_color=expected_color)
                                     stats = repair_results.get("repaired_stats") or repair_results.get("stats") or {}
-                                    bg_ratio = stats.get("dominant_background_color_ratio", 0.0)
+                                    leakage = stats.get("neutralized_background_leakage", 0.0)
                                     
-                                    logger.info(f"Retry with masked sources: bg_ratio={bg_ratio:.3f}")
+                                    logger.info(f"Retry with masked sources: leakage={leakage:.3f}")
                                     texture_results = retry_masked_results
                                     generated_textures = retry_masked_results["texture_atlas_paths"]
                 except Exception as retry_exc:
