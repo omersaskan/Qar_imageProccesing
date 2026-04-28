@@ -1,6 +1,7 @@
 # Phase 6.1B: SAM2 Video-Temporal Implementation Plan
-**Status:** DRAFT (Plan only)
-**Target:** Robust temporal segmentation using SAM2 Video Predictor.
+**Status:** REVIEWED / CLOSED (2026-04-28)
+**Target:** Robust temporal segmentation using SAM2 Video Predictor. (THRESHOLD NOT MET)
+
 
 ## 1. Overview
 Instead of per-frame image inference, this phase will implement SAM2's video propagation API. This allows the model to "track" an object through time, using information from previous frames to refine the current mask.

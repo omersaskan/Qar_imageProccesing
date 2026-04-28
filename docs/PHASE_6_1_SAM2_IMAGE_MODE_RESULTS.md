@@ -29,6 +29,12 @@ SAM2 image-mode (per-frame inference) is not accepted as the production default.
 ## 6. Recommendation: Evaluate Video-Temporal SAM2
 Proceed to **Phase 6.1B: SAM2 Video-Temporal Mode**. By leveraging temporal consistency, we expect to achieve the target robustness and >0.05 IoU gain.
 
+## 7. Phase 6.1 Final Closeout
+- **Final Decision**: SAM2 (Image & Video) remains **REVIEW-ONLY**.
+- **Production Default**: Remains **LEGACY (Rembg)**.
+- **Phase Status**: Closed as experimental success, production threshold failure.
+- **Next Step**: Expansion of evaluation dataset (Hard Cases) before further AI segmentation testing.
+
 > [!WARNING]
 > **Depth Anything remains BLOCKED**. 
-> Depth prior generation is gated until a segmentation pipeline consistently achieves the required IoU and stability benchmarks.
+> Depth prior generation is gated until a segmentation pipeline consistently achieves the required IoU and stability benchmarks on the expanded dataset.

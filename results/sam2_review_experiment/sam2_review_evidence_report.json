@@ -1,0 +1,24 @@
+{
+  "experiment_id": "sam2_tiny_review_20260428",
+  "ai_segmentation_used": true,
+  "review_only": true,
+  "production_ready_allowed": false,
+  "dense_mask_exact_matches": 27,
+  "dense_mask_fallback_white_ratio": 0.0,
+  "isolation_method": "mask_guided (SAM2.1 Tiny)",
+  "isolation_confidence": 0.941,
+  "fused_point_count": 52100,
+  "glb_validation": "review",
+  "delivery_status": "review_only",
+  "comparison_vs_legacy": {
+    "legacy_iou": 0.9004,
+    "sam2_iou": 0.9412,
+    "gain": 0.0408,
+    "status": "THRESHOLD_FAIL"
+  },
+  "observability": {
+    "masks_generated": 27,
+    "mask_propagation_failure_count": 0,
+    "propagation_status": "complete"
+  }
+}
