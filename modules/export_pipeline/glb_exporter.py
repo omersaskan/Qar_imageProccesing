@@ -209,7 +209,7 @@ class GLBExporter:
         if inspection.get("highest_black_pixel_ratio", 0.0) > settings.max_empty_texture_ratio:
             texture_quality_pass = False
             
-        delivery_ready = all_accessors and texture_success and texture_quality_pass
+        structural_export_ready = all_accessors and texture_success and texture_quality_pass
         
         if not all_accessors:
             export_status = "failed_validation"
@@ -227,7 +227,7 @@ class GLBExporter:
             "smoothing_mode": smoothing_mode,
             "texture_applied": texture_applied,
             "optimization_hooks": opt_report,
-            "delivery_ready": delivery_ready,
+            "structural_export_ready": structural_export_ready,
             "export_status": export_status,
             **inspection
         }

@@ -694,28 +694,48 @@ class IngestionWorker:
         point_cloud = None
         
         try:
-            workspace_path = Path(manifest.mesh_path).parent
-            if workspace_path.exists():
-                cameras = load_reconstruction_cameras(workspace_path)
+            mesh_path = Path(manifest.mesh_path)
+            workspace_path = mesh_path.parent
+            # Normalize: if mesh is in dense/, go up to attempt_dir so camera/mask
+            # loaders can find dense/sparse (undistorted model) and dense/stereo/masks
+            if workspace_path.name == "dense":
+                attempt_dir = workspace_path.parent
+            else:
+                attempt_dir = workspace_path
+            dense_dir = attempt_dir / "dense"
+            
+            if attempt_dir.exists():
+                cameras = load_reconstruction_cameras(attempt_dir)
                 if cameras:
-                    masks = load_reconstruction_masks(workspace_path, [c["name"] for c in cameras])
+                    # Pass camera dimensions so masks are resized to match if needed
+                    cam0 = cameras[0]
+                    masks = load_reconstruction_masks(
+                        attempt_dir,
+                        [c["name"] for c in cameras],
+                        expected_width=cam0["width"],
+                        expected_height=cam0["height"],
+                    )
                 else:
-                    logger.warning("[%s] No cameras found in workspace: %s", session.session_id, workspace_path)
+                    logger.warning("[%s] No cameras found in workspace: %s", session.session_id, attempt_dir)
                 
-                fused_path = workspace_path / "dense" / "fused.ply"
-                if fused_path.exists():
-                    try:
-                        import trimesh
-                        point_cloud = trimesh.load(str(fused_path))
-                        if not isinstance(point_cloud, trimesh.points.PointCloud):
-                            point_cloud = None
-                    except Exception as pc_err:
-                        logger.warning("Could not load fused point cloud for guidance: %s", pc_err)
+                # Load fused point cloud for guidance
+                fused_candidates = [dense_dir / "fused.ply", workspace_path / "fused.ply"]
+                for fused_path in fused_candidates:
+                    if fused_path.exists():
+                        try:
+                            import trimesh
+                            point_cloud = trimesh.load(str(fused_path))
+                            if not isinstance(point_cloud, trimesh.points.PointCloud):
+                                point_cloud = None
+                        except Exception as pc_err:
+                            logger.warning("Could not load fused point cloud for guidance: %s", pc_err)
+                        break
         except Exception as guide_err:
             logger.warning("[%s] Failed to resolve guidance data for cleanup: %s", session.session_id, guide_err)
         
-        logger.info("[%s] Cleanup Guidance: cameras=%s, masks=%s, point_cloud=%s", 
-                    session.session_id, len(cameras) if cameras else 0, len(masks) if masks else 0, bool(point_cloud))
+        camera_model_space = cameras[0].get("camera_model_space", "unknown") if cameras else "none"
+        logger.info("[%s] Cleanup Guidance: cameras=%s, masks=%s, point_cloud=%s, camera_model_space=%s", 
+                    session.session_id, len(cameras) if cameras else 0, len(masks) if masks else 0, bool(point_cloud), camera_model_space)
 
         try:
             metadata, cleanup_stats, cleaned_mesh_path = self.cleaner.process_cleanup(

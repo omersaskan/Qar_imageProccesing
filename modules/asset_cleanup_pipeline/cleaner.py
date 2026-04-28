@@ -172,6 +172,21 @@ class AssetCleaner:
         if isolation_stats.get("used_sam2"):
             delivery_ready = False
 
+        # ROOT CAUSE FIX: Semantic Quality Gate
+        iso_quality_status, iso_quality_msg = self._evaluate_isolation_quality(isolation_stats)
+        if iso_quality_status == "fail":
+            delivery_ready = False
+            isolation_stats["quality_status"] = "fail"
+            isolation_stats["quality_reason"] = iso_quality_msg
+            logger.warning("[%s] Isolation quality gate FAILED: %s", output_dir.name, iso_quality_msg)
+        elif iso_quality_status == "review":
+            delivery_ready = False
+            isolation_stats["quality_status"] = "review"
+            isolation_stats["quality_reason"] = iso_quality_msg
+            logger.info("[%s] Isolation quality gate flagged for REVIEW: %s", output_dir.name, iso_quality_msg)
+        else:
+            isolation_stats["quality_status"] = "pass"
+
         return {
             "cleanup_mode": "texture_safe_copy",
             "uv_preserved": True,
@@ -395,6 +410,21 @@ class AssetCleaner:
             if isolation_stats.get("used_sam2"):
                 delivery_ready = False
             
+            # ROOT CAUSE FIX: Semantic Quality Gate
+            iso_quality_status, iso_quality_msg = self._evaluate_isolation_quality(isolation_stats)
+            if iso_quality_status == "fail":
+                delivery_ready = False
+                isolation_stats["quality_status"] = "fail"
+                isolation_stats["quality_reason"] = iso_quality_msg
+                logger.warning("[%s] Isolation quality gate FAILED: %s", job_id, iso_quality_msg)
+            elif iso_quality_status == "review":
+                delivery_ready = False
+                isolation_stats["quality_status"] = "review"
+                isolation_stats["quality_reason"] = iso_quality_msg
+                logger.info("[%s] Isolation quality gate flagged for REVIEW: %s", job_id, iso_quality_msg)
+            else:
+                isolation_stats["quality_status"] = "pass"
+            
             logger.info("[%s] Cleanup pipeline finished. Output: %s, delivery_ready=%s", job_id, cleaned_mesh_path, delivery_ready)
             
             cleanup_stats = {
@@ -434,3 +464,27 @@ class AssetCleaner:
                 "retryable_from_fused_ply": True,
                 "reason": "System ran out of memory during mesh cleanup. Lowering Poisson density is recommended."
             }, ""
+
+    def _evaluate_isolation_quality(self, stats: Dict[str, Any]) -> Tuple[str, str]:
+        """
+        Hard gate for semantic isolation quality.
+        Returns (status, message) where status is 'pass', 'review', or 'fail'.
+        """
+        primary_share = stats.get("primary_face_share", 1.0)
+        kept_count = stats.get("kept_component_count", 1)
+        largest_share = stats.get("largest_kept_component_share", 1.0)
+        
+        # Rule 1: Primary component must be dominant in the isolated result
+        if primary_share < 0.50:
+            return "fail", f"Primary component is too small ({primary_share:.2%} of isolated mesh). Fragmented result."
+            
+        # Rule 2: If multiple components are kept, one should be clearly dominant
+        if kept_count > 1 and largest_share < 0.70:
+            return "review", f"Multiple components kept ({kept_count}) without a dominant one (largest={largest_share:.2%}). Contamination likely."
+            
+        # Rule 3: Isolation confidence (total_score of primary)
+        confidence = stats.get("isolation_confidence", 0.0)
+        if confidence < 0.35:
+            return "review", f"Low isolation confidence ({confidence:.2f})."
+            
+        return "pass", ""

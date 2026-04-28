@@ -502,6 +502,15 @@ class MeshIsolator:
         final_faces = int(len(final_mesh.faces))
         removed_face_ratio = (initial_faces - final_faces) / max(initial_faces, 1)
 
+        # Compute detailed quality metrics for post-cleanup gating
+        primary_faces = int(len(kept_components[0].faces))
+        primary_face_share = primary_faces / max(final_faces, 1)
+        kept_to_initial_face_ratio = final_faces / max(initial_faces, 1)
+        
+        # Largest kept component (may differ from primary if sorted differently)
+        largest_kept_faces = max(len(c.faces) for c in kept_components)
+        largest_kept_component_share = largest_kept_faces / max(final_faces, 1)
+
         # Final Summary Metrics
         stats = {
             "initial_faces": initial_faces,
@@ -514,9 +523,16 @@ class MeshIsolator:
             "final_faces": final_faces,
             "final_vertices": int(len(final_mesh.vertices)),
             "removed_face_ratio": float(removed_face_ratio),
+            "primary_component_faces": primary_faces,
+            "primary_face_share": float(primary_face_share),
+            "total_kept_faces": final_faces,
+            "kept_to_initial_face_ratio": float(kept_to_initial_face_ratio),
+            "largest_kept_component_share": float(largest_kept_component_share),
             "object_isolation_status": "success" if final_faces > 0 else "failed",
             "object_isolation_method": isolation_method,
             "isolation_confidence": float(best_scores["total_score"]),
+            "selected_component_score": float(best_scores["total_score"]),
+            "compactness_score": float(best_scores.get("compactness_score", 0.0)),
             "used_sam2": used_sam2,
             "mask_support_ratio": float(best_scores.get("mask_score", 0.0)),
             "point_cloud_support_ratio": float(best_scores.get("pc_score", 0.0)),

@@ -679,7 +679,9 @@ class COLMAPAdapter(ReconstructionAdapter):
             "dense_image_count": len(images),
             "dense_mask_count": 0,
             "dense_mask_exact_filename_matches": 0,
+            "source_mask_dimension_matches": 0,
             "dense_mask_dimension_matches": 0,
+            "dense_mask_resize_count": 0,
             "dense_mask_fallback_white_count": 0,
             "dense_mask_fallback_white_ratio": 1.0,
             "dense_mask_generation_mode": "feature_mask_resize",
@@ -721,8 +723,9 @@ class COLMAPAdapter(ReconstructionAdapter):
             else:
                 if mask.shape[:2] != (h, w):
                     mask = cv2.resize(mask, (w, h), interpolation=cv2.INTER_NEAREST)
+                    stats["dense_mask_resize_count"] += 1
                 else:
-                    stats["dense_mask_dimension_matches"] += 1
+                    stats["source_mask_dimension_matches"] += 1
                     
                 _, binary = cv2.threshold(mask, 1, 255, cv2.THRESH_BINARY)
                 binary = cv2.dilate(binary, kernel, iterations=1)
@@ -748,12 +751,26 @@ class COLMAPAdapter(ReconstructionAdapter):
             stats["dense_mask_fallback_white_count"] / max(stats["dense_image_count"], 1)
         )
 
+        # Post-generation validation: verify written masks match dense image dimensions
+        verified_dimension_matches = 0
+        for img_file in images:
+            mask_out = stereo_masks_dir / f"{img_file.name}.png"
+            if mask_out.exists():
+                written_mask = self._read_image(mask_out, cv2.IMREAD_GRAYSCALE)
+                if written_mask is not None:
+                    img = self._read_image(img_file, cv2.IMREAD_COLOR)
+                    if img is not None and written_mask.shape[:2] == img.shape[:2]:
+                        verified_dimension_matches += 1
+        stats["dense_mask_dimension_matches"] = verified_dimension_matches
+
         log_file.write("\n--- Dense Masking Summary ---\n")
         log_file.write(f"Dense masks directory: {stats['dense_masks_dir']}\n")
         log_file.write(f"Dense images: {stats['dense_image_count']}\n")
         log_file.write(f"Dense masks written: {stats['dense_mask_count']}\n")
         log_file.write(f"Exact filename matches: {stats['dense_mask_exact_filename_matches']}\n")
-        log_file.write(f"Dimension matches: {stats['dense_mask_dimension_matches']}\n")
+        log_file.write(f"Source mask dimension matches (pre-resize): {stats['source_mask_dimension_matches']}\n")
+        log_file.write(f"Dense mask dimension matches (post-write): {stats['dense_mask_dimension_matches']}\n")
+        log_file.write(f"Resized masks: {stats['dense_mask_resize_count']}\n")
         log_file.write(f"Fallback white count: {stats['dense_mask_fallback_white_count']}\n")
         log_file.write(f"Fallback white ratio: {stats['dense_mask_fallback_white_ratio']:.2%}\n")
         
