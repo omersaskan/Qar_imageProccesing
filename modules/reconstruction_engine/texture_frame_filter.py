@@ -17,7 +17,7 @@ class TextureFrameFilter:
         self.max_luminance = 245.0 # avoid blown out
         self.min_mask_coverage = 0.05 # 5% of image
         
-    def filter_session_images(self, image_folder: Path, output_dir: Path, expected_color: str = "unknown", target_count: int = 20) -> Dict[str, Any]:
+    def filter_session_images(self, image_folder: Path, output_dir: Path, dense_workspace: Path, expected_color: str = "unknown", target_count: int = 20) -> Dict[str, Any]:
         """
         Analyzes and filters images for texturing.
         Returns path to filtered images directory and metadata.
@@ -133,22 +133,16 @@ class TextureFrameFilter:
         selected_stats = []
         coverage_gap_detected = False
         max_gap_degrees = 0.0
+        cameras_loaded = False
+        azimuths_computed = 0
+        selected_azimuths = []
 
         try:
             from modules.asset_cleanup_pipeline.camera_projection import load_reconstruction_cameras
-            # Try to load cameras from the same job structure
-            # output_dir is likely the job_dir or a subfolder of it
-            recon_root = output_dir
-            if not (recon_root / "sparse").exists() and not (recon_root / "dense").exists():
-                # Try parent (we might be in 'texturing' subfolder)
-                recon_root = output_dir.parent
-                
-            if not (recon_root / "sparse").exists() and not (recon_root / "dense").exists():
-                # Try grandparent (we might be in 'texturing/retry_X' subfolder)
-                recon_root = output_dir.parent.parent
             
-            cameras = load_reconstruction_cameras(recon_root)
+            cameras = load_reconstruction_cameras(dense_workspace)
             if cameras:
+                cameras_loaded = True
                 # Calculate azimuths for all analyzed frames
                 name_to_azimuth = {}
                 for cam in cameras:
@@ -157,6 +151,8 @@ class TextureFrameFilter:
                     C = -R.T @ t
                     azimuth = float(np.degrees(np.arctan2(C[0], C[2])))
                     name_to_azimuth[cam["name"]] = azimuth
+                
+                azimuths_computed = len(name_to_azimuth)
                 
                 for s in analyzed_stats:
                     s["azimuth"] = name_to_azimuth.get(s["name"])
@@ -207,6 +203,7 @@ class TextureFrameFilter:
                         
                         if best_match:
                             selected_stats.append(best_match)
+                            selected_azimuths.append(best_match["azimuth"])
                 else:
                     logger.warning("No camera azimuths available for analyzed frames. Falling back to quality ranking.")
             else:
@@ -287,6 +284,9 @@ class TextureFrameFilter:
             "rejected_count": len(rejected_stats),
             "fallback_used": fallback_used,
             "has_masks_available": has_masks,
+            "cameras_loaded_for_texture_selection": cameras_loaded,
+            "azimuths_computed": azimuths_computed,
+            "selected_azimuths": selected_azimuths,
             "coverage_gap_detected": coverage_gap_detected,
             "max_gap_degrees": max_gap_degrees,
             "recapture_required": coverage_gap_detected,

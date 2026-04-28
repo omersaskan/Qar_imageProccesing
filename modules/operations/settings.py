@@ -151,6 +151,7 @@ class Settings(BaseSettings):
     texture_use_compatible_neutralization: bool = Field(True, validation_alias="TEXTURE_USE_COMPATIBLE_NEUTRALIZATION")
     texture_retry_raw_all: bool = Field(True, validation_alias="TEXTURE_RETRY_RAW_ALL")
     texture_max_selected_frames: int = Field(20, validation_alias="TEXTURE_MAX_SELECTED_FRAMES")
+    texture_neutralization_type: str = Field("cream", validation_alias="TEXTURE_NEUTRALIZATION_TYPE")
 
     # --- TEXTURE QUALITY QA ---
     max_black_pixel_ratio: float = Field(0.20, validation_alias="MAX_BLACK_PIXEL_RATIO")

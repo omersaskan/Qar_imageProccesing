@@ -171,6 +171,7 @@ class TexturingService:
                 selected_mesh=cleanup_stats["pre_aligned_mesh_path"],
                 output_dir=texturing_dir,
                 expected_color=expected_color,
+                neutralization_type=settings.texture_neutralization_type,
             )
         except Exception as exc:
             logger.warning(f"OpenMVS texturing failed (degraded): {exc}")
@@ -216,7 +217,8 @@ class TexturingService:
                         selected_mesh=cleanup_stats["pre_aligned_mesh_path"],
                         output_dir=texturing_dir / "retry_top12",
                         expected_color=expected_color,
-                        top_n=12
+                        top_n=12,
+                        neutralization_type=settings.texture_neutralization_type,
                     )
                     if retry_results.get("texture_atlas_paths"):
                         primary_atlas = retry_results["texture_atlas_paths"][0]
@@ -242,7 +244,8 @@ class TexturingService:
                                     selected_mesh=cleanup_stats["pre_aligned_mesh_path"],
                                     output_dir=texturing_dir / "retry_masked",
                                     expected_color=expected_color,
-                                    image_folder_override=masked_images_dir
+                                    image_folder_override=masked_images_dir,
+                                    neutralization_type=settings.texture_neutralization_type,
                                 )
                                 if retry_masked_results.get("texture_atlas_paths"):
                                     primary_atlas = retry_masked_results["texture_atlas_paths"][0]

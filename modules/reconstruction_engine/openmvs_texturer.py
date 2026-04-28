@@ -101,12 +101,14 @@ class OpenMVSTexturer:
         selected_names: List[str], 
         masked_images_dir: Optional[Path] = None,
         use_masks: bool = False,
+        neutralization_type: str = "cream",
         log_file = None
-    ) -> None:
+    ) -> Dict[str, Any]:
         """
         Creates a folder containing all original filenames.
         - Selected frames: copied from original or masked_images_dir.
-        - Rejected frames: neutralized (solid cream).
+        - Rejected frames: neutralized (solid cream or black mask).
+        Returns counts of images processed from each source.
         """
         if target_dir.exists():
             shutil.rmtree(target_dir)
@@ -119,36 +121,61 @@ class OpenMVSTexturer:
             log_file.write(f"Creating compatible image folder at {target_dir}\n")
             log_file.write(f"Original images count: {len(original_images)}\n")
             log_file.write(f"Selected images count: {len(selected_names_set)}\n")
-            log_file.write(f"Using masks: {use_masks}\n")
+            log_file.write(f"Using masks for selected: {use_masks}\n")
+            log_file.write(f"Neutralization type: {neutralization_type}\n")
 
         # Cream color: (220, 245, 245) in BGR
         CREAM_COLOR = (220, 245, 245)
+        
+        counts = {
+            "selected_from_masked": 0,
+            "selected_from_raw": 0,
+            "rejected_neutralized": 0
+        }
 
         for img_path in original_images:
             dest_path = target_dir / img_path.name
             if img_path.name in selected_names_set:
                 # Use high-quality version
                 source = img_path
+                from_masked = False
                 if use_masks and masked_images_dir:
                     m_source = masked_images_dir / img_path.name
                     if m_source.exists():
                         source = m_source
+                        from_masked = True
                 
                 shutil.copy2(source, dest_path)
+                if from_masked:
+                    counts["selected_from_masked"] += 1
+                else:
+                    counts["selected_from_raw"] += 1
             else:
                 # Create neutralized version
                 try:
+                    if neutralization_type == "selected_only":
+                        # For experimental 'C', we just skip these if possible. 
+                        # But OpenMVS needs them. So we'll use black as safest neutral.
+                        neutralization_type = "black_mask" 
+                    
                     img = cv2.imread(str(img_path))
                     if img is not None:
                         h, w = img.shape[:2]
-                        cream = np.full((h, w, 3), CREAM_COLOR, dtype=np.uint8)
-                        cv2.imwrite(str(dest_path), cream)
+                        if neutralization_type == "black_mask":
+                            neutral = np.zeros((h, w, 3), dtype=np.uint8)
+                        else: # default cream
+                            neutral = np.full((h, w, 3), CREAM_COLOR, dtype=np.uint8)
+                        
+                        cv2.imwrite(str(dest_path), neutral)
+                        counts["rejected_neutralized"] += 1
                     else:
                         shutil.copy2(img_path, dest_path) # Fallback
                 except Exception as e:
                     if log_file:
                         log_file.write(f"Warning: Failed to neutralize {img_path.name}: {e}\n")
                     shutil.copy2(img_path, dest_path)
+
+        return counts
 
     def _check_image_folder_completeness(self, dense_workspace: Path, image_folder: Path, log_file) -> None:
         """
@@ -184,6 +211,7 @@ class OpenMVSTexturer:
         expected_color: str = "unknown",
         image_folder_override: Optional[Path] = None,
         top_n: Optional[int] = None,
+        neutralization_type: str = "cream",
     ) -> Dict[str, Any]:
         """
         Runs InterfaceCOLMAP and then TextureMesh with a retry ladder.
@@ -200,6 +228,22 @@ class OpenMVSTexturer:
         max_selected_frames = settings.texture_max_selected_frames
         
         used_output_stem = "textured_model"
+        
+        # Metrics to persist
+        texture_metrics = {
+            "selected_texture_frame_names": [],
+            "masked_images_dir": None,
+            "use_masks_for_selected_frames": False,
+            "selected_frames_from_masked": 0,
+            "selected_frames_from_raw": 0,
+            "rejected_frames_neutralized": 0,
+            "neutralization_type": neutralization_type,
+            "cameras_loaded_for_texture_selection": False,
+            "azimuths_computed": 0,
+            "selected_frame_azimuth_list": [],
+            "max_texture_coverage_gap_degrees": 0.0
+        }
+
         with open(log_path, "w", encoding="utf-8") as log_file:
             log_file.write(f"Starting OpenMVS Texturing using mesh: {selected_mesh}\n")
 
@@ -227,18 +271,25 @@ class OpenMVSTexturer:
                 has_masks_available = is_masked
                 masked_images_dir = image_folder_override if is_masked else None
                 
-                self._create_compatible_image_folder(
+                source_counts = self._create_compatible_image_folder(
                     original_images_dir=image_folder,
                     target_dir=compatible_image_folder,
                     selected_names=selected_names,
                     masked_images_dir=masked_images_dir,
                     use_masks=is_masked,
+                    neutralization_type=neutralization_type,
                     log_file=log_file
                 )
             else:
                 from .texture_frame_filter import TextureFrameFilter
                 filter = TextureFrameFilter()
-                filter_results = filter.filter_session_images(image_folder, output_dir, expected_color=expected_color, target_count=top_n or max_selected_frames)
+                filter_results = filter.filter_session_images(
+                    image_folder, 
+                    output_dir, 
+                    dense_workspace=dense_workspace,
+                    expected_color=expected_color, 
+                    target_count=top_n or max_selected_frames
+                )
                 
                 selected_frames = filter_results.get("selected_frames", [])
                 has_masks_available = filter_results.get("has_masks_available", False)
@@ -246,14 +297,36 @@ class OpenMVSTexturer:
                 
                 selected_names = [s["name"] for s in selected_frames]
                 
-                self._create_compatible_image_folder(
+                # BUG FIX: If has_masks_available and masked_images_dir exists, use masks
+                use_masks_for_selected = has_masks_available and masked_images_dir is not None and masked_images_dir.exists()
+                
+                source_counts = self._create_compatible_image_folder(
                     original_images_dir=image_folder,
                     target_dir=compatible_image_folder,
                     selected_names=selected_names,
                     masked_images_dir=masked_images_dir,
-                    use_masks=False, # Default to compatible neutralization
+                    use_masks=use_masks_for_selected,
+                    neutralization_type=neutralization_type,
                     log_file=log_file
                 )
+                
+                # Update metrics
+                texture_metrics["use_masks_for_selected_frames"] = use_masks_for_selected
+                texture_metrics["cameras_loaded_for_texture_selection"] = filter_results.get("cameras_loaded_for_texture_selection", False)
+                texture_metrics["azimuths_computed"] = filter_results.get("azimuths_computed", 0)
+                texture_metrics["selected_frame_azimuth_list"] = filter_results.get("selected_azimuths", [])
+                texture_metrics["max_texture_coverage_gap_degrees"] = filter_results.get("max_gap_degrees", 0.0)
+
+            # Populate metrics
+            texture_metrics["selected_texture_frame_names"] = selected_names
+            texture_metrics["masked_images_dir"] = str(masked_images_dir) if masked_images_dir else None
+            texture_metrics["selected_frames_from_masked"] = source_counts["selected_from_masked"]
+            texture_metrics["selected_frames_from_raw"] = source_counts["selected_from_raw"]
+            texture_metrics["rejected_frames_neutralized"] = source_counts["rejected_neutralized"]
+
+            # Persist metrics to disk for later reporting
+            with open(output_dir / "texturing_metrics.json", "w") as f:
+                json.dump(texture_metrics, f, indent=2)
 
             # --- OPERATOR GUIDANCE ---
             operator_guidance = None
