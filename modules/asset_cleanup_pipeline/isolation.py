@@ -461,16 +461,36 @@ class MeshIsolator:
             
             best_score = ranked[0][0]
             best_faces = len(ranked[0][2].faces)
+            total_faces_ranked = sum(len(r[2].faces) for r in ranked)
             
-            kept_components = [ranked[0][2]]
-            best_scores = ranked[0][3]
-            all_scores[ranked[0][1]]["decision"] = "kept_primary"
+            # SPRINT Hardening: min_face_share guard (1%)
+            # If top-score component is < 1% of final mesh, and we have a much larger component
+            primary_idx_in_ranked = 0
+            primary_assignment_result = "normal"
+            
+            if best_faces < total_faces_ranked * 0.01:
+                # Find largest
+                largest_idx_in_ranked = int(np.argmax([len(r[2].faces) for r in ranked]))
+                largest_faces = len(ranked[largest_idx_in_ranked][2].faces)
+                
+                if largest_faces > total_faces_ranked * 0.50:
+                    # Conflict! Tiny fragment has higher score than the main body.
+                    primary_assignment_result = "primary_assignment_conflict"
+                    logger.warning(f"Primary assignment conflict: Tiny component (idx={ranked[0][1]}, faces={best_faces}) has higher score than main body (idx={ranked[largest_idx_in_ranked][1]}, faces={largest_faces}). Swapping primary.")
+                    primary_idx_in_ranked = largest_idx_in_ranked
+            
+            primary_comp = ranked[primary_idx_in_ranked][2]
+            best_scores = ranked[primary_idx_in_ranked][3]
+            kept_components = [primary_comp]
+            all_scores[ranked[primary_idx_in_ranked][1]]["decision"] = "kept_primary"
             
             # Keep secondary components if they are strong
             # We are more strict if we have semantic guidance
             threshold_ratio = 0.75 if isolation_method != "geometric_only" else 0.70
             
-            for score, idx, comp, s in ranked[1:8]:
+            for i, (score, idx, comp, s) in enumerate(ranked):
+                if i == primary_idx_in_ranked: continue # Skip primary
+                
                 if score > best_score * threshold_ratio and len(comp.faces) > best_faces * 0.05:
                     kept_components.append(comp)
                     all_scores[idx]["decision"] = "kept_secondary"
@@ -536,8 +556,9 @@ class MeshIsolator:
             "used_sam2": used_sam2,
             "mask_support_ratio": float(best_scores.get("mask_score", 0.0)),
             "point_cloud_support_ratio": float(best_scores.get("pc_score", 0.0)),
-            "supported_view_count": int(mask_supports.get(ranked[0][1], {}).get("supported_view_count", 0)) if ranked else 0,
+            "supported_view_count": int(mask_supports.get(ranked[primary_idx_in_ranked][1], {}).get("supported_view_count", 0)) if ranked else 0,
             "reason_if_geometric_fallback": reason_if_geometric_fallback,
+            "primary_assignment_result": primary_assignment_result,
         }
 
         # Debug export

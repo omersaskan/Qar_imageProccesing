@@ -163,9 +163,11 @@ class ValidationReport(BaseModel):
     default_fill_or_flat_color_ratio: float = 0.0
     alpha_empty_ratio: float = 0.0
 
-    # Delivery Strategy
-    is_mobile_ready: bool = False
-    delivery_status: str = "pending" # pending|delivery_ready|archive_only
+    # Hardening metrics
+    geometry_contamination_score: float = 0.0
+    texture_background_contamination_ratio: float = 0.0
+    validation_failure_source: Optional[str] = None
+    primary_assignment_result: Optional[str] = None
 
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 

@@ -167,6 +167,15 @@ class TextureFrameFilter:
                     mask_path = mask_folder / (img_path.name + ".png")
                 
                 if mask_path.exists():
+                    mask_stats = self._analyze_mask_quality(mask_path)
+                    s["mask_qa"] = mask_stats
+                    
+                    # SPRINT Hardening: Reject if mask is terrible
+                    if mask_stats["occupancy_ratio"] < 0.01 or mask_stats["border_touch_score"] > 0.8:
+                        logger.warning(f"Rejecting masked frame {img_path.name} due to poor mask QA: {mask_stats}")
+                        s["masked_source_generated"] = False
+                        continue
+
                     try:
                         img = cv2.imread(str(img_path))
                         mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
@@ -298,3 +307,43 @@ class TextureFrameFilter:
             sheet[r*h:(r+1)*h, c*w:(c+1)*w] = thumb
             
         cv2.imwrite(str(output_path), sheet)
+
+    def _analyze_mask_quality(self, mask_path: Path) -> Dict[str, Any]:
+        mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
+        if mask is None:
+            return {"occupancy_ratio": 0.0, "border_touch_score": 1.0, "error": "load_failed"}
+        
+        h, w = mask.shape
+        binary = (mask > 127).astype(np.uint8)
+        
+        # 1. Occupancy
+        white_pixels = np.count_nonzero(binary)
+        occupancy = white_pixels / (h * w)
+        
+        # 2. Border Touch
+        top = np.any(binary[0, :])
+        bottom = np.any(binary[-1, :])
+        left = np.any(binary[:, 0])
+        right = np.any(binary[:, -1])
+        border_touch_score = (int(top) + int(bottom) + int(left) + int(right)) / 4.0
+        
+        # 3. Foreground BBox Quality
+        coords = np.column_stack(np.where(binary > 0))
+        if coords.size > 0:
+            y_min, x_min = coords.min(axis=0)
+            y_max, x_max = coords.max(axis=0)
+            bw, bh = x_max - x_min, y_max - y_min
+            bbox_occupancy = white_pixels / max(bw * bh, 1)
+            # Centrality
+            cx, cy = (x_min + x_max) / 2.0, (y_min + y_max) / 2.0
+            centrality = 1.0 - (abs(cx - w/2) / (w/2) + abs(cy - h/2) / (h/2)) / 2.0
+        else:
+            bbox_occupancy = 0.0
+            centrality = 0.0
+            
+        return {
+            "occupancy_ratio": float(occupancy),
+            "border_touch_score": float(border_touch_score),
+            "bbox_occupancy": float(bbox_occupancy),
+            "centrality": float(centrality)
+        }

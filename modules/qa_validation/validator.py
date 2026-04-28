@@ -136,11 +136,28 @@ class AssetValidator:
         largest_component_share = float(iso_stats.get("largest_kept_component_share", 1.0))
         kept_to_initial_face_ratio = float(iso_stats.get("kept_to_initial_face_ratio", final_faces / initial_faces))
         
-        contamination_score = (
-            (1.0 - largest_component_share) * 0.70  # Most weight on dominance within output
-            + float(iso_stats.get("removed_plane_face_share", 0.0)) * 0.20
-            + (kept_to_initial_face_ratio * 0.10) # Tiny weight on how much of scene we kept
+        # SPRINT Hardening: Split metrics
+        geometry_contamination_score = (
+            (1.0 - largest_component_share) * 0.85
+            + float(iso_stats.get("removed_plane_face_share", 0.0)) * 0.15
         )
+        
+        texture_background_contamination_ratio = float(texture_quality_stats.get("dominant_background_color_ratio", 0.0))
+        
+        # Legacy monolithic contamination_score (for backward compatibility if needed)
+        contamination_score = (geometry_contamination_score * 0.5) + (texture_background_contamination_ratio * 0.5)
+        
+        # Failure Source mapping
+        failure_source = None
+        if blocking_checks:
+            if any("contamination" in c for c in blocking_checks):
+                failure_source = "isolation"
+            elif any("texture" in c for c in blocking_checks):
+                failure_source = "texturing"
+            elif "polycount" in blocking_checks:
+                failure_source = "reconstruction_density"
+            else:
+                failure_source = "generic"
         
         material_grade = self._calculate_material_grade(asset_data)
 
@@ -185,6 +202,12 @@ class AssetValidator:
             final_decision=final_decision,
             is_mobile_ready=is_mobile_ready,
             delivery_status=delivery_status,
+            
+            # Hardening metrics
+            geometry_contamination_score=geometry_contamination_score,
+            texture_background_contamination_ratio=texture_background_contamination_ratio,
+            validation_failure_source=failure_source,
+            primary_assignment_result=iso_stats.get("primary_assignment_result", "normal"),
         )
 
     def _calculate_grade(self, poly_count: int) -> str:
