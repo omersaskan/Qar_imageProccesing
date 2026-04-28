@@ -9,6 +9,7 @@ Features:
 - GT Metadata awareness: excludes invalid frames from corrected metrics.
 - Phase isolation: forces settings for legacy/SAM2 phases.
 - Video Mode: uses temporal propagation for consistency.
+- Observability: detailed status and error tracking.
 """
 
 import argparse
@@ -247,27 +248,35 @@ def run_evaluation(args):
             
             # Seed selection
             seed_box = None
+            seed_source = "prompt_mode"
             if mode == "manual_first_frame_box" and manual_first_frame_box:
                 seed_box = manual_first_frame_box
+                seed_source = "gt_frame_0000"
             elif mode in ["center_box", "legacy_bbox"]:
                 seed_box = get_gt_bbox(legacy_mask_list[0]) if legacy_mask_list[0].any() else None
+                seed_source = "legacy_mask_f0"
             
             # Propagation
             video_masks = backend.segment_video(
                 frames_dir=frames_dir,
                 seed_frame_idx=0,
                 seed_box=seed_box,
+                seed_prompt_source=seed_source,
                 output_dir=None
             )
             
-            if not video_masks:
-                logger.error(f"Video propagation failed for mode {mode}")
-                continue
+            if not video_masks and not backend.video_propagation_failed:
+                logger.error(f"Video propagation returned no masks for mode {mode}")
+                backend.video_propagation_failed = True
 
             for i, f_path in enumerate(frame_files):
-                mask = video_masks.get(i, np.zeros_like(legacy_mask_list[0]))
-                sam2_mask_list.append(mask)
+                mask = video_masks.get(i)
+                if mask is None:
+                    # Mark missing frame
+                    mask = np.zeros_like(legacy_mask_list[0])
+                    # backend.mask_propagation_failure_count is already updated in backend
                 
+                sam2_mask_list.append(mask)
                 entry = {"frame": f_path.name, "prompt_mode": mode}
                 stem = f_path.stem
                 if stem in gt_masks:
@@ -369,16 +378,17 @@ def run_evaluation(args):
     
     summary_table = []
     summary_table.append(f"### SAM2 {args.sam2_mode.upper()} Results")
-    summary_table.append("| Mode | Corr IoU | Corr Gain | Corr Leak | Jitter | Status |")
-    summary_table.append("| :--- | :--- | :--- | :--- | :--- | :--- |")
+    summary_table.append("| Mode | Corr IoU | Corr Gain | Corr Leak | Jitter | Failures | Status |")
+    summary_table.append("| :--- | :--- | :--- | :--- | :--- | :--- | :--- |")
     for r in ranked:
         m = r["metrics_corrected"]
         gain_str = f"{m['iou_gain']:+.4f}"
         jitter = r["temporal_stability"]["sam2"]["centroid_jitter"]
+        fails = r["sam2_status"].get("mask_propagation_failure_count", 0)
         summary_table.append(
             f"| {r['prompt_mode']} | {m['sam2_iou']:.4f} | {gain_str} | "
-            f"{m['sam2_leakage']:.4f} | {jitter:.2f} | "
-            f"{'PASS' if m['iou_gain'] >= 0.05 else 'FAIL'} |"
+            f"{m['sam2_leakage']:.4f} | {jitter:.2f} | {fails} | "
+            f"{'PASS' if m['iou_gain'] >= 0.05 and fails == 0 else 'FAIL'} |"
         )
 
     final_results = {
