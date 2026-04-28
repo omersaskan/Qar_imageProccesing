@@ -32,10 +32,19 @@ logging.basicConfig(
 )
 logger = logging.getLogger("RealRecon")
 
+import argparse
+
 def run():
-    video_path = str(ROOT / "data" / "captures" / "cap_50ab7977" / "video" / "raw_video.mp4")
-    session_id = "real_session_001"
-    job_id = f"job_real_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    parser = argparse.ArgumentParser(description="Real End-to-End Reconstruction")
+    parser.add_argument("--capture-id", type=str, default="cap_50ab7977")
+    parser.add_argument("--job-id", type=str)
+    parser.add_argument("--session-id", type=str, default="real_session_001")
+    args = parser.parse_args()
+
+    capture_id = args.capture_id
+    video_path = str(ROOT / "data" / "captures" / capture_id / "video" / "raw_video.mp4")
+    session_id = args.session_id
+    job_id = args.job_id or f"job_real_{capture_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     
     work_dir = ROOT / "data" / "reconstructions" / job_id
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -123,9 +132,9 @@ def run():
     logger.info(f"Validation Result: {validation_report.final_decision}")
     
     # Save final artifacts for user output
-    with open("cleanup_stats.json", "w") as f: json.dump(cleanup_stats, f, indent=2)
-    with open("export_metrics.json", "w") as f: json.dump(export_report, f, indent=2)
-    with open("validation_report.json", "w") as f: json.dump(validation_report.model_dump(mode="json"), f, indent=2)
+    with open(work_dir / "cleanup_stats.json", "w") as f: json.dump(cleanup_stats, f, indent=2)
+    with open(work_dir / "export_metrics.json", "w") as f: json.dump(export_report, f, indent=2)
+    with open(work_dir / "validation_report.json", "w") as f: json.dump(validation_report.model_dump(mode="json"), f, indent=2)
     
     logger.info("--- ALL STEPS COMPLETED ---")
     print(f"\nFinal GLB saved at: {export_output}")
