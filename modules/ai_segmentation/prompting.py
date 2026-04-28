@@ -5,6 +5,8 @@ SAM2 Prompt Generation Utility
 Generates prompts for SAM2 inference from various sources:
 - center_point: frame center or legacy mask centroid
 - center_box: legacy mask bounding box if available
+- legacy_bbox: explicitly use legacy mask bbox
+- legacy_centroid: explicitly use legacy mask centroid
 - auto: prefers legacy mask bbox if confidence is reasonable,
         otherwise falls back to center point
 
@@ -25,27 +27,39 @@ def generate_prompts(
     legacy_mask: Optional[np.ndarray] = None,
     legacy_meta: Optional[Dict[str, Any]] = None,
     confidence_threshold: float = 0.40,
+    manual_prompt: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Generate SAM2 prompts for a single frame.
 
     Args:
         frame_shape: (height, width) of the frame.
-        mode: One of "center_point", "center_box", "auto".
+        mode: One of "center_point", "center_box", "legacy_bbox", "legacy_centroid", "auto".
         legacy_mask: Optional binary mask from legacy segmentation.
         legacy_meta: Optional metadata dict from legacy segmentation.
         confidence_threshold: Minimum legacy confidence for auto mode
             to trust the legacy bbox.
+        manual_prompt: Optional dict with "bbox" or "points" to override everything.
 
     Returns:
         dict with keys:
             prompt_mode: str — actual mode used
-            prompt_source: str — "legacy_mask", "frame_center", etc.
+            prompt_source: str — "legacy_mask", "frame_center", "manual", etc.
             bbox: Optional[List[int]] — [x1, y1, x2, y2] if applicable
             points: Optional[List[List[int]]] — [[x, y]] if applicable
             labels: Optional[List[int]] — [1] for foreground points
             confidence: float — confidence in the prompt quality
     """
+    if manual_prompt:
+        return {
+            "prompt_mode": "manual",
+            "prompt_source": "manual_override",
+            "bbox": manual_prompt.get("bbox"),
+            "points": manual_prompt.get("points"),
+            "labels": manual_prompt.get("labels", [1] * len(manual_prompt.get("points", []))),
+            "confidence": 1.0,
+        }
+
     h, w = frame_shape
 
     # Try to extract bbox / centroid from legacy mask
@@ -65,14 +79,13 @@ def generate_prompts(
             resolved_mode = "center_box"
         else:
             resolved_mode = "center_point"
-        logger.debug(
-            f"Auto prompt resolved to '{resolved_mode}' "
-            f"(legacy_conf={legacy_confidence:.2f}, threshold={confidence_threshold})"
-        )
 
-    if resolved_mode == "center_box":
-        return _make_box_prompt(h, w, legacy_bbox, legacy_centroid, legacy_confidence)
+    if resolved_mode in ["center_box", "legacy_bbox"]:
+        return _make_box_prompt(h, w, legacy_bbox, legacy_centroid, legacy_confidence, force_legacy=(resolved_mode == "legacy_bbox"))
+    elif resolved_mode in ["center_point", "legacy_centroid"]:
+        return _make_point_prompt(h, w, legacy_centroid, legacy_confidence, force_legacy=(resolved_mode == "legacy_centroid"))
     else:
+        # Default fallback
         return _make_point_prompt(h, w, legacy_centroid, legacy_confidence)
 
 
@@ -108,17 +121,22 @@ def _make_box_prompt(
     legacy_bbox: Optional[List[int]],
     legacy_centroid: Optional[List[int]],
     legacy_confidence: float,
+    force_legacy: bool = False,
 ) -> Dict[str, Any]:
     """Create a bounding-box prompt, preferring legacy mask bbox."""
     if legacy_bbox is not None:
         return {
-            "prompt_mode": "center_box",
+            "prompt_mode": "legacy_bbox" if force_legacy else "center_box",
             "prompt_source": "legacy_mask",
             "bbox": legacy_bbox,
             "points": [legacy_centroid] if legacy_centroid else [[w // 2, h // 2]],
             "labels": [1],
             "confidence": min(1.0, legacy_confidence * 1.1),
         }
+    
+    if force_legacy:
+        logger.warning("legacy_bbox requested but legacy mask is missing or empty. Falling back to frame center.")
+
     # Fallback: use center 50% of frame as box
     pad_x = w // 4
     pad_y = h // 4
@@ -137,17 +155,22 @@ def _make_point_prompt(
     w: int,
     legacy_centroid: Optional[List[int]],
     legacy_confidence: float,
+    force_legacy: bool = False,
 ) -> Dict[str, Any]:
     """Create a center-point prompt, preferring legacy mask centroid."""
     if legacy_centroid is not None:
         return {
-            "prompt_mode": "center_point",
+            "prompt_mode": "legacy_centroid" if force_legacy else "center_point",
             "prompt_source": "legacy_mask",
             "bbox": None,
             "points": [legacy_centroid],
             "labels": [1],
             "confidence": min(1.0, legacy_confidence * 1.05),
         }
+
+    if force_legacy:
+        logger.warning("legacy_centroid requested but legacy mask is missing or empty. Falling back to frame center.")
+
     return {
         "prompt_mode": "center_point",
         "prompt_source": "frame_center",
