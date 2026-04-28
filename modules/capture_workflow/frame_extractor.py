@@ -158,12 +158,28 @@ class FrameExtractor:
 
     def extract_keyframes(self, video_path: str, output_dir: str) -> tuple[List[str], Dict[str, Any]]:
         import os
+        import hashlib
+        
+        # Calculate manifest hash for retry safety
+        manifest_data = f"{video_path}_{self.thresholds.min_similarity_score}_{self.thresholds.min_sharpness_score}"
+        current_hash = hashlib.md5(manifest_data.encode()).hexdigest()
+        
         if os.getenv("SKIP_EXTRACTION") == "true":
             output_path = Path(output_dir)
-            existing_frames = sorted([str(f) for f in output_path.glob("*.jpg")])
-            if existing_frames:
-                logger.info(f"SKIP_EXTRACTION=true: Found {len(existing_frames)} existing frames in {output_dir}. Skipping extraction.")
-                return existing_frames, {"status": "skipped", "count": len(existing_frames)}
+            manifest_path = output_path / "extraction_manifest.json"
+            
+            if manifest_path.exists():
+                with open(manifest_path, "r") as f:
+                    cached_manifest = json.load(f)
+                    if cached_manifest.get("manifest_hash") == current_hash:
+                        existing_frames = sorted([str(f) for f in output_path.glob("*.jpg")])
+                        if existing_frames:
+                            logger.info(f"SKIP_EXTRACTION=true: Found {len(existing_frames)} verified frames. Skipping.")
+                            return existing_frames, {"status": "skipped", "count": len(existing_frames), "verified": True}
+                    else:
+                        logger.warning("SKIP_EXTRACTION=true but hash mismatch! Re-extracting for safety.")
+            else:
+                 logger.warning("SKIP_EXTRACTION=true but manifest missing. Re-extracting.")
 
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
@@ -296,5 +312,16 @@ class FrameExtractor:
         logger.info(f"   - Rejected by similarity: {rejection_counts['redundant_similarity']}")
         logger.info(f"   - Total saved: {len(extracted_paths)}")
         logger.info("   - Frame mode: raw_for_reconstruction; masked previews saved separately")
+
+        # Save manifest for future skips
+        manifest_path = Path(output_dir) / "extraction_manifest.json"
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(manifest_path, "w") as f:
+            json.dump({
+                "manifest_hash": current_hash,
+                "video_path": video_path,
+                "timestamp": str(datetime.now()),
+                "frame_count": len(extracted_paths)
+            }, f, indent=2)
 
         return extracted_paths, extraction_report
