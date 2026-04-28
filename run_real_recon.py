@@ -19,6 +19,8 @@ from modules.export_pipeline.glb_exporter import GLBExporter
 from modules.qa_validation.validator import AssetValidator
 from modules.integration_flow import IntegrationFlow
 from modules.shared_contracts.models import ReconstructionJob
+import trimesh
+from modules.asset_cleanup_pipeline.camera_projection import load_reconstruction_cameras, load_reconstruction_masks
 
 # Configure logging
 log_file = ROOT / "reconstruction.log"
@@ -88,6 +90,31 @@ def run():
     
     # 3. Cleanup
     logger.info("--- 3. Running Cleanup ---")
+    
+    # Load guidance data from the successful attempt
+    best_attempt_dir = Path(manifest.mesh_path).parent.parent
+    logger.info(f"Loading guidance data from: {best_attempt_dir}")
+    
+    cameras = load_reconstruction_cameras(best_attempt_dir)
+    masks = None
+    if cameras:
+        masks = load_reconstruction_masks(best_attempt_dir, [c["name"] for c in cameras])
+    
+    point_cloud = None
+    # For OpenMVS, use project_dense.ply; for COLMAP, use fused.ply
+    pc_paths = [
+        best_attempt_dir / "dense" / "project_dense.ply",
+        best_attempt_dir / "dense" / "fused.ply"
+    ]
+    for pc_path in pc_paths:
+        if pc_path.exists():
+            try:
+                point_cloud = trimesh.load(str(pc_path))
+                logger.info(f"Loaded guidance point cloud: {pc_path.name}")
+                break
+            except Exception as pc_err:
+                logger.warning(f"Failed to load point cloud {pc_path.name}: {pc_err}")
+
     cleaner = AssetCleaner(data_root=str(ROOT / "data"))
     try:
         # Use OpenMVS output directly
@@ -96,7 +123,10 @@ def run():
             job_id,
             manifest.mesh_path,
             CleanupProfileType.MOBILE_HIGH,
-            raw_texture_path=manifest.texture_path
+            raw_texture_path=manifest.texture_path,
+            cameras=cameras,
+            masks=masks,
+            point_cloud=point_cloud
         )
         logger.info("Cleanup successful.")
     except Exception as e:
