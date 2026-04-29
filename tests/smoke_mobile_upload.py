@@ -11,15 +11,17 @@ API_BASE = "https://localhost:8001/api"
 DATA_ROOT = Path("data")
 
 def create_valid_tiny_video(path, ext=".mp4"):
-    # Always write as mp4 first to ensure it's valid, then rename if needed
-    temp_path = Path("temp_gen.mp4")
+    import uuid
+    temp_path = Path(f"temp_{uuid.uuid4().hex}.mp4")
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     out = cv2.VideoWriter(str(temp_path), fourcc, 20.0, (720, 720))
-    for _ in range(200): # 10 seconds
+    for _ in range(200): 
         frame = np.random.randint(0, 255, (720, 720, 3), dtype=np.uint8)
         out.write(frame)
     out.release()
     
+    # Give Windows a moment to release handle
+    time.sleep(0.5)
     if path.exists(): path.unlink()
     os.rename(temp_path, path)
 
@@ -65,13 +67,25 @@ def test_mobile_smoke_success():
     assert (reports_dir / "ar_quality_manifest.json").exists(), "ar_quality_manifest.json missing"
     
     # 4. Verify cv2 readability of normalized video
-    cap = cv2.VideoCapture(str(video_dir / "raw_video.mp4"))
+    normalized_path = video_dir / "raw_video.mp4"
+    cap = cv2.VideoCapture(str(normalized_path))
     assert cap.isOpened(), "cv2 could not open normalized raw_video.mp4"
     ret, frame = cap.read()
     assert ret, "cv2 could not read frame from normalized raw_video.mp4"
     cap.release()
     
-    # 5. Verify manifest content
+    # 5. Verify it's a real H.264 MP4 (not just renamed WebM)
+    # Using ffprobe to check codec_name
+    from modules.operations.settings import Settings
+    settings_obj = Settings()
+    ffprobe_path = settings_obj.ffmpeg_path.replace("ffmpeg.exe", "ffprobe.exe")
+    import subprocess
+    cmd = [ffprobe_path, "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=codec_name", "-of", "default=noprint_wrappers=1:nokey=1", str(normalized_path)]
+    codec = subprocess.check_output(cmd).decode().strip()
+    print(f"Verified codec for raw_video.mp4: {codec}")
+    assert codec == "h264", f"Expected h264 codec, got {codec}"
+    
+    # 6. Verify manifest content
     with open(reports_dir / "ar_quality_manifest.json", "r") as f:
         saved_manifest = json.load(f)
         assert saved_manifest['coverage_summary']['percent'] == 98
