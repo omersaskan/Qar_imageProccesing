@@ -547,13 +547,19 @@ class ARCapture {
         this.captureBtn.classList.remove('recording');
         
         this.qualityManifest = {
-            product_profile: document.querySelector('.profile-btn.active').dataset.profile,
+            product_profile: this.profile,
             coverage_summary: summary,
             accepted_frame_count: this.stats.acceptedCount,
             total_frame_count: this.stats.totalCount,
             rejection_stats: this.stats.rejectionReasons,
             is_demo: this.isDemoMode,
             selected_frames: this.stats.selectedIndices,
+            profile_completion: this.profile === 'box' ? {
+                faces: Array.from(this.boxGuide.completed)
+            } : this.profile === 'bottle' ? {
+                cap: this.bottleGuide.isCapComplete,
+                base: this.bottleGuide.isBaseComplete
+            } : null,
             timestamp: new Date().toISOString()
         };
 
