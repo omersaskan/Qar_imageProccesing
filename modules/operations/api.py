@@ -305,6 +305,7 @@ async def upload_video(
         # ── Quality Gate Enforcement ──────────────────────────────────────────
         manifest_valid = True
         rejection_reasons = []
+        manifest_data = {}
 
         if not quality_manifest:
             # If it's an AR guided session, we might want to flag it. 
