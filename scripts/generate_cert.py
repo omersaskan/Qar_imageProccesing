@@ -1,5 +1,7 @@
 import datetime
+import ipaddress
 from cryptography import x509
+# ... (rest of imports)
 from cryptography.x509.oid import NameOID
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -36,7 +38,7 @@ def generate_self_signed_cert(cert_path, key_path):
         # Our certificate will be valid for 1 year
         datetime.datetime.utcnow() + datetime.timedelta(days=365)
     ).add_extension(
-        x509.SubjectAlternativeName([x509.IPAddress(u"192.168.1.205"), x509.DNSName(u"localhost")]),
+        x509.SubjectAlternativeName([x509.IPAddress(ipaddress.ip_address(u"192.168.1.205")), x509.DNSName(u"localhost")]),
         critical=False,
     ).sign(key, hashes.SHA256())
 

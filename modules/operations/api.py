@@ -554,4 +554,19 @@ if ui_dir.exists():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    from pathlib import Path
+    
+    cert_path = Path(__file__).parent.parent.parent / "certs" / "cert.pem"
+    key_path = Path(__file__).parent.parent.parent / "certs" / "key.pem"
+    
+    ssl_config = {}
+    if cert_path.exists() and key_path.exists():
+        logger.info(f"Starting server with SSL: {cert_path}")
+        ssl_config = {
+            "ssl_certfile": str(cert_path),
+            "ssl_keyfile": str(key_path)
+        }
+    else:
+        logger.info("Starting server without SSL (Certs not found)")
+
+    uvicorn.run(app, host="0.0.0.0", port=8001, **ssl_config)
