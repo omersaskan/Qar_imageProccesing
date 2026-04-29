@@ -431,6 +431,7 @@ class ARCapture {
 
         this.toastTimeout = null;
         this.lastGuidanceTime = 0;
+        this.lastToastMessage = "";
         this.setupHandlers();
     }
 
@@ -438,19 +439,18 @@ class ARCapture {
         const toast = document.getElementById('ar-guidance-toast');
         if (!toast) return;
         
-        // Don't override a critical error with an info message too quickly
-        if (!toast.classList.contains('hidden') && type === 'info' && toast.classList.contains('ar-toast')) {
-             // skip if already showing something important
-        }
-
+        if (this.lastToastMessage === message && !toast.classList.contains('hidden')) return;
+        
         toast.textContent = message;
         toast.className = `ar-toast ${type}`;
         toast.classList.remove('hidden');
+        this.lastToastMessage = message;
         
         clearTimeout(this.toastTimeout);
         this.toastTimeout = setTimeout(() => {
             toast.classList.add('hidden');
-        }, 3000);
+            this.lastToastMessage = "";
+        }, 2000);
     }
 
     setupHandlers() {
