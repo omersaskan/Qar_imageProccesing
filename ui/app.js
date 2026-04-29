@@ -315,12 +315,12 @@ class BoxGhostGuide {
         this.container = document.getElementById('ar-ghost-guide');
         this.ghost = this.container.querySelector('.box-ghost');
         this.faces = {
-            front: { a: 0, t: 0, el: this.container.querySelector('.front') },
-            back: { a: 180, t: 0, el: this.container.querySelector('.back') },
-            left: { a: 90, t: 0, el: this.container.querySelector('.left') },
-            right: { a: 270, t: 0, el: this.container.querySelector('.right') },
-            top: { a: null, t: -90, el: this.container.querySelector('.top') },
-            bottom: { a: null, t: 45, el: this.container.querySelector('.bottom') }
+            front: this.container.querySelector('.front'),
+            back: this.container.querySelector('.back'),
+            left: this.container.querySelector('.left'),
+            right: this.container.querySelector('.right'),
+            top: this.container.querySelector('.top'),
+            bottom: this.container.querySelector('.bottom')
         };
         this.completed = new Set();
     }
@@ -328,21 +328,35 @@ class BoxGhostGuide {
     show() { this.container.classList.remove('hidden'); }
     hide() { this.container.classList.add('hidden'); }
 
+    reset() {
+        this.completed.clear();
+        Object.values(this.faces).forEach(el => {
+            el.classList.add('missing');
+            el.classList.remove('completed');
+        });
+    }
+
+    // This is a HUD visualizer, NOT a 3D reconstruction.
     update(azimuth, tilt, isAccepted) {
         this.ghost.style.transform = `rotateX(${-tilt}deg) rotateY(${-azimuth}deg)`;
         if (!isAccepted) return;
-        for (const [name, target] of Object.entries(this.faces)) {
-            if (this.completed.has(name)) continue;
-            const tiltMatch = Math.abs(tilt - target.t) < 25;
-            let azimuthMatch = true;
-            if (target.a !== null) {
-                const diff = Math.abs((azimuth - target.a + 180 + 360) % 360 - 180);
-                azimuthMatch = diff < 30;
-            }
-            if (tiltMatch && azimuthMatch) {
-                this.completed.add(name);
-                target.el.classList.add('completed');
-            }
+
+        let faceKey = null;
+        if (tilt > 45) faceKey = 'top';
+        else if (tilt < -45) faceKey = 'bottom';
+        else {
+            const a = ((azimuth % 360) + 360) % 360;
+            if (a >= 315 || a < 45) faceKey = 'front';
+            else if (a >= 45 && a < 135) faceKey = 'right';
+            else if (a >= 135 && a < 225) faceKey = 'back';
+            else if (a >= 225 && a < 315) faceKey = 'left';
+        }
+
+        if (faceKey && !this.completed.has(faceKey)) {
+            this.completed.add(faceKey);
+            const el = this.faces[faceKey];
+            el.classList.remove('missing');
+            el.classList.add('completed');
         }
     }
 
@@ -354,6 +368,7 @@ class BottleGhostGuide {
     constructor() {
         this.container = document.getElementById('ar-bottle-guide');
         this.ghost = this.container.querySelector('.bottle-ghost');
+        this.segments = Array.from(this.container.querySelectorAll('.seg-face'));
         this.cap = this.container.querySelector('.cap');
         this.base = this.container.querySelector('.base');
         this.isCapComplete = false;
@@ -363,20 +378,38 @@ class BottleGhostGuide {
     show() { this.container.classList.remove('hidden'); }
     hide() { this.container.classList.add('hidden'); }
 
-    update(azimuth, tilt, isAccepted) {
-        this.ghost.style.transform = `rotateX(${-tilt}deg) rotateY(${-azimuth}deg)`;
+    reset() {
+        this.segments.forEach(s => { s.classList.add('missing'); s.classList.remove('completed'); });
+        this.cap.classList.add('missing'); this.cap.classList.remove('completed');
+        this.base.classList.add('missing'); this.base.classList.remove('completed');
+        this.isCapComplete = false;
+        this.isBaseComplete = false;
+    }
 
+    update(azimuth, tilt, isAccepted, sectors = []) {
+        this.ghost.style.transform = `rotateX(${-tilt}deg) rotateY(${-azimuth}deg)`;
         if (!isAccepted) return;
 
-        // Cap: Tilt < -45 (looking down)
         if (tilt < -45) {
             this.isCapComplete = true;
+            this.cap.classList.remove('missing');
             this.cap.classList.add('completed');
         }
-        // Base: Tilt > 30 (looking up)
         if (tilt > 30) {
             this.isBaseComplete = true;
+            this.base.classList.remove('missing');
             this.base.classList.add('completed');
+        }
+
+        // Map 36 sectors to 12 segments
+        if (sectors.length === 36) {
+            for (let i = 0; i < 12; i++) {
+                const covered = sectors[i*3] || sectors[i*3+1] || sectors[i*3+2];
+                if (covered) {
+                    this.segments[i].classList.remove('missing');
+                    this.segments[i].classList.add('completed');
+                }
+            }
         }
     }
 
@@ -385,6 +418,36 @@ class BottleGhostGuide {
         if (!this.isCapComplete) reqs.push("Cap/Top");
         if (!this.isBaseComplete) reqs.push("Base/Bottom");
         return reqs;
+    }
+}
+
+class GenericGhostGuide {
+    constructor() {
+        this.container = document.getElementById('ar-generic-guide');
+        this.ghost = this.container.querySelector('.bottle-ghost');
+        this.segments = Array.from(this.container.querySelectorAll('.seg-face'));
+    }
+
+    show() { this.container.classList.remove('hidden'); }
+    hide() { this.container.classList.add('hidden'); }
+
+    reset() {
+        this.segments.forEach(s => { s.classList.add('missing'); s.classList.remove('completed'); });
+    }
+
+    update(azimuth, tilt, isAccepted, sectors = []) {
+        this.ghost.style.transform = `rotateX(${-tilt}deg) rotateY(${-azimuth}deg)`;
+        if (!isAccepted) return;
+
+        if (sectors.length === 36) {
+            for (let i = 0; i < 12; i++) {
+                const covered = sectors[i*3] || sectors[i*3+1] || sectors[i*3+2];
+                if (covered) {
+                    this.segments[i].classList.remove('missing');
+                    this.segments[i].classList.add('completed');
+                }
+            }
+        }
     }
 }
 
@@ -408,6 +471,8 @@ class ARCapture {
         this.tracker = new CoverageTracker();
         this.boxGuide = new BoxGhostGuide();
         this.bottleGuide = new BottleGhostGuide();
+        this.genericGuide = new GenericGhostGuide();
+        this.demoBtn = document.getElementById('ar-demo-btn');
         this.gateValidator = new GateValidator();
         
         this.stream = null;
@@ -456,6 +521,16 @@ class ARCapture {
     setupHandlers() {
         document.getElementById('close-ar').onclick = () => this.stop();
         this.captureBtn.onclick = () => this.toggleCapture();
+        this.demoBtn.onclick = () => {
+            this.isDemoMode = !this.isDemoMode;
+            this.demoBtn.classList.toggle('active', this.isDemoMode);
+            if (this.isDemoMode) {
+                this.statusLabel.textContent = "DEMO MODE AKTİF";
+                this.resetStats();
+            } else {
+                this.statusLabel.textContent = "HAZIR";
+            }
+        };
         
         window.addEventListener('deviceorientation', (e) => {
             if (e.alpha !== null) {
@@ -477,10 +552,13 @@ class ARCapture {
     updateGuideVisibility() {
         this.boxGuide.hide();
         this.bottleGuide.hide();
+        this.genericGuide.hide();
         if (this.profile === 'box') {
             this.boxGuide.show();
         } else if (this.profile === 'bottle') {
             this.bottleGuide.show();
+        } else if (this.profile === 'generic') {
+            this.genericGuide.show();
         }
     }
 
@@ -542,10 +620,11 @@ class ARCapture {
 
     resetStats() {
         this.tracker = new CoverageTracker();
-        this.boxGuide = new BoxGhostGuide();
-        this.bottleGuide = new BottleGhostGuide();
+        this.boxGuide.reset();
+        this.bottleGuide.reset();
+        this.genericGuide.reset();
         this.stats = { totalCount: 0, acceptedCount: 0, rejectionReasons: {}, selectedIndices: [] };
-        this.updateProgress(0);
+        this.updateProgress(0, []);
         this.chunks = [];
     }
 
@@ -629,8 +708,10 @@ class ARCapture {
         
         this.updateUIIndicators(quality, blur, lighting, curAzimuth);
         
+        const summary = this.tracker.getSummary();
         if (this.profile === 'box') this.boxGuide.update(curAzimuth, curTilt, quality.isAccepted);
-        if (this.profile === 'bottle') this.bottleGuide.update(curAzimuth, curTilt, quality.isAccepted);
+        if (this.profile === 'bottle') this.bottleGuide.update(curAzimuth, curTilt, quality.isAccepted, summary.sectors);
+        if (this.profile === 'generic') this.genericGuide.update(curAzimuth, curTilt, quality.isAccepted, summary.sectors);
         
         if (this.isRecording) {
             this.stats.totalCount++;
@@ -638,7 +719,7 @@ class ARCapture {
             this.tracker.addFrame(curAzimuth, quality.isAccepted);
             
             const now = Date.now();
-            if (now - this.lastGuidanceTime > 1500) { // Reduced to 1.5s
+            if (now - this.lastGuidanceTime > 1500) {
                 if (!quality.isAccepted) {
                     this.showGuidanceToast(quality.reasons[0]);
                     this.lastGuidanceTime = now;
@@ -659,13 +740,17 @@ class ARCapture {
                 });
             }
             
-            const summary = this.tracker.getSummary();
-            this.updateProgress(summary.percent, summary.sectors);
-            this.checkGate(summary);
+            const updatedSummary = this.tracker.getSummary();
+            this.updateProgress(updatedSummary.percent, updatedSummary.sectors);
+            
+            // Update shell again with latest sectors if recording
+            if (this.profile === 'bottle') this.bottleGuide.update(curAzimuth, curTilt, quality.isAccepted, updatedSummary.sectors);
+            if (this.profile === 'generic') this.genericGuide.update(curAzimuth, curTilt, quality.isAccepted, updatedSummary.sectors);
 
-            // Detailed gap guidance
-            if (now - this.lastGuidanceTime > 3000 && summary.percent < 90 && summary.maxGap > 30) { // Reduced to 3s
-                const target = Math.floor(summary.gapCenter);
+            this.checkGate(updatedSummary);
+
+            if (now - this.lastGuidanceTime > 3000 && updatedSummary.percent < 90 && updatedSummary.maxGap > 30) {
+                const target = Math.floor(updatedSummary.gapCenter);
                 this.showGuidanceToast(`Boşluğu doldurmak için ${target}° açısına doğru dönün`, "info");
                 this.lastGuidanceTime = now;
             }
