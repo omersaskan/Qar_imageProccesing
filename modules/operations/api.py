@@ -279,6 +279,30 @@ async def upload_video(
         video_path = video_dir / "raw_video.mp4"
         shutil.move(temp_path, str(video_path))
 
+        # ── Quality Gate Enforcment ──────────────────────────────────────────
+        if quality_manifest:
+            try:
+                manifest_data = json.loads(quality_manifest)
+                
+                # Rigid Gate: Reject if not demo and quality is too low
+                is_demo = manifest_data.get("is_demo", False)
+                max_gap = manifest_data.get("coverage_summary", {}).get("maxGap", 360)
+                
+                if not is_demo and max_gap > 60:
+                    logger.error(f"Upload rejected for {session_id}: Quality Gate Failed (Max Gap {max_gap} > 60)")
+                    # Clean up the session we just started
+                    shutil.rmtree(capture_path)
+                    session_file = Path(settings.data_root) / "sessions" / f"{session_id}.json"
+                    if session_file.exists(): session_file.unlink()
+                    raise HTTPException(
+                        status_code=422, 
+                        detail=f"Capture quality too low (Max Gap {max_gap:.1f}°). Please re-capture following the guides."
+                    )
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.warning(f"Metadata parsing failed during quality gate check: {e}")
+
         # 4. Save Quality Manifest if provided
         if quality_manifest:
             try:
@@ -466,6 +490,32 @@ async def get_session_guidance_summary(session_id: str):
 
     with open(summary_path, "r", encoding="utf-8") as f:
         return f.read()
+
+
+@app.post("/api/sessions/{session_id}/cancel", dependencies=[Depends(verify_api_key)])
+async def cancel_session(session_id: str):
+    """Marks a session as failed/cancelled to stop worker processing."""
+    session_file = Path(settings.data_root) / "sessions" / f"{session_id}.json"
+    if not session_file.exists():
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    try:
+        with open(session_file, "r+", encoding="utf-8") as f:
+            s_data = json.load(f)
+            if s_data.get("status") in ["published", "failed"]:
+                return {"status": "already_closed", "session_id": session_id}
+            
+            s_data["status"] = "failed"
+            s_data["error"] = "Cancelled by user via Dashboard"
+            f.seek(0)
+            json.dump(s_data, f, indent=2)
+            f.truncate()
+            
+        logger.info(f"Session {session_id} cancelled by user.")
+        return {"status": "cancelled", "session_id": session_id}
+    except Exception as e:
+        logger.error(f"Failed to cancel session {session_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/training/manifests", dependencies=[Depends(verify_api_key)])

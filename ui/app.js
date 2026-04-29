@@ -383,7 +383,18 @@ class ARCapture {
         this.qualityManifest = null;
         this.updateGuideVisibility();
         
-        // Detect desktop/no-sensor
+        this.captureBtn.disabled = true;
+        this.statusLabel.textContent = "INITIALIZING...";
+
+        // 1. Secure Context Check (Critical for mobile camera over LAN)
+        if (!window.isSecureContext && window.location.hostname !== "localhost") {
+            console.warn("Insecure context detected. Camera will likely fail.");
+            this.statusLabel.textContent = "INSECURE CONTEXT (Use HTTPS or Localhost)";
+            this.statusLabel.style.color = "var(--error)";
+            // Don't return yet, let catch handle it or enter demo
+        }
+
+        // 2. Permission request for iOS
         if (window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === 'function') {
             try {
                 await DeviceOrientationEvent.requestPermission();
@@ -391,6 +402,9 @@ class ARCapture {
         }
 
         try {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                throw new Error("MediaDevices API not available");
+            }
             this.stream = await navigator.mediaDevices.getUserMedia({ 
                 video: { facingMode: 'environment' }, 
                 audio: false 
@@ -398,13 +412,15 @@ class ARCapture {
             this.video.srcObject = this.stream;
             this.isDemoMode = false;
             this.statusLabel.textContent = "ALIGNED & READY";
+            this.statusLabel.style.color = "var(--success)";
         } catch (err) {
-            console.warn("Camera/Mobile sensors unavailable, entering DEMO MODE");
+            console.warn("Camera failed, entering DEMO MODE:", err);
             this.isDemoMode = true;
-            this.statusLabel.textContent = "DEMO MODE (Desktop)";
+            this.statusLabel.textContent = "DEMO MODE (No Camera)";
             this.statusLabel.style.color = "#fbbf24";
         }
         
+        this.captureBtn.disabled = false;
         this.runMetricsLoop();
     }
 
@@ -566,7 +582,7 @@ class ARCapture {
         console.log("Quality Manifest Generated:", this.qualityManifest);
         
         if (this.isDemoMode) {
-            alert("DEMO CAPTURE: Manifest generated but will be marked as DEMO on upload.");
+            alert("DEMO CAPTURE: No real camera data was recorded. This session will be marked as 'demo' on the server.");
         } else {
             alert("Capture Finished! Quality Manifest attached to upload.");
         }
@@ -744,21 +760,51 @@ async function showProductDetails(productId) {
     }
 }
 
+async function cancelSession(sessionId) {
+    if (!confirm(`Are you sure you want to cancel session ${sessionId}?`)) return;
+    
+    try {
+        const response = await fetch(`${API_BASE}/sessions/${sessionId}/cancel`, {
+            method: 'POST'
+        });
+        const result = await response.json();
+        if (response.ok) {
+            alert("Session cancelled successfully.");
+            // Refresh details
+            const productId = document.getElementById('modal-title').textContent.split(': ')[1];
+            showProductDetails(productId);
+            fetchProducts();
+        } else {
+            alert("Failed to cancel: " + result.detail);
+        }
+    } catch (err) {
+        alert("Error: " + err.message);
+    }
+}
+
 function renderHistory(history) {
     historyContainer.innerHTML = `
         <table class="history-table">
             <thead>
-                <tr><th>Asset ID</th><th>Version</th><th>Status</th><th>View</th></tr>
+                <tr><th>Asset ID</th><th>Version</th><th>Status</th><th>Actions</th></tr>
             </thead>
             <tbody>
-                ${history.map(item => `
-                    <tr>
-                        <td>${item.asset_id}</td>
-                        <td>${item.version}</td>
-                        <td>${item.status}</td>
-                        <td><button class="btn-view" onclick="open3DViewer('${item.asset_id}', '${item.status}')">View</button></td>
-                    </tr>
-                `).join('')}
+                ${history.map(item => {
+                    const isProcessing = item.status === 'processing' || item.status === 'CREATED' || item.status === 'uploaded';
+                    return `
+                        <tr>
+                            <td>${item.asset_id}</td>
+                            <td>${item.version}</td>
+                            <td><span class="badge ${item.status.toLowerCase()}">${item.status}</span></td>
+                            <td>
+                                <div class="btn-group">
+                                    <button class="btn-view" onclick="open3DViewer('${item.asset_id}', '${item.status}')">View</button>
+                                    ${isProcessing ? `<button class="btn-cancel" onclick="cancelSession('${item.asset_id}')">Stop</button>` : ''}
+                                </div>
+                            </td>
+                        </tr>
+                    `;
+                }).join('')}
             </tbody>
         </table>
     `;
