@@ -229,6 +229,54 @@ class CoverageTracker {
     }
 }
 
+class GateValidator {
+    constructor(config = {}) {
+        this.minCoverage = config.minCoverage || 90;
+        this.maxGap = config.maxGap || 45;
+        this.minAcceptedFrames = config.minAcceptedFrames || 100;
+        this.maxBlurRatio = config.maxBlurRatio || 0.3;
+        this.minDuration = config.minDuration || 15;
+    }
+
+    validate(summary, stats, elapsedSec, profile, profileCompletion) {
+        const blurRejections = stats.rejectionReasons["Move slower (blur detected)"] || 0;
+        const blurRatio = stats.totalCount > 0 ? (blurRejections / stats.totalCount) : 0;
+        
+        const hasEnoughFrames = stats.acceptedCount >= this.minAcceptedFrames;
+        const blurIsOk = blurRatio <= this.maxBlurRatio;
+        const durationIsOk = elapsedSec >= this.minDuration;
+        const coverageIsOk = summary.percent >= this.minCoverage && summary.maxGap <= this.maxGap;
+        
+        let profileIsOk = true;
+        let missingReq = "";
+
+        if (profile === 'box') {
+            const completed = profileCompletion ? (profileCompletion.faces || []) : [];
+            profileIsOk = completed.length >= 6;
+            if (!profileIsOk) missingReq = "Incomplete Box (6 faces required)";
+        } else if (profile === 'bottle') {
+            const cap = profileCompletion ? profileCompletion.cap : false;
+            const base = profileCompletion ? profileCompletion.base : false;
+            profileIsOk = cap && base;
+            if (!profileIsOk) missingReq = "Incomplete Bottle (Cap & Base required)";
+        }
+
+        const canFinish = coverageIsOk && hasEnoughFrames && blurIsOk && durationIsOk && profileIsOk;
+        
+        return {
+            canFinish,
+            reasons: {
+                coverage: coverageIsOk,
+                frames: hasEnoughFrames,
+                blur: blurIsOk,
+                duration: durationIsOk,
+                profile: profileIsOk
+            },
+            missingReq: missingReq || (summary.maxGap > this.maxGap ? `Gap too large: ${Math.floor(summary.maxGap)}°` : "")
+        };
+    }
+}
+
 class BoxGhostGuide {
     constructor() {
         this.container = document.getElementById('ar-ghost-guide');
@@ -321,19 +369,25 @@ class ARCapture {
         this.angleArrow = document.getElementById('angle-arrow');
         this.angleText = document.getElementById('current-angle');
         this.timerEl = document.getElementById('ar-timer');
+        this.productIdInput = document.getElementById('ar-product-id');
         
         this.metrics = new MetricsProcessor();
         this.tracker = new CoverageTracker();
         this.boxGuide = new BoxGhostGuide();
         this.bottleGuide = new BottleGhostGuide();
+        this.gateValidator = new GateValidator();
         
         this.stream = null;
+        this.mediaRecorder = null;
+        this.chunks = [];
         this.isRecording = false;
         this.isDemoMode = false;
         this.profile = 'generic';
         this.azimuth = 0;
         this.tilt = 0;
         this.qualityManifest = null;
+        this.canFinish = false;
+        this.startTime = null;
         
         this.stats = {
             totalCount: 0,
@@ -351,7 +405,6 @@ class ARCapture {
         
         window.addEventListener('deviceorientation', (e) => {
             if (e.alpha !== null) {
-                // Adjusting coordinate systems for visualization
                 this.azimuth = e.alpha; 
                 this.tilt = e.beta;
             }
@@ -381,17 +434,20 @@ class ARCapture {
         this.modal.classList.remove('hidden');
         this.resetStats();
         this.qualityManifest = null;
+        this.canFinish = false;
         this.updateGuideVisibility();
+        this.productIdInput.value = "";
         
         this.captureBtn.disabled = true;
         this.statusLabel.textContent = "INITIALIZING...";
 
-        // 1. Secure Context Check (Critical for mobile camera over LAN)
-        if (!window.isSecureContext && window.location.hostname !== "localhost") {
-            console.warn("Insecure context detected. Camera will likely fail.");
-            this.statusLabel.textContent = "INSECURE CONTEXT (Use HTTPS or Localhost)";
+        // 1. Secure Context Check
+        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+        if (isMobile && !window.isSecureContext && window.location.hostname !== "localhost") {
+            this.statusLabel.textContent = "HTTPS REQUIRED ON MOBILE";
             this.statusLabel.style.color = "var(--error)";
-            // Don't return yet, let catch handle it or enter demo
+            alert("Camera requires HTTPS on mobile for production capture.");
+            return;
         }
 
         // 2. Permission request for iOS
@@ -403,10 +459,14 @@ class ARCapture {
 
         try {
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                throw new Error("MediaDevices API not found. (Need HTTPS or Localhost)");
+                throw new Error("MediaDevices API not found.");
             }
             this.stream = await navigator.mediaDevices.getUserMedia({ 
-                video: { facingMode: 'environment' }, 
+                video: { 
+                    facingMode: 'environment',
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                }, 
                 audio: false 
             });
             this.video.srcObject = this.stream;
@@ -432,40 +492,85 @@ class ARCapture {
         this.bottleGuide = new BottleGhostGuide();
         this.stats = { totalCount: 0, acceptedCount: 0, rejectionReasons: {}, selectedIndices: [] };
         this.updateProgress(0);
+        this.chunks = [];
     }
 
     stop() {
         if (this.stream) {
             this.stream.getTracks().forEach(track => track.stop());
         }
+        if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
+            this.mediaRecorder.stop();
+        }
         this.modal.classList.add('hidden');
         this.isRecording = false;
+        this.timerEl.classList.add('hidden');
         clearInterval(this.timerInterval);
+    }
+
+    getMimeType() {
+        const types = [
+            'video/webm;codecs=vp9',
+            'video/webm;codecs=vp8',
+            'video/webm',
+            'video/mp4'
+        ];
+        for (const type of types) {
+            if (MediaRecorder.isTypeSupported(type)) return type;
+        }
+        return '';
     }
 
     toggleCapture() {
         if (!this.isRecording) {
+            const productId = this.productIdInput.value.trim();
+            if (!productId) {
+                alert("Please enter a Product ID before starting.");
+                this.productIdInput.focus();
+                return;
+            }
+
             this.isRecording = true;
             this.captureBtn.classList.add('recording');
             this.startTime = Date.now();
+            this.chunks = [];
+            this.timerEl.classList.remove('hidden');
+            this.startTimer();
+
+            if (!this.isDemoMode) {
+                const mimeType = this.getMimeType();
+                this.mediaRecorder = new MediaRecorder(this.stream, { mimeType });
+                this.mediaRecorder.ondataavailable = (e) => {
+                    if (e.data.size > 0) this.chunks.push(e.data);
+                };
+                this.mediaRecorder.onstop = () => this.uploadResult();
+                this.mediaRecorder.start(1000); // Collect chunks every second
+            }
         } else {
             this.finishRecording();
         }
     }
 
+    startTimer() {
+        clearInterval(this.timerInterval);
+        this.timerInterval = setInterval(() => {
+            const elapsed = Math.floor((Date.now() - this.startTime) / 1000);
+            const m = Math.floor(elapsed / 60).toString().padStart(2, '0');
+            const s = (elapsed % 60).toString().padStart(2, '0');
+            this.timerEl.textContent = `${m}:${s}`;
+        }, 1000);
+    }
+
     runMetricsLoop() {
         if (this.modal.classList.contains('hidden')) return;
 
-        // 1. Get current frame
         this.samplingCtx.drawImage(this.video, 0, 0, 160, 160);
         const imageData = this.samplingCtx.getImageData(0, 0, 160, 160);
         
-        // 2. Analyze
         const blur = this.metrics.analyzeBlur(imageData.data, 160, 160);
         const lighting = this.metrics.analyzeLighting(imageData.data);
         const quality = this.metrics.checkQuality({ blur, lighting });
         
-        // 3. Update Indicators & Ghost Guides
         const curAzimuth = this.isDemoMode ? (Date.now() / 50 % 360) : this.azimuth;
         const curTilt = this.isDemoMode ? (Math.sin(Date.now() / 1000) * 20) : this.tilt;
         
@@ -474,7 +579,6 @@ class ARCapture {
         if (this.profile === 'box') this.boxGuide.update(curAzimuth, curTilt, quality.isAccepted);
         if (this.profile === 'bottle') this.bottleGuide.update(curAzimuth, curTilt, quality.isAccepted);
         
-        // 4. Update Coverage if recording
         if (this.isRecording) {
             this.stats.totalCount++;
             this.tracker.addFrame(curAzimuth, quality.isAccepted);
@@ -518,34 +622,26 @@ class ARCapture {
     }
 
     checkGate(summary) {
-        const blurRejections = this.stats.rejectionReasons["Move slower (blur detected)"] || 0;
-        const blurRatio = this.stats.totalCount > 0 ? (blurRejections / this.stats.totalCount) : 0;
-        
-        const hasEnoughFrames = this.stats.acceptedCount > 50;
-        const blurIsOk = blurRatio < 0.4;
-        
-        let coverageIsOk = summary.percent > 90 && summary.maxGap < 45;
-        let missingReq = "";
+        const elapsedSec = (Date.now() - this.startTime) / 1000;
+        const profileCompletion = this.profile === 'box' ? {
+            faces: Array.from(this.boxGuide.completed)
+        } : this.profile === 'bottle' ? {
+            cap: this.bottleGuide.isCapComplete,
+            base: this.bottleGuide.isBaseComplete
+        } : null;
 
-        if (this.profile === 'box') {
-            const missing = this.boxGuide.getMissingFaces();
-            coverageIsOk = missing.length === 0;
-            if (!coverageIsOk) missingReq = `Missing: ${missing[0].toUpperCase()}`;
-        } else if (this.profile === 'bottle') {
-            const missing = this.bottleGuide.getMissingRequirements();
-            coverageIsOk = (summary.percent > 90 && summary.maxGap < 45) && missing.length === 0;
-            if (missing.length > 0) missingReq = `Capture: ${missing[0]}`;
-        } else if (summary.maxGap > 45) {
-            missingReq = `Gap too large: ${Math.floor(summary.maxGap)}°`;
-        }
-
-        const canFinish = (coverageIsOk && hasEnoughFrames && blurIsOk) || this.isDemoMode;
-        this.captureBtn.style.opacity = canFinish ? "1" : "0.5";
+        const validation = this.gateValidator.validate(summary, this.stats, elapsedSec, this.profile, profileCompletion);
         
-        if (!canFinish && this.isRecording) {
-            let msg = missingReq || "Keep rotating";
-            if (!hasEnoughFrames) msg = "Capturing detail...";
-            else if (!blurIsOk) msg = "Move slower!";
+        this.canFinish = validation.canFinish || this.isDemoMode;
+        this.captureBtn.style.opacity = this.canFinish ? "1" : "0.5";
+        
+        if (!this.canFinish && this.isRecording) {
+            let msg = validation.missingReq || "Keep rotating";
+            
+            if (!validation.reasons.duration) msg = `Capturing... (${Math.floor(15 - elapsedSec)}s left)`;
+            else if (!validation.reasons.frames) msg = "More detail needed...";
+            else if (!validation.reasons.blur) msg = "Move slower!";
+            
             this.statusLabel.textContent = msg;
             this.statusLabel.style.color = "var(--warning)";
         } else if (this.isRecording) {
@@ -555,15 +651,17 @@ class ARCapture {
     }
 
     async finishRecording() {
-        const summary = this.tracker.getSummary();
-        if (!this.isDemoMode && summary.maxGap > 60) {
-            alert(`Capture failed quality gate. Max gap: ${Math.floor(summary.maxGap)}°. Please rotate more slowly and fully.`);
+        if (!this.canFinish) {
+            alert("Capture quality gate not met. Please follow the guidance before finishing.");
             return;
         }
 
         this.isRecording = false;
         this.captureBtn.classList.remove('recording');
-        
+        this.timerEl.classList.add('hidden');
+        clearInterval(this.timerInterval);
+
+        const summary = this.tracker.getSummary();
         this.qualityManifest = {
             product_profile: this.profile,
             coverage_summary: summary,
@@ -578,20 +676,63 @@ class ARCapture {
                 cap: this.bottleGuide.isCapComplete,
                 base: this.bottleGuide.isBaseComplete
             } : null,
+            object_metrics: {
+                object_bbox_area_ratio: 0.0,
+                object_center_distance: 0.0,
+                border_touch: false,
+                clipping_risk: false,
+                foreground_background_contrast: 0.0,
+                _note: "Framing metrics placeholder. Not yet validated."
+            },
             timestamp: new Date().toISOString()
         };
 
-        console.log("Quality Manifest Generated:", this.qualityManifest);
-        
         if (this.isDemoMode) {
-            alert("DEMO CAPTURE: No real camera data was recorded. This session will be marked as 'demo' on the server.");
-        } else {
-            alert("Capture Finished! Quality Manifest attached to upload.");
+            // Demo mode upload with fake video
+            this.uploadResult(new Blob(["demo"], { type: 'video/mp4' }));
+        } else if (this.mediaRecorder) {
+            this.mediaRecorder.stop();
         }
+    }
+
+    async uploadResult(blob) {
+        const videoBlob = blob || new Blob(this.chunks, { type: this.mediaRecorder.mimeType });
+        const productId = this.productIdInput.value.trim();
         
-        // Open the original upload modal to select product ID
-        uploadModal.classList.remove('hidden');
-        this.stop();
+        const formData = new FormData();
+        formData.append('product_id', productId);
+        formData.append('file', videoBlob, `capture_${productId}.webm`);
+        formData.append('quality_manifest', JSON.stringify(this.qualityManifest));
+
+        this.statusLabel.textContent = "UPLOADING...";
+        this.statusLabel.style.color = "var(--accent-color)";
+        this.captureBtn.disabled = true;
+
+        try {
+            const response = await fetch(`${API_BASE}/sessions/upload`, {
+                method: 'POST',
+                body: formData
+            });
+
+            const result = await response.json();
+            if (response.ok) {
+                alert("Upload successful! Session created.");
+                this.stop();
+                await fetchProducts();
+            } else {
+                let errorMsg = result.detail;
+                if (typeof result.detail === 'object') {
+                    errorMsg = `${result.detail.message}\n${result.detail.reasons.join('\n')}`;
+                }
+                alert("Upload failed: " + errorMsg);
+                this.statusLabel.textContent = "UPLOAD FAILED";
+                this.captureBtn.disabled = false;
+            }
+        } catch (err) {
+            alert("Upload error: " + err.message);
+            this.statusLabel.textContent = "UPLOAD ERROR";
+            this.captureBtn.disabled = false;
+        }
     }
 }
 

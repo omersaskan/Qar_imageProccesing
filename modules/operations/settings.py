@@ -94,6 +94,13 @@ class Settings(BaseSettings):
     min_video_width: int = Field(720, validation_alias="MIN_VIDEO_WIDTH")
     min_video_height: int = Field(720, validation_alias="MIN_VIDEO_HEIGHT")
     min_video_fps: float = Field(20.0, validation_alias="MIN_VIDEO_FPS")
+    
+    # --- AR CAPTURE QUALITY GATING ---
+    ar_min_coverage: float = Field(90.0, validation_alias="AR_MIN_COVERAGE")
+    ar_max_gap: float = Field(45.0, validation_alias="AR_MAX_GAP")
+    ar_min_accepted_frames: int = Field(100, validation_alias="AR_MIN_ACCEPTED_FRAMES")
+    ar_max_blur_ratio: float = Field(0.3, validation_alias="AR_MAX_BLUR_RATIO")
+    ar_min_duration_sec: float = Field(15.0, validation_alias="AR_MIN_DURATION_SEC")
 
     # --- RECONSTRUCTION ENGINES ---
     # Global switch for the default pipeline: "colmap_dense" or "colmap_openmvs"

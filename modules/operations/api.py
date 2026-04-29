@@ -279,52 +279,123 @@ async def upload_video(
         video_path = video_dir / "raw_video.mp4"
         shutil.move(temp_path, str(video_path))
 
-        # ── Quality Gate Enforcment ──────────────────────────────────────────
-        if quality_manifest:
-            try:
-                manifest_data = json.loads(quality_manifest)
-                
-                # Rigid Gate: Reject if not demo and quality is too low
-                is_demo = manifest_data.get("is_demo", False)
-                max_gap = manifest_data.get("coverage_summary", {}).get("maxGap", 360)
-                
-                if not is_demo and max_gap > 60:
-                    logger.error(f"Upload rejected for {session_id}: Quality Gate Failed (Max Gap {max_gap} > 60)")
-                    # Clean up the session we just started
-                    shutil.rmtree(capture_path)
-                    session_file = Path(settings.data_root) / "sessions" / f"{session_id}.json"
-                    if session_file.exists(): session_file.unlink()
-                    raise HTTPException(
-                        status_code=422, 
-                        detail=f"Capture quality too low (Max Gap {max_gap:.1f}°). Please re-capture following the guides."
-                    )
-            except HTTPException:
-                raise
-            except Exception as e:
-                logger.warning(f"Metadata parsing failed during quality gate check: {e}")
+        # ── Quality Gate Enforcement ──────────────────────────────────────────
+        manifest_valid = True
+        rejection_reasons = []
 
-        # 4. Save Quality Manifest if provided
-        if quality_manifest:
-            try:
-                manifest_data = json.loads(quality_manifest)
-                reports_dir = capture_path / "reports"
-                reports_dir.mkdir(parents=True, exist_ok=True)
-                with open(reports_dir / "ar_quality_manifest.json", "w", encoding="utf-8") as f:
-                    json.dump(manifest_data, f, indent=2)
-                
-                # If it's a demo, tag the session metadata
-                if manifest_data.get("is_demo"):
-                    session_file = Path(settings.data_root) / "sessions" / f"{session_id}.json"
-                    if session_file.exists():
-                        with open(session_file, "r+", encoding="utf-8") as f:
-                            s_data = json.load(f)
-                            s_data["test_mode"] = True
-                            s_data["status"] = "demo_capture"
-                            f.seek(0)
-                            json.dump(s_data, f, indent=2)
-                            f.truncate()
-            except Exception as e:
-                logger.warning(f"Failed to save quality manifest for {session_id}: {e}")
+        if not quality_manifest:
+            # If it's an AR guided session, we might want to flag it. 
+            # For now, let's assume if it comes from the AR modal, it MUST have a manifest.
+            # We can't strictly know if it's AR unless we add a flag, but if it has a manifest, we validate it.
+            # The prompt says: "Reject if quality_manifest is missing for AR guided uploads."
+            # Since we are moving to AR-only automatic uploads, we can require it.
+            logger.error(f"Upload rejected for {session_id}: Missing quality_manifest")
+            shutil.rmtree(capture_path)
+            session_file = Path(settings.data_root) / "sessions" / f"{session_id}.json"
+            if session_file.exists(): session_file.unlink()
+            raise HTTPException(status_code=422, detail="Missing quality_manifest for AR capture.")
+
+        try:
+            manifest_data = json.loads(quality_manifest)
+            
+            # 1. Demo Mode Check
+            is_demo = manifest_data.get("is_demo", False)
+            if is_demo and not settings.is_dev:
+                logger.error(f"Upload rejected for {session_id}: Demo mode not allowed in {settings.env.value}")
+                shutil.rmtree(capture_path)
+                session_file = Path(settings.data_root) / "sessions" / f"{session_id}.json"
+                if session_file.exists(): session_file.unlink()
+                raise HTTPException(
+                    status_code=422, 
+                    detail=f"Demo mode is only permitted in LOCAL_DEV. Current environment: {settings.env.value}"
+                )
+
+            # 2. Metric Validation
+            coverage = manifest_data.get("coverage_summary", {}).get("percent", 0)
+            max_gap = manifest_data.get("coverage_summary", {}).get("maxGap", 360)
+            accepted_frames = manifest_data.get("accepted_frame_count", 0)
+            total_frames = manifest_data.get("total_frame_count", 0)
+            
+            blur_rejections = manifest_data.get("rejection_stats", {}).get("Move slower (blur detected)", 0)
+            blur_ratio = blur_rejections / total_frames if total_frames > 0 else 0
+            
+            profile = manifest_data.get("product_profile", "generic")
+            completion = manifest_data.get("profile_completion")
+            
+            # Duration (if available in manifest, otherwise we check video duration later)
+            # The manifest should probably include the actual recording duration
+            
+            if coverage < settings.ar_min_coverage:
+                rejection_reasons.append(f"Coverage too low: {coverage:.1f}% (min {settings.ar_min_coverage}%)")
+            if max_gap > settings.ar_max_gap:
+                rejection_reasons.append(f"Gap too large: {max_gap:.1f}° (max {settings.ar_max_gap}°)")
+            if accepted_frames < settings.ar_min_accepted_frames:
+                rejection_reasons.append(f"Insufficient accepted frames: {accepted_frames} (min {settings.ar_min_accepted_frames})")
+            if blur_ratio > settings.ar_max_blur_ratio:
+                rejection_reasons.append(f"Too much blur: {blur_ratio:.2f} (max {settings.ar_max_blur_ratio})")
+            
+            # Profile specific
+            if profile == "box":
+                completed_faces = completion.get("faces", []) if completion else []
+                if len(completed_faces) < 6:
+                    rejection_reasons.append(f"Incomplete box profile: {len(completed_faces)}/6 faces captured")
+            elif profile == "bottle":
+                cap = completion.get("cap", False) if completion else False
+                base = completion.get("base", False) if completion else False
+                if not cap or not base:
+                    rejection_reasons.append(f"Incomplete bottle profile: {'missing CAP' if not cap else ''} {'missing BASE' if not base else ''}")
+
+            if rejection_reasons:
+                manifest_valid = False
+
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="Invalid quality_manifest JSON.")
+        except Exception as e:
+            logger.warning(f"Metadata parsing failed during quality gate check: {e}")
+            # Fallback: if we can't parse it, we can't validate it.
+            manifest_valid = False
+            rejection_reasons.append(f"Manifest parsing error: {str(e)}")
+
+        # ── Final Decision & Persistence ──────────────────────────────────────
+        reports_dir = capture_path / "reports"
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        
+        if manifest_valid:
+            with open(reports_dir / "ar_quality_manifest.json", "w", encoding="utf-8") as f:
+                json.dump(manifest_data, f, indent=2)
+            
+            # Tag demo if applicable (only reaches here if in LOCAL_DEV)
+            if manifest_data.get("is_demo"):
+                session_file = Path(settings.data_root) / "sessions" / f"{session_id}.json"
+                if session_file.exists():
+                    with open(session_file, "r+", encoding="utf-8") as f:
+                        s_data = json.load(f)
+                        s_data["test_mode"] = True
+                        s_data["status"] = "demo_capture"
+                        f.seek(0)
+                        json.dump(s_data, f, indent=2)
+                        f.truncate()
+        else:
+            # Save rejected manifest for debugging
+            rejected_dir = reports_dir / "rejected"
+            rejected_dir.mkdir(parents=True, exist_ok=True)
+            with open(rejected_dir / "rejected_ar_quality_manifest.json", "w", encoding="utf-8") as f:
+                json.dump(manifest_data, f, indent=2)
+            
+            # Cleanup session
+            logger.error(f"Upload rejected for {session_id}: {'; '.join(rejection_reasons)}")
+            shutil.rmtree(capture_path)
+            session_file = Path(settings.data_root) / "sessions" / f"{session_id}.json"
+            if session_file.exists(): session_file.unlink()
+            
+            raise HTTPException(
+                status_code=422, 
+                detail={
+                    "message": "Capture failed quality gate.",
+                    "reasons": rejection_reasons,
+                    "manifest_validation_status": "rejected"
+                }
+            )
 
         logger.info(
             f"Video uploaded successfully for session {session_id}. Size: {file_size_mb:.2f} MB, Res: {width}x{height}, Dur: {duration:.1f}s",
@@ -336,6 +407,7 @@ async def upload_video(
             "product_id": product_id,
             "status": "uploaded",
             "path": str(video_path),
+            "manifest_validation_status": "passed"
         }
     except HTTPException:
         if os.path.exists(temp_path):

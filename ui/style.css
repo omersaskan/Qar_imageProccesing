@@ -162,6 +162,27 @@ body {
     box-shadow: 0 0 15px rgba(0, 255, 204, 0.2);
 }
 
+.glass-input-sm {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--glass-border);
+    padding: 8px 16px;
+    border-radius: 20px;
+    color: #fff;
+    width: 200px;
+    outline: none;
+    font-size: 0.85rem;
+    transition: var(--transition);
+}
+
+.glass-input-sm:focus {
+    border-color: var(--accent-color);
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.ar-product-input {
+    margin-left: 1rem;
+}
+
 /* Product Cards */
 .product-grid {
     display: grid;
