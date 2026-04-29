@@ -220,11 +220,44 @@ class CoverageTracker {
         return Math.max(maxGap, currentGap);
     }
 
+    getLargestGapCenter() {
+        let maxGap = 0;
+        let startIdx = -1;
+        let currentGap = 0;
+        let currentStart = -1;
+        
+        const extendedSectors = [...this.sectors, ...this.sectors];
+        for (let i = 0; i < extendedSectors.length; i++) {
+            if (!extendedSectors[i]) {
+                if (currentStart === -1) currentStart = i;
+                currentGap += this.sectorSize;
+            } else {
+                if (currentGap > maxGap) {
+                    maxGap = currentGap;
+                    startIdx = currentStart;
+                }
+                currentGap = 0;
+                currentStart = -1;
+            }
+        }
+        if (startIdx === -1) return null;
+        
+        const centerIdx = (startIdx + (maxGap / this.sectorSize / 2)) % this.numSectors;
+        return centerIdx * this.sectorSize;
+    }
+
+    isAngleCovered(azimuth) {
+        const normalized = ((azimuth % 360) + 360) % 360;
+        const index = Math.floor(normalized / this.sectorSize);
+        return this.sectors[index];
+    }
+
     getSummary() {
         return {
             percent: this.getPercent(),
             maxGap: this.getMaxGap(),
-            sectors: [...this.sectors]
+            sectors: [...this.sectors],
+            gapCenter: this.getLargestGapCenter()
         };
     }
 }
@@ -233,9 +266,9 @@ class GateValidator {
     constructor(config = {}) {
         this.minCoverage = config.minCoverage || 90;
         this.maxGap = config.maxGap || 45;
-        this.minAcceptedFrames = config.minAcceptedFrames || 100;
-        this.maxBlurRatio = config.maxBlurRatio || 0.3;
-        this.minDuration = config.minDuration || 15;
+        this.minAcceptedFrames = config.minAcceptedFrames || 80;
+        this.maxBlurRatio = config.maxBlurRatio || 0.4;
+        this.minDuration = config.minDuration || 5;
     }
 
     validate(summary, stats, elapsedSec, profile, profileCompletion) {
@@ -396,7 +429,28 @@ class ARCapture {
             selectedIndices: []
         };
 
+        this.toastTimeout = null;
+        this.lastGuidanceTime = 0;
         this.setupHandlers();
+    }
+
+    showGuidanceToast(message, type = 'error') {
+        const toast = document.getElementById('ar-guidance-toast');
+        if (!toast) return;
+        
+        // Don't override a critical error with an info message too quickly
+        if (!toast.classList.contains('hidden') && type === 'info' && toast.classList.contains('ar-toast')) {
+             // skip if already showing something important
+        }
+
+        toast.textContent = message;
+        toast.className = `ar-toast ${type}`;
+        toast.classList.remove('hidden');
+        
+        clearTimeout(this.toastTimeout);
+        this.toastTimeout = setTimeout(() => {
+            toast.classList.add('hidden');
+        }, 3000);
     }
 
     setupHandlers() {
@@ -581,8 +635,20 @@ class ARCapture {
         
         if (this.isRecording) {
             this.stats.totalCount++;
+            const isRedundant = this.tracker.isAngleCovered(curAzimuth);
             this.tracker.addFrame(curAzimuth, quality.isAccepted);
             
+            const now = Date.now();
+            if (now - this.lastGuidanceTime > 2000) {
+                if (!quality.isAccepted) {
+                    this.showGuidanceToast(quality.reasons[0]);
+                    this.lastGuidanceTime = now;
+                } else if (isRedundant) {
+                    this.showGuidanceToast("Angle already covered, keep moving!", "info");
+                    this.lastGuidanceTime = now;
+                }
+            }
+
             if (quality.isAccepted) {
                 this.stats.acceptedCount++;
                 if (this.stats.acceptedCount % 10 === 0) {
@@ -597,6 +663,13 @@ class ARCapture {
             const summary = this.tracker.getSummary();
             this.updateProgress(summary.percent);
             this.checkGate(summary);
+
+            // Detailed gap guidance
+            if (now - this.lastGuidanceTime > 5000 && summary.percent < 90 && summary.maxGap > 30) {
+                const target = Math.floor(summary.gapCenter);
+                this.showGuidanceToast(`Move towards ${target}° to fill the gap`, "info");
+                this.lastGuidanceTime = now;
+            }
         }
 
         requestAnimationFrame(() => this.runMetricsLoop());
@@ -604,13 +677,21 @@ class ARCapture {
 
     updateUIIndicators(quality, blur, lighting, azimuth) {
         document.getElementById('indicator-stability').querySelector('.dot').style.background = 
-            blur > this.metrics.blurThreshold ? "var(--success)" : "var(--error)";
+            blur > this.metrics.blurThreshold ? "var(--accent-color)" : "var(--error)";
         
         document.getElementById('indicator-lighting').querySelector('.dot').style.background = 
-            quality.reasons.some(r => r.includes("lighting") || r.includes("dark") || r.includes("bright")) ? "var(--error)" : "var(--success)";
+            quality.reasons.some(r => r.includes("lighting") || r.includes("dark") || r.includes("bright")) ? "var(--error)" : "var(--accent-color)";
             
         this.angleArrow.style.transform = `rotate(${azimuth}deg)`;
         this.angleText.textContent = `${Math.floor(azimuth)}°`;
+
+        if (this.isRecording) {
+            this.statusLabel.textContent = quality.isAccepted ? "RECORDING..." : "QUALITY WARNING";
+            this.statusLabel.style.color = quality.isAccepted ? "var(--accent-color)" : "var(--error)";
+        } else {
+            this.statusLabel.textContent = "READY";
+            this.statusLabel.style.color = "var(--accent-color)";
+        }
     }
 
     updateProgress(percent) {
@@ -632,21 +713,26 @@ class ARCapture {
 
         const validation = this.gateValidator.validate(summary, this.stats, elapsedSec, this.profile, profileCompletion);
         
+        const newlyPassed = validation.canFinish && !this.canFinish;
         this.canFinish = validation.canFinish || this.isDemoMode;
         this.captureBtn.style.opacity = this.canFinish ? "1" : "0.5";
         
+        if (newlyPassed && this.isRecording) {
+            this.showGuidanceToast("Quality gate passed! You can finish now.", "success");
+        }
+
         if (!this.canFinish && this.isRecording) {
             let msg = validation.missingReq || "Keep rotating";
             
-            if (!validation.reasons.duration) msg = `Capturing... (${Math.floor(15 - elapsedSec)}s left)`;
-            else if (!validation.reasons.frames) msg = "More detail needed...";
-            else if (!validation.reasons.blur) msg = "Move slower!";
+            if (!validation.reasons.duration) msg = `Capturing... (${Math.max(0, Math.floor(this.gateValidator.minDuration - elapsedSec))}s left)`;
+            else if (!validation.reasons.frames) msg = "Adding detail...";
+            else if (!validation.reasons.blur) msg = "Too fast!";
             
             this.statusLabel.textContent = msg;
-            this.statusLabel.style.color = "var(--warning)";
+            this.statusLabel.style.color = "var(--error)";
         } else if (this.isRecording) {
             this.statusLabel.textContent = this.isDemoMode ? "DEMO MODE: READY" : "READY TO FINISH";
-            this.statusLabel.style.color = "var(--success)";
+            this.statusLabel.style.color = "var(--accent-color)";
         }
     }
 

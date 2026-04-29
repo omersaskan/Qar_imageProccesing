@@ -460,6 +460,7 @@ body {
 
 .ar-header {
     padding: 1.5rem;
+    padding-top: calc(1.5rem + env(safe-area-inset-top));
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -476,10 +477,11 @@ body {
 }
 
 #ar-status-label {
-    font-size: 0.8rem;
+    font-size: 0.9rem;
     font-weight: 800;
     letter-spacing: 1px;
     color: var(--accent-color);
+    text-shadow: 0 2px 4px rgba(0,0,0,0.5);
 }
 
 #ar-timer {
@@ -655,9 +657,37 @@ body {
 }
 
 .ar-hint {
-    font-size: 0.85rem;
-    color: var(--text-secondary);
+    font-size: 0.9rem;
+    color: #fff;
     text-align: center;
+    background: rgba(0, 0, 0, 0.4);
+    padding: 8px 16px;
+    border-radius: 20px;
+    backdrop-filter: blur(5px);
+}
+
+.ar-toast {
+    position: absolute;
+    top: 20%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(255, 68, 68, 0.8);
+    color: white;
+    padding: 10px 20px;
+    border-radius: 12px;
+    font-weight: 600;
+    z-index: 100;
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+    transition: opacity 0.3s, transform 0.3s;
+    text-align: center;
+    max-width: 80%;
+}
+
+.ar-toast.success {
+    background: rgba(0, 255, 204, 0.8);
+    color: #000;
 }
 
 /* Box Ghost Guide 3D */
