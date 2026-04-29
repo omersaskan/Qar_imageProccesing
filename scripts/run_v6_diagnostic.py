@@ -29,15 +29,24 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(na
 logger = logging.getLogger("V6Diagnostic")
 
 def run():
-    capture_id = "cap_29ab6fa1"
-    src_job_id = "cap_29ab6fa1_v5_cream"
-    dst_job_id = "cap_29ab6fa1_v6_diag"
+    import argparse
+    parser = argparse.ArgumentParser(description="V6 Diagnostic Hardening Runner")
+    parser.add_argument("--capture-id", type=str, default="cap_29ab6fa1")
+    parser.add_argument("--src-job-id", type=str, default="cap_29ab6fa1_v5_cream")
+    parser.add_argument("--dst-job-id", type=str, default="cap_29ab6fa1_v6_diag")
+    parser.add_argument("--product-profile", type=str, default="generic", choices=["bottle", "box", "generic"])
+    args = parser.parse_args()
+
+    capture_id = args.capture_id
+    src_job_id = args.src_job_id
+    dst_job_id = args.dst_job_id
+    product_profile = args.product_profile
     
     src_dir = ROOT / "data" / "reconstructions" / src_job_id
     dst_dir = ROOT / "data" / "reconstructions" / dst_job_id
     
     # 1. Setup destination
-    if dst_dir.exists():
+    if dst_dir.exists() and dst_dir != src_dir:
         shutil.rmtree(dst_dir)
     dst_dir.mkdir(parents=True, exist_ok=True)
     
@@ -100,7 +109,8 @@ def run():
         cleanup_stats=cleanup_stats,
         pivot_offset=metadata.pivot_offset,
         cleaned_mesh_path=cleaned_mesh_path,
-        expected_color="white_cream"
+        expected_color="white_cream",
+        product_profile=product_profile
     )
     manifest = texturing_result.manifest
     cleaned_mesh_path = texturing_result.cleaned_mesh_path
@@ -136,14 +146,28 @@ def run():
     logger.info("--- Final v6 Diagnostic Classification ---")
     
     # Load metrics
+    cleaned_dir = ROOT / "data" / "cleaned" / dst_job_id
+    t_report = {}
+    q_report = {}
+    rejected_frames = []
+    
     try:
-        with open(ROOT / "data" / "cleaned" / dst_job_id / "texturing" / "selected_texture_frames.json", "r") as f:
-            t_report = json.load(f)
-        with open(ROOT / "data" / "cleaned" / dst_job_id / "texturing" / "texture_quality_report.json", "r") as f:
-            q_report = json.load(f)
+        if (cleaned_dir / "texturing" / "selected_texture_frames.json").exists():
+            with open(cleaned_dir / "texturing" / "selected_texture_frames.json", "r") as f:
+                t_report = json.load(f)
+        
+        rejected_path = cleaned_dir / "texturing" / "rejected_texture_frames.json"
+        if rejected_path.exists():
+            with open(rejected_path, "r") as f:
+                rejected_frames = json.load(f)
+        
+        if (cleaned_dir / "texturing" / "texture_quality_report.json").exists():
+            with open(cleaned_dir / "texturing" / "texture_quality_report.json", "r") as f:
+                q_report = json.load(f)
+        else:
+            logger.warning("texture_quality_report.json not found. Texturing likely failed.")
     except Exception as e:
-        logger.error(f"Failed to load diagnostic reports: {e}")
-        return
+        logger.error(f"Error loading diagnostic reports: {e}")
 
     classification = "unknown"
     reasons = []
@@ -153,7 +177,7 @@ def run():
     frames = mqa.get("frames", {})
     temporal = mqa.get("temporal_summary", {})
     
-    bad_mask_count = sum(1 for f in t_report.get("rejected_frames", []) if "mask" in str(f.get("rejection_reasons", "")))
+    bad_mask_count = sum(1 for f in rejected_frames if "mask" in str(f.get("rejection_reasons", "")))
     if bad_mask_count > len(frames) * 0.5:
         classification = "mask_quality_outliers"
         reasons.append("Majority of frames have poor mask quality or temporal jumps.")
@@ -166,10 +190,14 @@ def run():
             classification = "recapture_required"
             reasons.append("Missing side coverage requires recapture.")
 
-    # 3. Projection / Detail
+    # 3. Projection / Detail / Texturing Failure
     leakage = q_report.get("neutralized_background_leakage", 0)
     detail = q_report.get("texture_detail_entropy", 0)
-    if leakage > 0.3:
+    
+    if not q_report and classification == "unknown":
+        classification = "texturing_process_failure"
+        reasons.append("OpenMVS texturing crashed or failed to produce atlas.")
+    elif leakage > 0.3:
         classification = "OpenMVS_projection_issue"
         reasons.append(f"High background leakage ({leakage:.2f}) into visible mesh surfaces.")
     
