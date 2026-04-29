@@ -287,8 +287,18 @@ async def upload_video(
                 normalize_video(original_path, video_path, ffmpeg_path=settings.ffmpeg_path)
                 logger.info(f"Transcoded {original_path.name} to {video_path.name}")
             except Exception as e:
-                logger.warning(f"Transcoding failed for {session_id}, falling back to copy: {e}")
-                shutil.copy(original_path, video_path)
+                if settings.env.value == "local_dev":
+                    logger.warning(f"Transcoding failed for {session_id}, falling back to copy (LOCAL_DEV ONLY): {e}")
+                    shutil.copy(original_path, video_path)
+                else:
+                    logger.error(f"Normalization failed for {session_id}: {e}")
+                    shutil.rmtree(capture_path)
+                    session_file = Path(settings.data_root) / "sessions" / f"{session_id}.json"
+                    if session_file.exists(): session_file.unlink()
+                    raise HTTPException(
+                        status_code=500, 
+                        detail=f"Video normalization failed: FFmpeg error or unavailable. {str(e)}"
+                    )
         else:
             video_path = video_dir / "raw_video.mp4"
             shutil.move(temp_path, str(video_path))

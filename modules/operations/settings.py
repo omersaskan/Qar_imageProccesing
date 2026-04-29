@@ -29,7 +29,10 @@ class Settings(BaseSettings):
         r"C:\openmvs\bin", 
         validation_alias="OPENMVS_BIN_PATH"
     )
-    ffmpeg_path: str = Field("ffmpeg", validation_alias="FFMPEG_PATH")
+    ffmpeg_path: str = Field(
+        r"C:\Users\Lenovo\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-8.1-full_build\bin\ffmpeg.exe", 
+        validation_alias="FFMPEG_PATH"
+    )
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
