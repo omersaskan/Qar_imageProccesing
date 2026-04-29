@@ -340,32 +340,42 @@ class BoxGhostGuide {
         this.completed.clear();
         Object.values(this.faces).forEach(el => {
             el.classList.add('missing');
-            el.classList.remove('completed');
+            el.classList.remove('completed', 'redundant', 'fill-animate');
         });
     }
 
     // This is a HUD visualizer, NOT a 3D reconstruction.
     update(azimuth, tilt, isAccepted) {
         this.ghost.style.transform = `rotateX(${-tilt}deg) rotateY(${-azimuth}deg)`;
-        if (!isAccepted) return;
-
-        let faceKey = null;
-        if (tilt > 45) faceKey = 'top';
-        else if (tilt < -45) faceKey = 'bottom';
+        
+        let activeFaceKey = null;
+        if (tilt > 45) activeFaceKey = 'top';
+        else if (tilt < -45) activeFaceKey = 'bottom';
         else {
             const a = ((azimuth % 360) + 360) % 360;
-            if (a >= 315 || a < 45) faceKey = 'front';
-            else if (a >= 45 && a < 135) faceKey = 'right';
-            else if (a >= 135 && a < 225) faceKey = 'back';
-            else if (a >= 225 && a < 315) faceKey = 'left';
+            if (a >= 315 || a < 45) activeFaceKey = 'front';
+            else if (a >= 45 && a < 135) activeFaceKey = 'right';
+            else if (a >= 135 && a < 225) activeFaceKey = 'back';
+            else if (a >= 225 && a < 315) activeFaceKey = 'left';
         }
 
-        if (faceKey && !this.completed.has(faceKey)) {
-            this.completed.add(faceKey);
-            const el = this.faces[faceKey];
+        // Handle fill logic only on accepted frames
+        if (isAccepted && activeFaceKey && !this.completed.has(activeFaceKey)) {
+            this.completed.add(activeFaceKey);
+            const el = this.faces[activeFaceKey];
             el.classList.remove('missing');
-            el.classList.add('completed');
+            el.classList.add('completed', 'fill-animate');
         }
+
+        // Handle redundant/focus state visuals
+        Object.keys(this.faces).forEach(key => {
+            const el = this.faces[key];
+            if (key === activeFaceKey && this.completed.has(key)) {
+                el.classList.add('redundant');
+            } else {
+                el.classList.remove('redundant');
+            }
+        });
     }
 
     isFullyComplete() { return this.completed.size >= 6; }
@@ -387,38 +397,62 @@ class BottleGhostGuide {
     hide() { this.container.classList.add('hidden'); }
 
     reset() {
-        this.segments.forEach(s => { s.classList.add('missing'); s.classList.remove('completed'); });
-        this.cap.classList.add('missing'); this.cap.classList.remove('completed');
-        this.base.classList.add('missing'); this.base.classList.remove('completed');
+        this.segments.forEach(s => { 
+            s.classList.add('missing'); 
+            s.classList.remove('completed', 'redundant', 'fill-animate'); 
+        });
+        this.cap.classList.add('missing'); 
+        this.cap.classList.remove('completed', 'redundant', 'fill-animate');
+        this.base.classList.add('missing'); 
+        this.base.classList.remove('completed', 'redundant', 'fill-animate');
         this.isCapComplete = false;
         this.isBaseComplete = false;
     }
 
     update(azimuth, tilt, isAccepted, sectors = []) {
         this.ghost.style.transform = `rotateX(${-tilt}deg) rotateY(${-azimuth}deg)`;
-        if (!isAccepted) return;
+        
+        const a = ((azimuth % 360) + 360) % 360;
+        const activeSegIdx = Math.floor(a / 30); // 12 segments = 30 deg each
 
-        if (tilt < -45) {
-            this.isCapComplete = true;
-            this.cap.classList.remove('missing');
-            this.cap.classList.add('completed');
-        }
-        if (tilt > 30) {
-            this.isBaseComplete = true;
-            this.base.classList.remove('missing');
-            this.base.classList.add('completed');
-        }
+        // 1. Completion Logic (Only on Accepted)
+        if (isAccepted) {
+            if (tilt < -45 && !this.isCapComplete) {
+                this.isCapComplete = true;
+                this.cap.classList.remove('missing');
+                this.cap.classList.add('completed', 'fill-animate');
+            }
+            if (tilt > 30 && !this.isBaseComplete) {
+                this.isBaseComplete = true;
+                this.base.classList.remove('missing');
+                this.base.classList.add('completed', 'fill-animate');
+            }
 
-        // Map 36 sectors to 12 segments
-        if (sectors.length === 36) {
-            for (let i = 0; i < 12; i++) {
-                const covered = sectors[i*3] || sectors[i*3+1] || sectors[i*3+2];
-                if (covered) {
-                    this.segments[i].classList.remove('missing');
-                    this.segments[i].classList.add('completed');
+            if (sectors.length === 36) {
+                for (let i = 0; i < 12; i++) {
+                    const covered = sectors[i*3] || sectors[i*3+1] || sectors[i*3+2];
+                    if (covered && this.segments[i].classList.contains('missing')) {
+                        this.segments[i].classList.remove('missing');
+                        this.segments[i].classList.add('completed', 'fill-animate');
+                    }
                 }
             }
         }
+
+        // 2. Focus/Redundant Logic
+        this.segments.forEach((s, idx) => {
+            if (idx === activeSegIdx && !s.classList.contains('missing')) {
+                s.classList.add('redundant');
+            } else {
+                s.classList.remove('redundant');
+            }
+        });
+
+        if (tilt < -45 && this.isCapComplete) this.cap.classList.add('redundant');
+        else this.cap.classList.remove('redundant');
+
+        if (tilt > 30 && this.isBaseComplete) this.base.classList.add('redundant');
+        else this.base.classList.remove('redundant');
     }
 
     getMissingRequirements() {
@@ -440,22 +474,35 @@ class GenericGhostGuide {
     hide() { this.container.classList.add('hidden'); }
 
     reset() {
-        this.segments.forEach(s => { s.classList.add('missing'); s.classList.remove('completed'); });
+        this.segments.forEach(s => { 
+            s.classList.add('missing'); 
+            s.classList.remove('completed', 'redundant', 'fill-animate'); 
+        });
     }
 
     update(azimuth, tilt, isAccepted, sectors = []) {
         this.ghost.style.transform = `rotateX(${-tilt}deg) rotateY(${-azimuth}deg)`;
-        if (!isAccepted) return;
+        
+        const a = ((azimuth % 360) + 360) % 360;
+        const activeSegIdx = Math.floor(a / 30);
 
-        if (sectors.length === 36) {
+        if (isAccepted && sectors.length === 36) {
             for (let i = 0; i < 12; i++) {
                 const covered = sectors[i*3] || sectors[i*3+1] || sectors[i*3+2];
-                if (covered) {
+                if (covered && this.segments[i].classList.contains('missing')) {
                     this.segments[i].classList.remove('missing');
-                    this.segments[i].classList.add('completed');
+                    this.segments[i].classList.add('completed', 'fill-animate');
                 }
             }
         }
+
+        this.segments.forEach((s, idx) => {
+            if (idx === activeSegIdx && !s.classList.contains('missing')) {
+                s.classList.add('redundant');
+            } else {
+                s.classList.remove('redundant');
+            }
+        });
     }
 }
 
@@ -740,13 +787,19 @@ class ARCapture {
             this.tracker.addFrame(curAzimuth, quality.isAccepted);
             
             const now = Date.now();
-            if (now - this.lastGuidanceTime > 1500) {
+            // Rate-limited Guidance (Short Turkish Messages)
+            if (now - this.lastGuidanceTime > 2000) {
                 if (!quality.isAccepted) {
-                    const label = REJECTION_LABELS[quality.reasons[0]] || quality.reasons[0];
-                    this.showGuidanceToast(label);
+                    const reason = quality.reasons[0];
+                    if (reason === 'blur') this.showGuidanceToast("Yavaş hareket et");
+                    else if (reason === 'too_dark' || reason === 'too_bright') this.showGuidanceToast("Işığı düzelt");
+                    else this.showGuidanceToast("Kaliteyi artır");
                     this.lastGuidanceTime = now;
                 } else if (isRedundant) {
-                    this.showGuidanceToast("Bu açı zaten tarandı, ilerlemeye devam edin!", "info");
+                    this.showGuidanceToast("Bu açı tamamlandı", "info");
+                    this.lastGuidanceTime = now;
+                } else if (summary.percent < 90 && summary.maxGap > 45) {
+                    this.showGuidanceToast("Eksik yöne dön", "info");
                     this.lastGuidanceTime = now;
                 }
             }
@@ -770,12 +823,7 @@ class ARCapture {
             if (this.profile === 'generic') this.genericGuide.update(curAzimuth, curTilt, quality.isAccepted, updatedSummary.sectors);
 
             this.checkGate(updatedSummary);
-
-            if (now - this.lastGuidanceTime > 3000 && updatedSummary.percent < 90 && updatedSummary.maxGap > 30) {
-                const target = Math.floor(updatedSummary.gapCenter);
-                this.showGuidanceToast(`Boşluğu doldurmak için ${target}° açısına doğru dönün`, "info");
-                this.lastGuidanceTime = now;
-            }
+            this.updateDirectionalArrow(updatedSummary, curAzimuth, quality.isAccepted && !isRedundant);
         }
 
         requestAnimationFrame(() => this.runMetricsLoop());
@@ -797,7 +845,35 @@ class ARCapture {
         } else {
             this.statusLabel.textContent = "HAZIR";
             this.statusLabel.style.color = "var(--accent-color)";
+            this.updateDirectionalArrow(null, 0, false); // Hide arrow when not recording
         }
+    }
+
+    updateDirectionalArrow(summary, curAzimuth, isFillingNew) {
+        const hud = document.getElementById('ar-direction-hud');
+        const arrow = document.getElementById('ar-direction-arrow');
+        if (!hud || !arrow) return;
+
+        if (!this.isRecording || !summary || isFillingNew) {
+            hud.classList.add('hidden');
+            return;
+        }
+
+        const isRedundant = this.tracker.isAngleCovered(curAzimuth);
+        const needsGuidance = isRedundant || summary.maxGap > 45;
+
+        if (needsGuidance && summary.gapCenter !== null) {
+            hud.classList.remove('hidden');
+            let diff = summary.gapCenter - curAzimuth;
+            while (diff > 180) diff -= 360;
+            while (diff < -180) diff += 360;
+            
+            // Subtly rotate the arrow icon to point toward the gap
+            arrow.style.transform = `rotate(${diff}deg)`;
+        } else {
+            hud.classList.add('hidden');
+        }
+    }
     }
 
     updateProgress(percent, sectors = []) {
