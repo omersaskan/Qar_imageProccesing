@@ -577,11 +577,10 @@ class ARCapture {
 
     toggleCapture() {
         if (!this.isRecording) {
-            const productId = this.productIdInput.value.trim();
+            let productId = this.productIdInput.value.trim();
             if (!productId) {
-                alert("Please enter a Product ID before starting.");
-                this.productIdInput.focus();
-                return;
+                productId = `prod_${Date.now().toString().slice(-6)}`;
+                this.productIdInput.value = productId;
             }
 
             this.isRecording = true;
@@ -661,7 +660,7 @@ class ARCapture {
             }
             
             const summary = this.tracker.getSummary();
-            this.updateProgress(summary.percent);
+            this.updateProgress(summary.percent, summary.sectors);
             this.checkGate(summary);
 
             // Detailed gap guidance
@@ -694,12 +693,55 @@ class ARCapture {
         }
     }
 
-    updateProgress(percent) {
-        const radius = 45;
-        const circumference = 2 * Math.PI * radius;
-        const offset = circumference - (percent / 100) * circumference;
-        this.progressRing.style.strokeDashoffset = offset;
+    updateProgress(percent, sectors = []) {
         this.coverageEl.textContent = `${Math.floor(percent)}%`;
+        if (sectors.length > 0) {
+            this.drawSectors(sectors);
+        }
+    }
+
+    drawSectors(sectors) {
+        const container = document.getElementById('ar-sector-ring');
+        if (!container) return;
+        
+        if (container.children.length === 0) {
+            const numSectors = sectors.length;
+            const sectorSize = 360 / numSectors;
+            for (let i = 0; i < numSectors; i++) {
+                const arc = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                const startAngle = i * sectorSize - 90;
+                const endAngle = (i + 1) * sectorSize - 90;
+                const d = this.describeArc(50, 50, 45, startAngle, endAngle);
+                arc.setAttribute("d", d);
+                arc.setAttribute("fill", "none");
+                arc.setAttribute("stroke", "rgba(255, 255, 255, 0.05)");
+                arc.setAttribute("stroke-width", "3");
+                container.appendChild(arc);
+            }
+        }
+        
+        Array.from(container.children).forEach((arc, i) => {
+            if (sectors[i]) {
+                arc.setAttribute("stroke", "var(--accent-color)");
+                arc.setAttribute("stroke-width", "5");
+                arc.setAttribute("opacity", "0.8");
+            }
+        });
+    }
+
+    describeArc(x, y, radius, startAngle, endAngle) {
+        const start = this.polarToCartesian(x, y, radius, endAngle);
+        const end = this.polarToCartesian(x, y, radius, startAngle);
+        const arcSweep = endAngle - startAngle <= 180 ? "0" : "1";
+        return ["M", start.x, start.y, "A", radius, radius, 0, arcSweep, 0, end.x, end.y].join(" ");
+    }
+
+    polarToCartesian(centerX, centerY, radius, angleInDegrees) {
+        const angleInRadians = (angleInDegrees * Math.PI) / 180.0;
+        return {
+            x: centerX + radius * Math.cos(angleInRadians),
+            y: centerY + radius * Math.sin(angleInRadians)
+        };
     }
 
     checkGate(summary) {

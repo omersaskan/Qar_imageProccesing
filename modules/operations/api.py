@@ -253,6 +253,7 @@ async def upload_video(
             raise HTTPException(status_code=400, detail=f"Video FPS too low: {fps:.1f}. Minimum required: {settings.min_video_fps}.")
             
         duration = frame_count / fps if fps > 0 else 0
+        duration = max(0.0, duration) # Ensure non-negative
         if duration < settings.min_video_duration_sec:
             raise HTTPException(status_code=400, detail=f"Video duration too short: {duration:.1f}s. Minimum required: {settings.min_video_duration_sec}s.")
         if duration > settings.max_video_duration_sec:
