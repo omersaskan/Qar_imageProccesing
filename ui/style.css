@@ -421,3 +421,220 @@ body {
 @media (max-width: 1024px) {
     .main-content { grid-template-columns: 1fr; }
 }
+
+/* AR Capture UI */
+.ar-container {
+    width: 100%;
+    height: 100%;
+    max-width: none;
+    max-height: none;
+    padding: 0;
+    border-radius: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative;
+    background: #000;
+}
+
+.ar-header {
+    padding: 1.5rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: absolute;
+    top: 0;
+    width: 100%;
+    z-index: 10;
+    background: linear-gradient(to bottom, rgba(0,0,0,0.8), transparent);
+}
+
+.ar-status {
+    display: flex;
+    flex-direction: column;
+}
+
+#ar-status-label {
+    font-size: 0.8rem;
+    font-weight: 800;
+    letter-spacing: 1px;
+    color: var(--accent-color);
+}
+
+#ar-timer {
+    font-size: 1.5rem;
+    font-weight: 600;
+    font-family: monospace;
+}
+
+.camera-wrapper {
+    flex: 1;
+    position: relative;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow: hidden;
+}
+
+#ar-video-feed {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.ar-overlay {
+    position: absolute;
+    width: 80vmin;
+    height: 80vmin;
+    pointer-events: none;
+    z-index: 5;
+}
+
+.ring-bg {
+    stroke: rgba(255,255,255,0.1);
+    stroke-width: 2;
+}
+
+.ring-progress {
+    stroke: var(--accent-color);
+    stroke-width: 4;
+    stroke-linecap: round;
+    transition: stroke-dashoffset 0.5s ease;
+    transform: rotate(-90deg);
+    transform-origin: center;
+}
+
+.bbox-guide {
+    stroke: rgba(255,255,255,0.3);
+    stroke-width: 1;
+    stroke-dasharray: 5, 5;
+}
+
+.ar-indicators {
+    position: absolute;
+    left: 2rem;
+    bottom: 12rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    z-index: 10;
+}
+
+.indicator {
+    background: rgba(0,0,0,0.5);
+    backdrop-filter: blur(8px);
+    padding: 8px 16px;
+    border-radius: 20px;
+    border: 1px solid var(--glass-border);
+    font-size: 0.9rem;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.indicator .dot {
+    margin-right: 0;
+}
+
+.ar-angle-gauge {
+    position: absolute;
+    right: 2rem;
+    bottom: 12rem;
+    background: rgba(0,0,0,0.5);
+    backdrop-filter: blur(8px);
+    padding: 1rem;
+    border-radius: 50%;
+    width: 80px;
+    height: 80px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    border: 1px solid var(--glass-border);
+    z-index: 10;
+}
+
+#angle-arrow {
+    font-size: 1.5rem;
+    color: var(--accent-color);
+    transition: transform 0.2s ease;
+}
+
+#current-angle {
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.ar-footer {
+    padding: 2rem;
+    background: linear-gradient(to top, rgba(0,0,0,0.9), transparent);
+    position: absolute;
+    bottom: 0;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1.5rem;
+    z-index: 10;
+}
+
+.profile-selector {
+    display: flex;
+    gap: 10px;
+    background: rgba(255,255,255,0.05);
+    padding: 5px;
+    border-radius: 12px;
+    border: 1px solid var(--glass-border);
+}
+
+.profile-btn {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.profile-btn.active {
+    background: var(--accent-color);
+    color: var(--bg-color);
+}
+
+.btn-capture {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.2);
+    border: 4px solid #fff;
+    padding: 5px;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.inner-circle {
+    width: 100%;
+    height: 100%;
+    background: #fff;
+    border-radius: 50%;
+    transition: var(--transition);
+}
+
+.btn-capture.recording {
+    border-color: var(--error);
+}
+
+.btn-capture.recording .inner-circle {
+    background: var(--error);
+    border-radius: 8px;
+    transform: scale(0.6);
+}
+
+.ar-hint {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    text-align: center;
+}

@@ -150,6 +150,64 @@
         </div>
     </div>
 
+    <!-- Modal for AR Capture -->
+    <div id="ar-capture-modal-backdrop" class="modal-backdrop hidden">
+        <div class="ar-container glass">
+            <header class="ar-header">
+                <div class="ar-status">
+                    <span id="ar-status-label">READY TO CAPTURE</span>
+                    <div id="ar-timer" class="hidden">00:00</div>
+                </div>
+                <button id="close-ar" class="close-btn">&times;</button>
+            </header>
+
+            <div class="camera-wrapper">
+                <video id="ar-video-feed" autoplay playsinline muted></video>
+                
+                <!-- SVG Overlay for Guidance -->
+                <svg class="ar-overlay" viewBox="0 0 100 100">
+                    <!-- Progress Ring -->
+                    <circle class="ring-bg" cx="50" cy="50" r="45" fill="none" />
+                    <circle id="ar-progress-ring" class="ring-progress" cx="50" cy="50" r="45" fill="none" stroke-dasharray="283" stroke-dashoffset="283" />
+                    
+                    <!-- Bounding Box Guide -->
+                    <rect class="bbox-guide" x="25" y="25" width="50" height="50" rx="2" fill="none" />
+                </svg>
+
+                <div class="ar-indicators">
+                    <div class="indicator" id="indicator-stability">
+                        <span class="dot"></span> Stability
+                    </div>
+                    <div class="indicator" id="indicator-coverage">
+                        <span class="dot"></span> Coverage: <span id="coverage-value">0%</span>
+                    </div>
+                    <div class="indicator" id="indicator-lighting">
+                        <span class="dot"></span> Lighting
+                    </div>
+                </div>
+
+                <div class="ar-angle-gauge">
+                    <div id="angle-arrow" style="transform: rotate(0deg);">↑</div>
+                    <div id="current-angle">0°</div>
+                </div>
+            </div>
+
+            <footer class="ar-footer">
+                <div class="profile-selector">
+                    <button class="profile-btn active" data-profile="generic">GENERIC</button>
+                    <button class="profile-btn" data-profile="bottle">BOTTLE</button>
+                    <button class="profile-btn" data-profile="box">BOX</button>
+                </div>
+                <div class="ar-controls">
+                    <button id="ar-capture-btn" class="btn-capture">
+                        <div class="inner-circle"></div>
+                    </button>
+                </div>
+                <p class="ar-hint">Move slowly around the object keeping it in the box</p>
+            </footer>
+        </div>
+    </div>
+
     <script src="app.js"></script>
 </body>
 </html>

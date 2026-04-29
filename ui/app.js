@@ -110,10 +110,148 @@ function renderGuidance(guidance) {
     `).join('');
 }
 
+// --- AR Capture Logic ---
+
+class ARCapture {
+    constructor() {
+        this.modal = document.getElementById('ar-capture-modal-backdrop');
+        this.video = document.getElementById('ar-video-feed');
+        this.progressRing = document.getElementById('ar-progress-ring');
+        this.statusLabel = document.getElementById('ar-status-label');
+        this.captureBtn = document.getElementById('ar-capture-btn');
+        this.coverageEl = document.getElementById('coverage-value');
+        this.angleArrow = document.getElementById('angle-arrow');
+        this.angleText = document.getElementById('current-angle');
+        this.timerEl = document.getElementById('ar-timer');
+        
+        this.stream = null;
+        this.isRecording = false;
+        this.progress = 0;
+        this.angle = 0;
+        this.timerInterval = null;
+        this.startTime = 0;
+
+        this.setupHandlers();
+    }
+
+    setupHandlers() {
+        document.getElementById('close-ar').onclick = () => this.stop();
+        this.captureBtn.onclick = () => this.toggleCapture();
+        
+        document.querySelectorAll('.profile-btn').forEach(btn => {
+            btn.onclick = () => {
+                document.querySelectorAll('.profile-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+            };
+        });
+    }
+
+    async start() {
+        this.modal.classList.remove('hidden');
+        try {
+            this.stream = await navigator.mediaDevices.getUserMedia({ 
+                video: { facingMode: 'environment' }, 
+                audio: false 
+            });
+            this.video.srcObject = this.stream;
+            this.statusLabel.textContent = "ALIGNED & READY";
+            this.startSimulation();
+        } catch (err) {
+            console.error("Camera access failed:", err);
+            this.statusLabel.textContent = "CAMERA ERROR";
+            alert("Camera access is required for AR Capture.");
+        }
+    }
+
+    stop() {
+        if (this.stream) {
+            this.stream.getTracks().forEach(track => track.stop());
+        }
+        this.modal.classList.add('hidden');
+        this.isRecording = false;
+        this.captureBtn.classList.remove('recording');
+        clearInterval(this.timerInterval);
+        this.timerEl.classList.add('hidden');
+    }
+
+    toggleCapture() {
+        if (!this.isRecording) {
+            this.startRecording();
+        } else {
+            this.finishRecording();
+        }
+    }
+
+    startRecording() {
+        this.isRecording = true;
+        this.captureBtn.classList.add('recording');
+        this.statusLabel.textContent = "RECORDING...";
+        this.statusLabel.style.color = "#e74c3c";
+        
+        this.timerEl.classList.remove('hidden');
+        this.startTime = Date.now();
+        this.timerInterval = setInterval(() => {
+            const diff = Date.now() - this.startTime;
+            const sec = Math.floor(diff / 1000) % 60;
+            const min = Math.floor(diff / 60000);
+            this.timerEl.textContent = `${min.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
+        }, 1000);
+    }
+
+    finishRecording() {
+        this.isRecording = false;
+        this.captureBtn.classList.remove('recording');
+        this.statusLabel.textContent = "PROCESSING CAPTURE...";
+        this.statusLabel.style.color = "var(--accent-color)";
+        clearInterval(this.timerInterval);
+        
+        setTimeout(() => {
+            alert("Capture successful! Video is being uploaded and processed by the V6 pipeline.");
+            this.stop();
+        }, 1500);
+    }
+
+    startSimulation() {
+        // Mocking real-time feedback for angle and coverage
+        const update = () => {
+            if (!this.modal.classList.contains('hidden')) {
+                if (this.isRecording) {
+                    // Simulate coverage gain
+                    this.progress = Math.min(100, this.progress + 0.1);
+                    this.updateProgress(this.progress);
+                    
+                    // Simulate angle change
+                    this.angle = (this.angle + 1) % 360;
+                    this.angleArrow.style.transform = `rotate(${this.angle}deg)`;
+                    this.angleText.textContent = `${this.angle}°`;
+                }
+                requestAnimationFrame(update);
+            }
+        };
+        update();
+    }
+
+    updateProgress(percent) {
+        const radius = 45;
+        const circumference = 2 * Math.PI * radius;
+        const offset = circumference - (percent / 100) * circumference;
+        this.progressRing.style.strokeDashoffset = offset;
+        this.coverageEl.textContent = `${Math.floor(percent)}%`;
+        
+        const coverageIndicator = document.getElementById('indicator-coverage');
+        if (percent > 90) {
+            coverageIndicator.querySelector('.dot').style.background = "var(--success)";
+            coverageIndicator.querySelector('.dot').style.boxShadow = "0 0 10px var(--success)";
+        }
+    }
+}
+
+const arCapture = new ARCapture();
+
 // --- Upload Handlers ---
 
 function setupUploadHandlers() {
-    openUploadBtn.onclick = () => uploadModal.classList.remove('hidden');
+    openUploadBtn.onclick = () => arCapture.start();
     closeUploadBtn.onclick = () => uploadModal.classList.add('hidden');
 
     // Drag and Drop
