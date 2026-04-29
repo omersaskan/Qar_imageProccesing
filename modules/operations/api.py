@@ -267,16 +267,15 @@ async def upload_video(
         os.remove(temp_path)
         raise HTTPException(status_code=500, detail=f"Error validating video: {e}")
 
+    # 1. Define paths without creating session record yet
+    capture_path = session_manager.get_capture_path(session_id)
+    video_dir = capture_path / "video"
+    video_dir.mkdir(parents=True, exist_ok=True)
+    (capture_path / "reports").mkdir(parents=True, exist_ok=True)
+    (capture_path / "frames").mkdir(parents=True, exist_ok=True)
+
     try:
-        # 1. Create Session folders and record
-        session = session_manager.create_session(session_id, product_id, operator_id)
-
-        # 2. Setup video folder
-        capture_path = session_manager.get_capture_path(session_id)
-        video_dir = capture_path / "video"
-        video_dir.mkdir(parents=True, exist_ok=True)
-
-        # 3. Save uploaded file
+        # 2. Save uploaded file
         original_ext = Path(file.filename).suffix.lower()
         if original_ext == ".webm":
             original_path = video_dir / "original_capture.webm"
@@ -294,8 +293,6 @@ async def upload_video(
                 else:
                     logger.error(f"Normalization failed for {session_id}: {e}")
                     shutil.rmtree(capture_path)
-                    session_file = Path(settings.data_root) / "sessions" / f"{session_id}.json"
-                    if session_file.exists(): session_file.unlink()
                     raise HTTPException(
                         status_code=500, 
                         detail=f"Video normalization failed: FFmpeg error or unavailable. {str(e)}"
@@ -321,7 +318,11 @@ async def upload_video(
             raise HTTPException(status_code=422, detail="Missing quality_manifest for AR capture.")
 
         try:
+            if not quality_manifest or quality_manifest.strip() in ("", "null"):
+                 raise ValueError("Empty or null manifest string")
             manifest_data = json.loads(quality_manifest)
+            if not manifest_data:
+                 raise ValueError("Parsed manifest is empty/null")
             
             # 1. Demo Mode Check
             is_demo = manifest_data.get("is_demo", False)
@@ -390,16 +391,7 @@ async def upload_video(
                 json.dump(manifest_data, f, indent=2)
             
             # Tag demo if applicable (only reaches here if in LOCAL_DEV)
-            if manifest_data.get("is_demo"):
-                session_file = Path(settings.data_root) / "sessions" / f"{session_id}.json"
-                if session_file.exists():
-                    with open(session_file, "r+", encoding="utf-8") as f:
-                        s_data = json.load(f)
-                        s_data["test_mode"] = True
-                        s_data["status"] = "demo_capture"
-                        f.seek(0)
-                        json.dump(s_data, f, indent=2)
-                        f.truncate()
+            pass
         else:
             # Save rejected manifest for debugging
             rejected_dir = reports_dir / "rejected"
@@ -407,11 +399,9 @@ async def upload_video(
             with open(rejected_dir / "rejected_ar_quality_manifest.json", "w", encoding="utf-8") as f:
                 json.dump(manifest_data, f, indent=2)
             
-            # Cleanup session
+            # Cleanup capture folder
             logger.error(f"Upload rejected for {session_id}: {'; '.join(rejection_reasons)}")
             shutil.rmtree(capture_path)
-            session_file = Path(settings.data_root) / "sessions" / f"{session_id}.json"
-            if session_file.exists(): session_file.unlink()
             
             raise HTTPException(
                 status_code=422, 
@@ -420,6 +410,22 @@ async def upload_video(
                     "reasons": rejection_reasons,
                     "manifest_validation_status": "rejected"
                 }
+            )
+
+        # ── Finalize Session (Only now the worker can see it) ──────────────────
+        session = session_manager.create_session(session_id, product_id, operator_id)
+        session_manager.update_session(
+            session_id, 
+            status=AssetStatus.UPLOADED,
+            manifest_validation_status="passed"
+        )
+
+        # Tag demo if applicable (only reaches here if in LOCAL_DEV)
+        if manifest_data and manifest_data.get("is_demo"):
+            session_manager.update_session(
+                session_id,
+                status=AssetStatus.DEMO_CAPTURE,
+                test_mode=True
             )
 
         logger.info(
