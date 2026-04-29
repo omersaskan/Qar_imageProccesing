@@ -403,7 +403,7 @@ class ARCapture {
 
         try {
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                throw new Error("MediaDevices API not available");
+                throw new Error("MediaDevices API not found. (Need HTTPS or Localhost)");
             }
             this.stream = await navigator.mediaDevices.getUserMedia({ 
                 video: { facingMode: 'environment' }, 
@@ -413,11 +413,13 @@ class ARCapture {
             this.isDemoMode = false;
             this.statusLabel.textContent = "ALIGNED & READY";
             this.statusLabel.style.color = "var(--success)";
+            document.getElementById('ar-debug-log').textContent = "";
         } catch (err) {
             console.warn("Camera failed, entering DEMO MODE:", err);
             this.isDemoMode = true;
             this.statusLabel.textContent = "DEMO MODE (No Camera)";
             this.statusLabel.style.color = "#fbbf24";
+            document.getElementById('ar-debug-log').textContent = `ERR: ${err.message || err}`;
         }
         
         this.captureBtn.disabled = false;
