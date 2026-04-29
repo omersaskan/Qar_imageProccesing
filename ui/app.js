@@ -1,4 +1,12 @@
 const API_BASE = window.MESHYSIZ_API_BASE || (window.location.origin !== "null" && window.location.protocol.startsWith("http") && window.location.hostname !== "localhost" ? window.location.origin + "/api" : "http://localhost:8001/api");
+const IS_LOCAL_DEV = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+
+const REJECTION_LABELS = {
+    "blur": "Daha yavaş hareket edin (bulanıklık)",
+    "too_dark": "Ortam çok karanlık",
+    "too_bright": "Ortam çok aydınlık",
+    "highlight": "Sert yansımaları azaltın"
+};
 
 const state = {
     products: [],
@@ -168,10 +176,10 @@ class MetricsProcessor {
 
     checkQuality(metrics) {
         const reasons = [];
-        if (metrics.blur < this.blurThreshold) reasons.push("Daha yavaş hareket edin (bulanıklık)");
-        if (metrics.lighting.avgLuminance < this.lightingMin) reasons.push("Ortam çok karanlık");
-        if (metrics.lighting.avgLuminance > this.lightingMax) reasons.push("Ortam çok aydınlık");
-        if (metrics.lighting.highlightRatio > this.highlightRatioThreshold) reasons.push("Sert yansımaları azaltın");
+        if (metrics.blur < this.blurThreshold) reasons.push("blur");
+        if (metrics.lighting.avgLuminance < this.lightingMin) reasons.push("too_dark");
+        if (metrics.lighting.avgLuminance > this.lightingMax) reasons.push("too_bright");
+        if (metrics.lighting.highlightRatio > this.highlightRatioThreshold) reasons.push("highlight");
         
         return {
             isAccepted: reasons.length === 0,
@@ -266,13 +274,13 @@ class GateValidator {
     constructor(config = {}) {
         this.minCoverage = config.minCoverage || 90;
         this.maxGap = config.maxGap || 45;
-        this.minAcceptedFrames = config.minAcceptedFrames || 80;
-        this.maxBlurRatio = config.maxBlurRatio || 0.4;
-        this.minDuration = config.minDuration || 5;
+        this.minAcceptedFrames = config.minAcceptedFrames || 100;
+        this.maxBlurRatio = config.maxBlurRatio || 0.3;
+        this.minDuration = config.minDuration || 15;
     }
 
     validate(summary, stats, elapsedSec, profile, profileCompletion) {
-        const blurRejections = stats.rejectionReasons["Move slower (blur detected)"] || 0;
+        const blurRejections = stats.rejectionReasons["blur"] || 0;
         const blurRatio = stats.totalCount > 0 ? (blurRejections / stats.totalCount) : 0;
         
         const hasEnoughFrames = stats.acceptedCount >= this.minAcceptedFrames;
@@ -497,6 +505,12 @@ class ARCapture {
         this.toastTimeout = null;
         this.lastGuidanceTime = 0;
         this.lastToastMessage = "";
+        
+        // Hide demo btn outside local dev
+        if (!IS_LOCAL_DEV) {
+            this.demoBtn.style.display = 'none';
+        }
+        
         this.setupHandlers();
     }
 
@@ -522,6 +536,7 @@ class ARCapture {
         document.getElementById('close-ar').onclick = () => this.stop();
         this.captureBtn.onclick = () => this.toggleCapture();
         this.demoBtn.onclick = () => {
+            if (this.isRecording) return; // Disable during recording
             this.isDemoMode = !this.isDemoMode;
             this.demoBtn.classList.toggle('active', this.isDemoMode);
             if (this.isDemoMode) {
@@ -658,11 +673,17 @@ class ARCapture {
         if (!this.isRecording) {
             let productId = this.productIdInput.value.trim();
             if (!productId) {
-                productId = `prod_${Date.now().toString().slice(-6)}`;
-                this.productIdInput.value = productId;
+                if (IS_LOCAL_DEV || this.isDemoMode) {
+                    productId = `prod_${Date.now().toString().slice(-6)}`;
+                    this.productIdInput.value = productId;
+                } else {
+                    alert("Product ID gereklidir!");
+                    return;
+                }
             }
 
             this.isRecording = true;
+            this.demoBtn.disabled = true; // Disable toggle while recording
             this.captureBtn.classList.add('recording');
             this.startTime = Date.now();
             this.chunks = [];
@@ -721,7 +742,8 @@ class ARCapture {
             const now = Date.now();
             if (now - this.lastGuidanceTime > 1500) {
                 if (!quality.isAccepted) {
-                    this.showGuidanceToast(quality.reasons[0]);
+                    const label = REJECTION_LABELS[quality.reasons[0]] || quality.reasons[0];
+                    this.showGuidanceToast(label);
                     this.lastGuidanceTime = now;
                 } else if (isRedundant) {
                     this.showGuidanceToast("Bu açı zaten tarandı, ilerlemeye devam edin!", "info");
@@ -764,7 +786,7 @@ class ARCapture {
             blur > this.metrics.blurThreshold ? "var(--accent-color)" : "var(--error)";
         
         document.getElementById('indicator-lighting').querySelector('.dot').style.background = 
-            quality.reasons.some(r => r.includes("lighting") || r.includes("dark") || r.includes("bright")) ? "var(--error)" : "var(--accent-color)";
+            quality.reasons.some(r => r === "too_dark" || r === "too_bright" || r === "highlight") ? "var(--error)" : "var(--accent-color)";
             
         this.angleArrow.style.transform = `rotate(${azimuth}deg)`;
         this.angleText.textContent = `${Math.floor(azimuth)}°`;
@@ -871,6 +893,7 @@ class ARCapture {
 
         this.isRecording = false;
         this.captureBtn.classList.remove('recording');
+        this.demoBtn.disabled = false;
         this.timerEl.classList.add('hidden');
         clearInterval(this.timerInterval);
 
@@ -901,8 +924,14 @@ class ARCapture {
         };
 
         if (this.isDemoMode) {
-            // Demo mode upload with fake video
-            this.uploadResult(new Blob(["demo"], { type: 'video/mp4' }));
+            // Demo mode upload with fake video - skip production upload if desired, 
+            // but user says "Must not upload to production as a real capture"
+            // For now, we allow the local flow but we could block it if needed.
+            // The user said: "Demo captures must not be sent as production uploads."
+            console.log("Demo capture - skipping production upload");
+            alert("Demo capture completed (Not uploaded to production)");
+            this.stop();
+            return;
         } else if (this.mediaRecorder) {
             this.mediaRecorder.stop();
         }

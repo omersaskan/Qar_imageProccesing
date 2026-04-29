@@ -149,7 +149,7 @@ def test_reject_too_much_blur(dummy_video_file):
         "coverage_summary": {"percent": 95, "maxGap": 20},
         "accepted_frame_count": 150,
         "total_frame_count": 300,
-        "rejection_stats": {"Move slower (blur detected)": 150} # 50% blur
+        "rejection_stats": {"blur": 150} # 50% blur
     }
     
     with open(dummy_video_file, 'rb') as f:
@@ -193,7 +193,7 @@ def test_accept_valid_manifest(dummy_video_file):
         "coverage_summary": {"percent": 95, "maxGap": 20},
         "accepted_frame_count": 150,
         "total_frame_count": 200,
-        "rejection_stats": {"Move slower (blur detected)": 10}
+        "rejection_stats": {"blur": 10}
     }
     
     with open(dummy_video_file, 'rb') as f:

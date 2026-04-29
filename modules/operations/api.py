@@ -25,6 +25,7 @@ import uuid
 
 from modules.asset_registry.registry import AssetRegistry
 from modules.capture_workflow.session_manager import SessionManager
+from modules.shared_contracts.lifecycle import AssetStatus
 from modules.operations.logging_config import get_component_logger, setup_logging
 from modules.operations.worker import worker_instance
 from modules.operations.settings import settings, AppEnvironment
@@ -342,7 +343,7 @@ async def upload_video(
             accepted_frames = manifest_data.get("accepted_frame_count", 0)
             total_frames = manifest_data.get("total_frame_count", 0)
             
-            blur_rejections = manifest_data.get("rejection_stats", {}).get("Move slower (blur detected)", 0)
+            blur_rejections = manifest_data.get("rejection_stats", {}).get("blur", 0)
             blur_ratio = blur_rejections / total_frames if total_frames > 0 else 0
             
             profile = manifest_data.get("product_profile", "generic")
