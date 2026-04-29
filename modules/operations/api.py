@@ -382,17 +382,24 @@ async def list_products():
                 with open(file, "r", encoding="utf-8") as f:
                     session_data = json.load(f)
                     p_id = session_data.get("product_id")
-                    if p_id and p_id not in products_map:
-                        products_map[p_id] = {
-                            "id": p_id,
-                            "active_id": None,
-                            "asset_count": 0,
-                            "last_updated": file.stat().st_mtime,
-                            "status": "processing",
-                        }
-                    elif p_id in products_map and products_map[p_id]["status"] == "registered":
-                        if session_data.get("status") not in ["published", "failed"]:
-                            products_map[p_id]["has_active_session"] = True
+                    s_status = session_data.get("status")
+                    
+                    if p_id:
+                        is_active = s_status not in ["published", "failed"]
+                        
+                        if p_id not in products_map:
+                            products_map[p_id] = {
+                                "id": p_id,
+                                "active_id": None,
+                                "asset_count": 0,
+                                "last_updated": file.stat().st_mtime,
+                                "status": "processing" if is_active else "registered",
+                                "has_active_session": is_active
+                            }
+                        else:
+                            if is_active:
+                                products_map[p_id]["has_active_session"] = True
+                                products_map[p_id]["status"] = "processing"
             except Exception:
                 continue
 
