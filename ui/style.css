@@ -638,3 +638,96 @@ body {
     color: var(--text-secondary);
     text-align: center;
 }
+
+/* Box Ghost Guide 3D */
+#ar-ghost-guide {
+    position: absolute;
+    perspective: 1000px;
+    z-index: 4;
+    pointer-events: none;
+}
+
+.box-ghost {
+    width: 150px;
+    height: 200px;
+    position: relative;
+    transform-style: preserve-3d;
+    transition: transform 0.3s ease-out;
+}
+
+.face {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 0.7rem;
+    font-weight: 800;
+    color: rgba(255,255,255,0.3);
+    backface-visibility: visible;
+}
+
+.face.completed {
+    background: rgba(0, 255, 204, 0.2);
+    border-color: var(--accent-color);
+    color: var(--accent-color);
+    box-shadow: inset 0 0 15px rgba(0, 255, 204, 0.2);
+}
+
+.front  { transform: translateZ(50px); }
+.back   { transform: rotateY(180deg) translateZ(50px); }
+.left   { transform: rotateY(-90deg) translateZ(75px); width: 100px; left: 25px; }
+.right  { transform: rotateY(90deg) translateZ(75px); width: 100px; left: 25px; }
+.top    { transform: rotateX(90deg) translateZ(100px); height: 100px; top: 50px; }
+.bottom { transform: rotateX(-90deg) translateZ(100px); height: 100px; top: 50px; }
+
+/* Bottle Ghost Guide */
+#ar-bottle-guide {
+    position: absolute;
+    perspective: 1000px;
+    z-index: 4;
+    pointer-events: none;
+}
+
+.bottle-ghost {
+    width: 80px;
+    height: 200px;
+    position: relative;
+    transform-style: preserve-3d;
+    transition: transform 0.3s ease-out;
+}
+
+.cylinder {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    border-radius: 40px;
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.cap, .base {
+    position: absolute;
+    width: 60px;
+    height: 60px;
+    left: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 50%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 0.6rem;
+    color: rgba(255,255,255,0.3);
+}
+
+.cap { top: -30px; transform: rotateX(90deg); }
+.base { bottom: -30px; transform: rotateX(90deg); }
+
+.cap.completed, .base.completed {
+    border-color: var(--accent-color);
+    color: var(--accent-color);
+    background: rgba(0, 255, 204, 0.2);
+}

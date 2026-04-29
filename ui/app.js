@@ -229,7 +229,83 @@ class CoverageTracker {
     }
 }
 
-// --- AR Capture Logic ---
+class BoxGhostGuide {
+    constructor() {
+        this.container = document.getElementById('ar-ghost-guide');
+        this.ghost = this.container.querySelector('.box-ghost');
+        this.faces = {
+            front: { a: 0, t: 0, el: this.container.querySelector('.front') },
+            back: { a: 180, t: 0, el: this.container.querySelector('.back') },
+            left: { a: 90, t: 0, el: this.container.querySelector('.left') },
+            right: { a: 270, t: 0, el: this.container.querySelector('.right') },
+            top: { a: null, t: -90, el: this.container.querySelector('.top') },
+            bottom: { a: null, t: 45, el: this.container.querySelector('.bottom') }
+        };
+        this.completed = new Set();
+    }
+
+    show() { this.container.classList.remove('hidden'); }
+    hide() { this.container.classList.add('hidden'); }
+
+    update(azimuth, tilt, isAccepted) {
+        this.ghost.style.transform = `rotateX(${-tilt}deg) rotateY(${-azimuth}deg)`;
+        if (!isAccepted) return;
+        for (const [name, target] of Object.entries(this.faces)) {
+            if (this.completed.has(name)) continue;
+            const tiltMatch = Math.abs(tilt - target.t) < 25;
+            let azimuthMatch = true;
+            if (target.a !== null) {
+                const diff = Math.abs((azimuth - target.a + 180 + 360) % 360 - 180);
+                azimuthMatch = diff < 30;
+            }
+            if (tiltMatch && azimuthMatch) {
+                this.completed.add(name);
+                target.el.classList.add('completed');
+            }
+        }
+    }
+
+    isFullyComplete() { return this.completed.size >= 6; }
+    getMissingFaces() { return Object.keys(this.faces).filter(f => !this.completed.has(f)); }
+}
+
+class BottleGhostGuide {
+    constructor() {
+        this.container = document.getElementById('ar-bottle-guide');
+        this.ghost = this.container.querySelector('.bottle-ghost');
+        this.cap = this.container.querySelector('.cap');
+        this.base = this.container.querySelector('.base');
+        this.isCapComplete = false;
+        this.isBaseComplete = false;
+    }
+
+    show() { this.container.classList.remove('hidden'); }
+    hide() { this.container.classList.add('hidden'); }
+
+    update(azimuth, tilt, isAccepted) {
+        this.ghost.style.transform = `rotateX(${-tilt}deg) rotateY(${-azimuth}deg)`;
+
+        if (!isAccepted) return;
+
+        // Cap: Tilt < -45 (looking down)
+        if (tilt < -45) {
+            this.isCapComplete = true;
+            this.cap.classList.add('completed');
+        }
+        // Base: Tilt > 30 (looking up)
+        if (tilt > 30) {
+            this.isBaseComplete = true;
+            this.base.classList.add('completed');
+        }
+    }
+
+    getMissingRequirements() {
+        const reqs = [];
+        if (!this.isCapComplete) reqs.push("Cap/Top");
+        if (!this.isBaseComplete) reqs.push("Base/Bottom");
+        return reqs;
+    }
+}
 
 class ARCapture {
     constructor() {
@@ -248,10 +324,13 @@ class ARCapture {
         
         this.metrics = new MetricsProcessor();
         this.tracker = new CoverageTracker();
+        this.boxGuide = new BoxGhostGuide();
+        this.bottleGuide = new BottleGhostGuide();
         
         this.stream = null;
         this.isRecording = false;
         this.isDemoMode = false;
+        this.profile = 'generic';
         this.azimuth = 0;
         this.tilt = 0;
         this.qualityManifest = null;
@@ -272,16 +351,37 @@ class ARCapture {
         
         window.addEventListener('deviceorientation', (e) => {
             if (e.alpha !== null) {
-                this.azimuth = e.alpha;
+                // Adjusting coordinate systems for visualization
+                this.azimuth = e.alpha; 
                 this.tilt = e.beta;
             }
         });
+
+        document.querySelectorAll('.profile-btn').forEach(btn => {
+            btn.onclick = () => {
+                document.querySelectorAll('.profile-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                this.profile = btn.dataset.profile;
+                this.updateGuideVisibility();
+            };
+        });
+    }
+
+    updateGuideVisibility() {
+        this.boxGuide.hide();
+        this.bottleGuide.hide();
+        if (this.profile === 'box') {
+            this.boxGuide.show();
+        } else if (this.profile === 'bottle') {
+            this.bottleGuide.show();
+        }
     }
 
     async start() {
         this.modal.classList.remove('hidden');
         this.resetStats();
         this.qualityManifest = null;
+        this.updateGuideVisibility();
         
         // Detect desktop/no-sensor
         if (window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === 'function') {
@@ -310,6 +410,8 @@ class ARCapture {
 
     resetStats() {
         this.tracker = new CoverageTracker();
+        this.boxGuide = new BoxGhostGuide();
+        this.bottleGuide = new BottleGhostGuide();
         this.stats = { totalCount: 0, acceptedCount: 0, rejectionReasons: {}, selectedIndices: [] };
         this.updateProgress(0);
     }
@@ -345,23 +447,24 @@ class ARCapture {
         const lighting = this.metrics.analyzeLighting(imageData.data);
         const quality = this.metrics.checkQuality({ blur, lighting });
         
-        // 3. Update Indicators
-        this.updateUIIndicators(quality, blur, lighting);
+        // 3. Update Indicators & Ghost Guides
+        const curAzimuth = this.isDemoMode ? (Date.now() / 50 % 360) : this.azimuth;
+        const curTilt = this.isDemoMode ? (Math.sin(Date.now() / 1000) * 20) : this.tilt;
+        
+        this.updateUIIndicators(quality, blur, lighting, curAzimuth);
+        
+        if (this.profile === 'box') this.boxGuide.update(curAzimuth, curTilt, quality.isAccepted);
+        if (this.profile === 'bottle') this.bottleGuide.update(curAzimuth, curTilt, quality.isAccepted);
         
         // 4. Update Coverage if recording
         if (this.isRecording) {
             this.stats.totalCount++;
-            const azimuth = this.isDemoMode ? (Date.now() / 50 % 360) : this.azimuth;
-            this.tracker.addFrame(azimuth, quality.isAccepted);
+            this.tracker.addFrame(curAzimuth, quality.isAccepted);
             
             if (quality.isAccepted) {
                 this.stats.acceptedCount++;
-                // Add to selected indices (sample every 10 accepted frames)
                 if (this.stats.acceptedCount % 10 === 0) {
-                    this.stats.selectedIndices.push({
-                        t: Date.now() - this.startTime,
-                        a: azimuth
-                    });
+                    this.stats.selectedIndices.push({ t: Date.now() - this.startTime, a: curAzimuth });
                 }
             } else {
                 quality.reasons.forEach(r => {
@@ -377,15 +480,15 @@ class ARCapture {
         requestAnimationFrame(() => this.runMetricsLoop());
     }
 
-    updateUIIndicators(quality, blur, lighting) {
+    updateUIIndicators(quality, blur, lighting, azimuth) {
         document.getElementById('indicator-stability').querySelector('.dot').style.background = 
             blur > this.metrics.blurThreshold ? "var(--success)" : "var(--error)";
         
         document.getElementById('indicator-lighting').querySelector('.dot').style.background = 
             quality.reasons.some(r => r.includes("lighting") || r.includes("dark") || r.includes("bright")) ? "var(--error)" : "var(--success)";
             
-        this.angleArrow.style.transform = `rotate(${this.azimuth}deg)`;
-        this.angleText.textContent = `${Math.floor(this.azimuth)}°`;
+        this.angleArrow.style.transform = `rotate(${azimuth}deg)`;
+        this.angleText.textContent = `${Math.floor(azimuth)}°`;
     }
 
     updateProgress(percent) {
@@ -400,17 +503,30 @@ class ARCapture {
         const blurRejections = this.stats.rejectionReasons["Move slower (blur detected)"] || 0;
         const blurRatio = this.stats.totalCount > 0 ? (blurRejections / this.stats.totalCount) : 0;
         
-        const hasEnoughFrames = this.stats.acceptedCount > 50; // Relaxed for dev
+        const hasEnoughFrames = this.stats.acceptedCount > 50;
         const blurIsOk = blurRatio < 0.4;
-        const coverageIsOk = summary.percent > 90 && summary.maxGap < 45;
         
+        let coverageIsOk = summary.percent > 90 && summary.maxGap < 45;
+        let missingReq = "";
+
+        if (this.profile === 'box') {
+            const missing = this.boxGuide.getMissingFaces();
+            coverageIsOk = missing.length === 0;
+            if (!coverageIsOk) missingReq = `Missing: ${missing[0].toUpperCase()}`;
+        } else if (this.profile === 'bottle') {
+            const missing = this.bottleGuide.getMissingRequirements();
+            coverageIsOk = (summary.percent > 90 && summary.maxGap < 45) && missing.length === 0;
+            if (missing.length > 0) missingReq = `Capture: ${missing[0]}`;
+        } else if (summary.maxGap > 45) {
+            missingReq = `Gap too large: ${Math.floor(summary.maxGap)}°`;
+        }
+
         const canFinish = (coverageIsOk && hasEnoughFrames && blurIsOk) || this.isDemoMode;
         this.captureBtn.style.opacity = canFinish ? "1" : "0.5";
         
         if (!canFinish && this.isRecording) {
-            let msg = "Keep rotating";
-            if (summary.maxGap > 45) msg = `Gap too large: ${Math.floor(summary.maxGap)}°`;
-            else if (!hasEnoughFrames) msg = "Capturing detail...";
+            let msg = missingReq || "Keep rotating";
+            if (!hasEnoughFrames) msg = "Capturing detail...";
             else if (!blurIsOk) msg = "Move slower!";
             this.statusLabel.textContent = msg;
             this.statusLabel.style.color = "var(--warning)";
