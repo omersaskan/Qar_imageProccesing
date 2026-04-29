@@ -254,8 +254,10 @@ class ARCapture {
         this.isDemoMode = false;
         this.azimuth = 0;
         this.tilt = 0;
+        this.qualityManifest = null;
         
         this.stats = {
+            totalCount: 0,
             acceptedCount: 0,
             rejectionReasons: {},
             selectedIndices: []
@@ -279,6 +281,7 @@ class ARCapture {
     async start() {
         this.modal.classList.remove('hidden');
         this.resetStats();
+        this.qualityManifest = null;
         
         // Detect desktop/no-sensor
         if (window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === 'function') {
@@ -307,7 +310,7 @@ class ARCapture {
 
     resetStats() {
         this.tracker = new CoverageTracker();
-        this.stats = { acceptedCount: 0, rejectionReasons: {}, selectedIndices: [] };
+        this.stats = { totalCount: 0, acceptedCount: 0, rejectionReasons: {}, selectedIndices: [] };
         this.updateProgress(0);
     }
 
@@ -347,11 +350,19 @@ class ARCapture {
         
         // 4. Update Coverage if recording
         if (this.isRecording) {
+            this.stats.totalCount++;
             const azimuth = this.isDemoMode ? (Date.now() / 50 % 360) : this.azimuth;
             this.tracker.addFrame(azimuth, quality.isAccepted);
             
             if (quality.isAccepted) {
                 this.stats.acceptedCount++;
+                // Add to selected indices (sample every 10 accepted frames)
+                if (this.stats.acceptedCount % 10 === 0) {
+                    this.stats.selectedIndices.push({
+                        t: Date.now() - this.startTime,
+                        a: azimuth
+                    });
+                }
             } else {
                 quality.reasons.forEach(r => {
                     this.stats.rejectionReasons[r] = (this.stats.rejectionReasons[r] || 0) + 1;
@@ -386,15 +397,25 @@ class ARCapture {
     }
 
     checkGate(summary) {
-        const canFinish = summary.percent > 90 && summary.maxGap < 45;
+        const blurRejections = this.stats.rejectionReasons["Move slower (blur detected)"] || 0;
+        const blurRatio = this.stats.totalCount > 0 ? (blurRejections / this.stats.totalCount) : 0;
+        
+        const hasEnoughFrames = this.stats.acceptedCount > 50; // Relaxed for dev
+        const blurIsOk = blurRatio < 0.4;
+        const coverageIsOk = summary.percent > 90 && summary.maxGap < 45;
+        
+        const canFinish = (coverageIsOk && hasEnoughFrames && blurIsOk) || this.isDemoMode;
         this.captureBtn.style.opacity = canFinish ? "1" : "0.5";
         
         if (!canFinish && this.isRecording) {
-            let msg = "Rotate more";
+            let msg = "Keep rotating";
             if (summary.maxGap > 45) msg = `Gap too large: ${Math.floor(summary.maxGap)}°`;
+            else if (!hasEnoughFrames) msg = "Capturing detail...";
+            else if (!blurIsOk) msg = "Move slower!";
             this.statusLabel.textContent = msg;
+            this.statusLabel.style.color = "var(--warning)";
         } else if (this.isRecording) {
-            this.statusLabel.textContent = "READY TO FINISH";
+            this.statusLabel.textContent = this.isDemoMode ? "DEMO MODE: READY" : "READY TO FINISH";
             this.statusLabel.style.color = "var(--success)";
         }
     }
@@ -409,17 +430,27 @@ class ARCapture {
         this.isRecording = false;
         this.captureBtn.classList.remove('recording');
         
-        const manifest = {
+        this.qualityManifest = {
             product_profile: document.querySelector('.profile-btn.active').dataset.profile,
             coverage_summary: summary,
             accepted_frame_count: this.stats.acceptedCount,
+            total_frame_count: this.stats.totalCount,
             rejection_stats: this.stats.rejectionReasons,
             is_demo: this.isDemoMode,
+            selected_frames: this.stats.selectedIndices,
             timestamp: new Date().toISOString()
         };
 
-        console.log("Quality Manifest Generated:", manifest);
-        alert("Capture Finished! Quality Manifest created and attached to upload.");
+        console.log("Quality Manifest Generated:", this.qualityManifest);
+        
+        if (this.isDemoMode) {
+            alert("DEMO CAPTURE: Manifest generated but will be marked as DEMO on upload.");
+        } else {
+            alert("Capture Finished! Quality Manifest attached to upload.");
+        }
+        
+        // Open the original upload modal to select product ID
+        uploadModal.classList.remove('hidden');
         this.stop();
     }
 }
@@ -432,42 +463,23 @@ function setupUploadHandlers() {
     openUploadBtn.onclick = () => arCapture.start();
     closeUploadBtn.onclick = () => uploadModal.classList.add('hidden');
 
-    // Drag and Drop
-    dropZone.onclick = (e) => {
-        videoInput.click();
-    };
-
-    dropZone.ondragover = (e) => {
-        e.preventDefault();
-        dropZone.classList.add('active');
-    };
-
-    dropZone.ondragleave = () => dropZone.classList.remove('active');
-
-    dropZone.ondrop = (e) => {
-        e.preventDefault();
-        dropZone.classList.remove('active');
-        if (e.dataTransfer.files.length) {
-            handleFileSelect(e.dataTransfer.files[0]);
-        }
-    };
-
-    videoInput.onchange = (e) => {
-        if (e.target.files.length) {
-            handleFileSelect(e.target.files[0]);
-        }
-    };
-
     uploadForm.onsubmit = async (e) => {
         e.preventDefault();
         const productId = document.getElementById('upload-product-id').value;
         const file = videoInput.files[0];
 
-        if (!file || !productId) return;
+        if (!file || !productId) {
+            alert("Please select a file and enter Product ID");
+            return;
+        }
 
         const formData = new FormData();
         formData.append('product_id', productId);
         formData.append('file', file);
+        
+        if (arCapture.qualityManifest) {
+            formData.append('quality_manifest', JSON.stringify(arCapture.qualityManifest));
+        }
 
         progressContainer.classList.remove('hidden');
         const xhr = new XMLHttpRequest();

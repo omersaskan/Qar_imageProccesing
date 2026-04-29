@@ -169,6 +169,7 @@ async def readiness_check():
 async def upload_video(
     product_id: str = Form(...),
     operator_id: str = Form("dashboard_user"),
+    quality_manifest: Optional[str] = Form(None),
     file: UploadFile = File(...),
 ):
     """
@@ -277,6 +278,17 @@ async def upload_video(
         # 3. Save uploaded file
         video_path = video_dir / "raw_video.mp4"
         shutil.move(temp_path, str(video_path))
+
+        # 4. Save Quality Manifest if provided
+        if quality_manifest:
+            try:
+                manifest_data = json.loads(quality_manifest)
+                reports_dir = capture_path / "reports"
+                reports_dir.mkdir(parents=True, exist_ok=True)
+                with open(reports_dir / "ar_quality_manifest.json", "w", encoding="utf-8") as f:
+                    json.dump(manifest_data, f, indent=2)
+            except Exception as e:
+                logger.warning(f"Failed to save quality manifest for {session_id}: {e}")
 
         logger.info(
             f"Video uploaded successfully for session {session_id}. Size: {file_size_mb:.2f} MB, Res: {width}x{height}, Dur: {duration:.1f}s",
