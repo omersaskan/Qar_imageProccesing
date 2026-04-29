@@ -110,12 +110,134 @@ function renderGuidance(guidance) {
     `).join('');
 }
 
+// --- AR Capture Pure Logic ---
+
+class MetricsProcessor {
+    constructor(config = {}) {
+        this.blurThreshold = config.blurThreshold || 100;
+        this.lightingMin = config.lightingMin || 40;
+        this.lightingMax = config.lightingMax || 220;
+        this.highlightRatioThreshold = config.highlightRatioThreshold || 0.1;
+    }
+
+    // Pure function for blur detection (Laplacian Variance proxy)
+    analyzeBlur(pixels, width, height) {
+        let sum = 0;
+        let sumSq = 0;
+        const n = (width - 2) * (height - 2);
+        
+        // Simple 3x3 Laplacian kernel over grayscale
+        for (let y = 1; y < height - 1; y++) {
+            for (let x = 1; x < width - 1; x++) {
+                const idx = (y * width + x) * 4;
+                const center = (pixels[idx] + pixels[idx+1] + pixels[idx+2]) / 3;
+                
+                const neighbors = [
+                    (pixels[((y-1)*width + x)*4] + pixels[((y-1)*width + x)*4+1] + pixels[((y-1)*width + x)*4+2]) / 3,
+                    (pixels[((y+1)*width + x)*4] + pixels[((y+1)*width + x)*4+1] + pixels[((y+1)*width + x)*4+2]) / 3,
+                    (pixels[(y*width + (x-1))*4] + pixels[(y*width + (x-1))*4+1] + pixels[(y*width + (x-1))*4+2]) / 3,
+                    (pixels[(y*width + (x+1))*4] + pixels[(y*width + (x+1))*4+1] + pixels[(y*width + (x+1))*4+2]) / 3
+                ];
+                
+                const laplacian = neighbors.reduce((a, b) => a + b, 0) - 4 * center;
+                sum += laplacian;
+                sumSq += laplacian * laplacian;
+            }
+        }
+        
+        const variance = (sumSq / n) - (sum / n) ** 2;
+        return variance;
+    }
+
+    analyzeLighting(pixels) {
+        let totalLum = 0;
+        let highlights = 0;
+        const n = pixels.length / 4;
+        
+        for (let i = 0; i < pixels.length; i += 4) {
+            const lum = 0.2126 * pixels[i] + 0.7152 * pixels[i+1] + 0.0722 * pixels[i+2];
+            totalLum += lum;
+            if (lum > 240) highlights++;
+        }
+        
+        return {
+            avgLuminance: totalLum / n,
+            highlightRatio: highlights / n
+        };
+    }
+
+    checkQuality(metrics) {
+        const reasons = [];
+        if (metrics.blur < this.blurThreshold) reasons.push("Move slower (blur detected)");
+        if (metrics.lighting.avgLuminance < this.lightingMin) reasons.push("Too dark");
+        if (metrics.lighting.avgLuminance > this.lightingMax) reasons.push("Too bright");
+        if (metrics.lighting.highlightRatio > this.highlightRatioThreshold) reasons.push("Reduce harsh highlights");
+        
+        return {
+            isAccepted: reasons.length === 0,
+            reasons
+        };
+    }
+}
+
+class CoverageTracker {
+    constructor(numSectors = 36) {
+        this.numSectors = numSectors;
+        this.sectorSize = 360 / numSectors;
+        this.sectors = new Array(numSectors).fill(false);
+        this.lastAzimuth = null;
+    }
+
+    addFrame(azimuth, isAccepted) {
+        if (!isAccepted) return;
+        
+        // Normalize azimuth to 0-360
+        const normalized = ((azimuth % 360) + 360) % 360;
+        const index = Math.floor(normalized / this.sectorSize);
+        this.sectors[index] = true;
+        this.lastAzimuth = normalized;
+    }
+
+    getPercent() {
+        const covered = this.sectors.filter(s => s).length;
+        return (covered / this.numSectors) * 100;
+    }
+
+    getMaxGap() {
+        let maxGap = 0;
+        let currentGap = 0;
+        
+        // Circular check (double the array to handle 359->0 wrap)
+        const extendedSectors = [...this.sectors, ...this.sectors];
+        for (const s of extendedSectors) {
+            if (!s) {
+                currentGap += this.sectorSize;
+            } else {
+                maxGap = Math.max(maxGap, currentGap);
+                currentGap = 0;
+            }
+        }
+        return Math.max(maxGap, currentGap);
+    }
+
+    getSummary() {
+        return {
+            percent: this.getPercent(),
+            maxGap: this.getMaxGap(),
+            sectors: [...this.sectors]
+        };
+    }
+}
+
 // --- AR Capture Logic ---
 
 class ARCapture {
     constructor() {
         this.modal = document.getElementById('ar-capture-modal-backdrop');
         this.video = document.getElementById('ar-video-feed');
+        this.samplingCanvas = document.getElementById('ar-sampling-canvas');
+        this.samplingCtx = this.samplingCanvas.getContext('2d', { willReadFrequently: true });
+        
         this.progressRing = document.getElementById('ar-progress-ring');
         this.statusLabel = document.getElementById('ar-status-label');
         this.captureBtn = document.getElementById('ar-capture-btn');
@@ -124,12 +246,20 @@ class ARCapture {
         this.angleText = document.getElementById('current-angle');
         this.timerEl = document.getElementById('ar-timer');
         
+        this.metrics = new MetricsProcessor();
+        this.tracker = new CoverageTracker();
+        
         this.stream = null;
         this.isRecording = false;
-        this.progress = 0;
-        this.angle = 0;
-        this.timerInterval = null;
-        this.startTime = 0;
+        this.isDemoMode = false;
+        this.azimuth = 0;
+        this.tilt = 0;
+        
+        this.stats = {
+            acceptedCount: 0,
+            rejectionReasons: {},
+            selectedIndices: []
+        };
 
         this.setupHandlers();
     }
@@ -138,29 +268,47 @@ class ARCapture {
         document.getElementById('close-ar').onclick = () => this.stop();
         this.captureBtn.onclick = () => this.toggleCapture();
         
-        document.querySelectorAll('.profile-btn').forEach(btn => {
-            btn.onclick = () => {
-                document.querySelectorAll('.profile-btn').forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-            };
+        window.addEventListener('deviceorientation', (e) => {
+            if (e.alpha !== null) {
+                this.azimuth = e.alpha;
+                this.tilt = e.beta;
+            }
         });
     }
 
     async start() {
         this.modal.classList.remove('hidden');
+        this.resetStats();
+        
+        // Detect desktop/no-sensor
+        if (window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === 'function') {
+            try {
+                await DeviceOrientationEvent.requestPermission();
+            } catch (e) { console.warn("Orientation permission denied"); }
+        }
+
         try {
             this.stream = await navigator.mediaDevices.getUserMedia({ 
                 video: { facingMode: 'environment' }, 
                 audio: false 
             });
             this.video.srcObject = this.stream;
+            this.isDemoMode = false;
             this.statusLabel.textContent = "ALIGNED & READY";
-            this.startSimulation();
         } catch (err) {
-            console.error("Camera access failed:", err);
-            this.statusLabel.textContent = "CAMERA ERROR";
-            alert("Camera access is required for AR Capture.");
+            console.warn("Camera/Mobile sensors unavailable, entering DEMO MODE");
+            this.isDemoMode = true;
+            this.statusLabel.textContent = "DEMO MODE (Desktop)";
+            this.statusLabel.style.color = "#fbbf24";
         }
+        
+        this.runMetricsLoop();
+    }
+
+    resetStats() {
+        this.tracker = new CoverageTracker();
+        this.stats = { acceptedCount: 0, rejectionReasons: {}, selectedIndices: [] };
+        this.updateProgress(0);
     }
 
     stop() {
@@ -169,66 +317,64 @@ class ARCapture {
         }
         this.modal.classList.add('hidden');
         this.isRecording = false;
-        this.captureBtn.classList.remove('recording');
         clearInterval(this.timerInterval);
-        this.timerEl.classList.add('hidden');
     }
 
     toggleCapture() {
         if (!this.isRecording) {
-            this.startRecording();
+            this.isRecording = true;
+            this.captureBtn.classList.add('recording');
+            this.startTime = Date.now();
         } else {
             this.finishRecording();
         }
     }
 
-    startRecording() {
-        this.isRecording = true;
-        this.captureBtn.classList.add('recording');
-        this.statusLabel.textContent = "RECORDING...";
-        this.statusLabel.style.color = "#e74c3c";
-        
-        this.timerEl.classList.remove('hidden');
-        this.startTime = Date.now();
-        this.timerInterval = setInterval(() => {
-            const diff = Date.now() - this.startTime;
-            const sec = Math.floor(diff / 1000) % 60;
-            const min = Math.floor(diff / 60000);
-            this.timerEl.textContent = `${min.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
-        }, 1000);
-    }
+    runMetricsLoop() {
+        if (this.modal.classList.contains('hidden')) return;
 
-    finishRecording() {
-        this.isRecording = false;
-        this.captureBtn.classList.remove('recording');
-        this.statusLabel.textContent = "PROCESSING CAPTURE...";
-        this.statusLabel.style.color = "var(--accent-color)";
-        clearInterval(this.timerInterval);
+        // 1. Get current frame
+        this.samplingCtx.drawImage(this.video, 0, 0, 160, 160);
+        const imageData = this.samplingCtx.getImageData(0, 0, 160, 160);
         
-        setTimeout(() => {
-            alert("Capture successful! Video is being uploaded and processed by the V6 pipeline.");
-            this.stop();
-        }, 1500);
-    }
-
-    startSimulation() {
-        // Mocking real-time feedback for angle and coverage
-        const update = () => {
-            if (!this.modal.classList.contains('hidden')) {
-                if (this.isRecording) {
-                    // Simulate coverage gain
-                    this.progress = Math.min(100, this.progress + 0.1);
-                    this.updateProgress(this.progress);
-                    
-                    // Simulate angle change
-                    this.angle = (this.angle + 1) % 360;
-                    this.angleArrow.style.transform = `rotate(${this.angle}deg)`;
-                    this.angleText.textContent = `${this.angle}°`;
-                }
-                requestAnimationFrame(update);
+        // 2. Analyze
+        const blur = this.metrics.analyzeBlur(imageData.data, 160, 160);
+        const lighting = this.metrics.analyzeLighting(imageData.data);
+        const quality = this.metrics.checkQuality({ blur, lighting });
+        
+        // 3. Update Indicators
+        this.updateUIIndicators(quality, blur, lighting);
+        
+        // 4. Update Coverage if recording
+        if (this.isRecording) {
+            const azimuth = this.isDemoMode ? (Date.now() / 50 % 360) : this.azimuth;
+            this.tracker.addFrame(azimuth, quality.isAccepted);
+            
+            if (quality.isAccepted) {
+                this.stats.acceptedCount++;
+            } else {
+                quality.reasons.forEach(r => {
+                    this.stats.rejectionReasons[r] = (this.stats.rejectionReasons[r] || 0) + 1;
+                });
             }
-        };
-        update();
+            
+            const summary = this.tracker.getSummary();
+            this.updateProgress(summary.percent);
+            this.checkGate(summary);
+        }
+
+        requestAnimationFrame(() => this.runMetricsLoop());
+    }
+
+    updateUIIndicators(quality, blur, lighting) {
+        document.getElementById('indicator-stability').querySelector('.dot').style.background = 
+            blur > this.metrics.blurThreshold ? "var(--success)" : "var(--error)";
+        
+        document.getElementById('indicator-lighting').querySelector('.dot').style.background = 
+            quality.reasons.some(r => r.includes("lighting") || r.includes("dark") || r.includes("bright")) ? "var(--error)" : "var(--success)";
+            
+        this.angleArrow.style.transform = `rotate(${this.azimuth}deg)`;
+        this.angleText.textContent = `${Math.floor(this.azimuth)}°`;
     }
 
     updateProgress(percent) {
@@ -237,12 +383,44 @@ class ARCapture {
         const offset = circumference - (percent / 100) * circumference;
         this.progressRing.style.strokeDashoffset = offset;
         this.coverageEl.textContent = `${Math.floor(percent)}%`;
+    }
+
+    checkGate(summary) {
+        const canFinish = summary.percent > 90 && summary.maxGap < 45;
+        this.captureBtn.style.opacity = canFinish ? "1" : "0.5";
         
-        const coverageIndicator = document.getElementById('indicator-coverage');
-        if (percent > 90) {
-            coverageIndicator.querySelector('.dot').style.background = "var(--success)";
-            coverageIndicator.querySelector('.dot').style.boxShadow = "0 0 10px var(--success)";
+        if (!canFinish && this.isRecording) {
+            let msg = "Rotate more";
+            if (summary.maxGap > 45) msg = `Gap too large: ${Math.floor(summary.maxGap)}°`;
+            this.statusLabel.textContent = msg;
+        } else if (this.isRecording) {
+            this.statusLabel.textContent = "READY TO FINISH";
+            this.statusLabel.style.color = "var(--success)";
         }
+    }
+
+    async finishRecording() {
+        const summary = this.tracker.getSummary();
+        if (!this.isDemoMode && summary.maxGap > 60) {
+            alert(`Capture failed quality gate. Max gap: ${Math.floor(summary.maxGap)}°. Please rotate more slowly and fully.`);
+            return;
+        }
+
+        this.isRecording = false;
+        this.captureBtn.classList.remove('recording');
+        
+        const manifest = {
+            product_profile: document.querySelector('.profile-btn.active').dataset.profile,
+            coverage_summary: summary,
+            accepted_frame_count: this.stats.acceptedCount,
+            rejection_stats: this.stats.rejectionReasons,
+            is_demo: this.isDemoMode,
+            timestamp: new Date().toISOString()
+        };
+
+        console.log("Quality Manifest Generated:", manifest);
+        alert("Capture Finished! Quality Manifest created and attached to upload.");
+        this.stop();
     }
 }
 
@@ -256,7 +434,6 @@ function setupUploadHandlers() {
 
     // Drag and Drop
     dropZone.onclick = (e) => {
-        console.log('Dropzone clicked');
         videoInput.click();
     };
 
@@ -299,7 +476,6 @@ function setupUploadHandlers() {
             if (event.lengthComputable) {
                 const percent = (event.loaded / event.total) * 100;
                 progressBar.style.width = percent + '%';
-                // Show 'Uploading' text
                 document.getElementById('submit-upload').textContent = `Uploading... ${Math.round(percent)}%`;
             }
         };
@@ -357,46 +533,24 @@ async function fetchLogs() {
 
 function open3DViewer(assetId, status) {
     if (!assetId || assetId === 'null' || assetId === 'undefined') {
-        console.error("View3D called without valid Asset ID");
-        viewerStatus.innerHTML = '<span style="color: #f87171">❌ Error: Asset ID not found. Still processing?</span>';
+        viewerStatus.innerHTML = '<span style="color: #f87171">❌ Error: Asset ID not found.</span>';
         return;
     }
 
     viewerModal.classList.remove('hidden');
     viewerTitle.textContent = `Asset Preview: ${assetId}`;
-
-    // Reset viewer state
-    console.log(`Attempting to load asset: ${assetId} (Status: ${status})`);
     mainViewer.src = "";
-    viewerStatus.innerHTML = '<span class="status-pulse-yellow"></span> Checking availability...';
+    viewerStatus.innerHTML = 'Checking availability...';
 
-    // Use timestamp to break any cache during repeated tests
     const timestamp = Date.now();
     const modelUrl = `${API_BASE}/assets/blobs/${assetId}.glb?t=${timestamp}`;
 
     if (status === 'processing' || status === 'CREATED') {
-        viewerStatus.innerHTML = '⚙️ <span style="color: #fbbf24">Processing: Reconstruction in progress. Showing demo model.</span>';
+        viewerStatus.innerHTML = '⚙️ <span style="color: #fbbf24">Processing...</span>';
         mainViewer.src = "https://modelviewer.dev/shared-assets/models/Astronaut.glb";
     } else {
-        viewerStatus.textContent = "🚀 Fetching produced asset...";
+        viewerStatus.textContent = "🚀 Fetching...";
         mainViewer.src = modelUrl;
-
-        // More robust load detection
-        const onLoad = () => {
-            console.log("Model-viewer: Success loading", modelUrl);
-            viewerStatus.innerHTML = '✅ <span style="color: #4ade80">Asset Produced Successfully.</span>';
-            mainViewer.removeEventListener('load', onLoad);
-        };
-
-        const onError = (error) => {
-            console.error("Model-viewer error:", error);
-            viewerStatus.innerHTML = '⚠️ <span style="color: #fbbf24">Asset was registered but file loading failed. Showing fallback.</span>';
-            mainViewer.src = "https://modelviewer.dev/shared-assets/models/Astronaut.glb";
-            mainViewer.removeEventListener('error', onError);
-        };
-
-        mainViewer.addEventListener('load', onLoad);
-        mainViewer.addEventListener('error', onError);
     }
 }
 
@@ -412,23 +566,11 @@ function renderProducts() {
 
     productGrid.innerHTML = filtered.map(p => {
         const isProcessing = p.status === 'processing';
-        const hasActiveUpdate = p.has_active_session ? '<span class="pulse-dot"></span>' : '';
-
         return `
             <div class="product-card glass ${isProcessing ? 'processing' : ''}" onclick="showProductDetails('${p.id}')">
-                <div class="product-id">
-                    ${p.id}
-                    ${hasActiveUpdate}
-                </div>
-                <div class="badge ${isProcessing ? 'badge-warning' : ''}">
-                    ${isProcessing ? 'PROCESSING' : `v${p.active_id ? p.active_id.split('_').pop() : 'N/A'}`}
-                </div>
-                <div class="v-count">
-                    ${isProcessing ? 'New session in progress' : `${p.asset_count} versions total`}
-                </div>
-                <div class="last_seen" style="font-size: 0.7rem; color: #666; margin-top: 10px;">
-                    Last activity: ${new Date(p.last_updated * 1000).toLocaleString()}
-                </div>
+                <div class="product-id">${p.id}</div>
+                <div class="badge">${isProcessing ? 'PROCESSING' : `v${p.active_id ? p.active_id.split('_').pop() : 'N/A'}`}</div>
+                <div class="v-count">${p.asset_count} versions</div>
             </div>
         `;
     }).join('');
@@ -440,7 +582,6 @@ function renderLogs() {
             <span class="log-time">${new Date(log.timestamp).toLocaleTimeString()}</span>
             <span class="log-level ${log.level}">${log.level}</span>
             <span class="log-msg">${log.message}</span>
-            ${log.component ? `<br/><small style="color:#555">[${log.component}]</small>` : ''}
         </div>
     `).join('');
 }
@@ -450,68 +591,42 @@ function updateStats() {
     activeVersionsEl.textContent = state.products.filter(p => p.active_id).length;
 }
 
-// Search Handler
 searchInput.addEventListener('input', (e) => {
     state.searchQuery = e.target.value;
     renderProducts();
 });
 
-// Modal Actions
 async function showProductDetails(productId) {
     modalBackdrop.classList.remove('hidden');
     document.getElementById('modal-title').textContent = `History: ${productId}`;
-    historyContainer.innerHTML = '<div class="loader">Loading history...</div>';
+    historyContainer.innerHTML = '<div class="loader">Loading...</div>';
 
     try {
         const response = await fetch(`${API_BASE}/products/${productId}/history`);
         const history = await response.json();
         renderHistory(history);
     } catch (err) {
-        historyContainer.innerHTML = `<div class="error">Error loading history: ${err.message}</div>`;
+        historyContainer.innerHTML = `Error: ${err.message}`;
     }
 }
 
 function renderHistory(history) {
     historyContainer.innerHTML = `
-        <div class="history-table-container">
-            <table class="history-table">
-                <thead>
+        <table class="history-table">
+            <thead>
+                <tr><th>Asset ID</th><th>Version</th><th>Status</th><th>View</th></tr>
+            </thead>
+            <tbody>
+                ${history.map(item => `
                     <tr>
-                        <th>Asset ID</th>
-                        <th>Version</th>
-                        <th>Status</th>
-                        <th>Active</th>
-                        <th>Approved</th>
-                        <th>View</th>
+                        <td>${item.asset_id}</td>
+                        <td>${item.version}</td>
+                        <td>${item.status}</td>
+                        <td><button class="btn-view" onclick="open3DViewer('${item.asset_id}', '${item.status}')">View</button></td>
                     </tr>
-                </thead>
-                <tbody>
-                    ${history.map(item => `
-                        <tr>
-                            <td class="id-cell">${item.asset_id}</td>
-                            <td>${item.version}</td>
-                            <td><span class="status-tag">${item.status}</span></td>
-                            <td>${item.is_active ? '✅' : '-'}</td>
-                            <td>${item.approved ? '💎' : '⏳'}</td>
-                            <td>
-                                <button class="btn-view" onclick="open3DViewer('${item.asset_id}', '${item.status}')">
-                                    View 3D
-                                </button>
-                            </td>
-                        </tr>
-                    `).join('')}
-                </tbody>
-            </table>
-        </div>
-        <div class="audit-section">
-            <h3>Recent Audit Events</h3>
-            ${history.map(item => item.audit.map(a => `
-                <div class="audit-log">
-                    [${new Date(item.created_at || Date.now()).toLocaleDateString()}] 
-                    <b>${a.action}</b>: ${a.asset_id}
-                </div>
-            `).join('')).join('')}
-        </div>
+                `).join('')}
+            </tbody>
+        </table>
     `;
 }
 
@@ -519,5 +634,4 @@ closeModal.addEventListener('click', () => {
     modalBackdrop.classList.add('hidden');
 });
 
-// Initialize
 init();
