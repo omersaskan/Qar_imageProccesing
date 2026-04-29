@@ -742,6 +742,12 @@ const arCapture = new ARCapture();
 
 function setupUploadHandlers() {
     openUploadBtn.onclick = () => arCapture.start();
+    
+    const manualUploadBtn = document.getElementById('open-manual-upload');
+    if (manualUploadBtn) {
+        manualUploadBtn.onclick = () => uploadModal.classList.remove('hidden');
+    }
+
     closeUploadBtn.onclick = () => uploadModal.classList.add('hidden');
 
     uploadForm.onsubmit = async (e) => {

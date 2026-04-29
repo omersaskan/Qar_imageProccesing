@@ -179,10 +179,10 @@ async def upload_video(
       - Disk space is checked before accepting the file in pilot/production.
       - The error message is explicit and actionable.
     """
-    if not file.filename.lower().endswith((".mp4", ".mov", ".avi")):
+    if not file.filename.lower().endswith((".mp4", ".mov", ".avi", ".webm")):
         raise HTTPException(
             status_code=400,
-            detail="Invalid video format. Supported: .mp4, .mov, .avi",
+            detail="Invalid video format. Supported: .mp4, .mov, .avi, .webm",
         )
 
     session_id = f"cap_{uuid.uuid4().hex[:8]}"
@@ -276,8 +276,22 @@ async def upload_video(
         video_dir.mkdir(parents=True, exist_ok=True)
 
         # 3. Save uploaded file
-        video_path = video_dir / "raw_video.mp4"
-        shutil.move(temp_path, str(video_path))
+        original_ext = Path(file.filename).suffix.lower()
+        if original_ext == ".webm":
+            original_path = video_dir / "original_capture.webm"
+            shutil.move(temp_path, str(original_path))
+            
+            video_path = video_dir / "raw_video.mp4"
+            try:
+                from modules.utils.video_utils import normalize_video
+                normalize_video(original_path, video_path, ffmpeg_path=settings.ffmpeg_path)
+                logger.info(f"Transcoded {original_path.name} to {video_path.name}")
+            except Exception as e:
+                logger.warning(f"Transcoding failed for {session_id}, falling back to copy: {e}")
+                shutil.copy(original_path, video_path)
+        else:
+            video_path = video_dir / "raw_video.mp4"
+            shutil.move(temp_path, str(video_path))
 
         # ── Quality Gate Enforcement ──────────────────────────────────────────
         manifest_valid = True

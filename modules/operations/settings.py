@@ -29,6 +29,7 @@ class Settings(BaseSettings):
         r"C:\openmvs\bin", 
         validation_alias="OPENMVS_BIN_PATH"
     )
+    ffmpeg_path: str = Field("ffmpeg", validation_alias="FFMPEG_PATH")
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
