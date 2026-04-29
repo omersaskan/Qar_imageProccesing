@@ -39,6 +39,8 @@ class CaptureSession(BaseModel):
     asset_version: Optional[str] = None
     publish_state: Optional[str] = None
     last_pipeline_stage: Optional[str] = None
+    manifest_validation_status: Optional[str] = None
+    test_mode: bool = False
     history: List[SessionEvent] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 

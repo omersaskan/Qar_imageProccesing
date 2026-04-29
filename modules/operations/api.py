@@ -417,7 +417,7 @@ async def upload_video(
         session = session_manager.create_session(session_id, product_id, operator_id)
         session_manager.update_session(
             session_id, 
-            status=AssetStatus.UPLOADED,
+            new_status=AssetStatus.CAPTURED,
             manifest_validation_status="passed"
         )
 
@@ -425,7 +425,7 @@ async def upload_video(
         if manifest_data and manifest_data.get("is_demo"):
             session_manager.update_session(
                 session_id,
-                status=AssetStatus.DEMO_CAPTURE,
+                new_status=AssetStatus.CAPTURED,
                 test_mode=True
             )
 
