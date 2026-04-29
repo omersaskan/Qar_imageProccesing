@@ -180,22 +180,52 @@
                     <rect class="bbox-guide" x="25" y="25" width="50" height="50" rx="2" fill="none" />
                 </svg>
 
-                <div id="ar-ghost-guide" class="hidden">
+                <!-- 3D Ghost Guides (Coverage Shell HUD - Non-geometrical) -->
+                <div id="ar-ghost-guide" class="holographic-shell hidden">
                     <div class="box-ghost">
-                        <div class="face front">FRONT</div>
-                        <div class="face back">BACK</div>
-                        <div class="face left">LEFT</div>
-                        <div class="face right">RIGHT</div>
-                        <div class="face top">TOP</div>
-                        <div class="face bottom">BOTTOM</div>
+                        <div class="face front holographic-face missing">FRONT</div>
+                        <div class="face back holographic-face missing">BACK</div>
+                        <div class="face left holographic-face missing">LEFT</div>
+                        <div class="face right holographic-face missing">RIGHT</div>
+                        <div class="face top holographic-face missing">TOP</div>
+                        <div class="face bottom holographic-face missing">BOTTOM</div>
                     </div>
                 </div>
 
-                <div id="ar-bottle-guide" class="hidden">
+                <div id="ar-bottle-guide" class="holographic-shell hidden">
                     <div class="bottle-ghost">
-                        <div class="cylinder"></div>
-                        <div class="cap">CAP</div>
-                        <div class="base">BASE</div>
+                        <!-- 12 segments for 360 deg coverage mapping -->
+                        <div class="cylinder-segment" style="transform: rotateY(0deg)"><div class="seg-face holographic-face missing"></div></div>
+                        <div class="cylinder-segment" style="transform: rotateY(30deg)"><div class="seg-face holographic-face missing"></div></div>
+                        <div class="cylinder-segment" style="transform: rotateY(60deg)"><div class="seg-face holographic-face missing"></div></div>
+                        <div class="cylinder-segment" style="transform: rotateY(90deg)"><div class="seg-face holographic-face missing"></div></div>
+                        <div class="cylinder-segment" style="transform: rotateY(120deg)"><div class="seg-face holographic-face missing"></div></div>
+                        <div class="cylinder-segment" style="transform: rotateY(150deg)"><div class="seg-face holographic-face missing"></div></div>
+                        <div class="cylinder-segment" style="transform: rotateY(180deg)"><div class="seg-face holographic-face missing"></div></div>
+                        <div class="cylinder-segment" style="transform: rotateY(210deg)"><div class="seg-face holographic-face missing"></div></div>
+                        <div class="cylinder-segment" style="transform: rotateY(240deg)"><div class="seg-face holographic-face missing"></div></div>
+                        <div class="cylinder-segment" style="transform: rotateY(270deg)"><div class="seg-face holographic-face missing"></div></div>
+                        <div class="cylinder-segment" style="transform: rotateY(300deg)"><div class="seg-face holographic-face missing"></div></div>
+                        <div class="cylinder-segment" style="transform: rotateY(330deg)"><div class="seg-face holographic-face missing"></div></div>
+                        <div class="cap holographic-face missing">TOP</div>
+                        <div class="base holographic-face missing">BASE</div>
+                    </div>
+                </div>
+
+                <div id="ar-generic-guide" class="holographic-shell hidden">
+                    <div class="bottle-ghost" style="width: 120px; border-radius: 20px;">
+                        <div class="cylinder-segment" style="transform: rotateY(0deg)"><div class="seg-face holographic-face missing"></div></div>
+                        <div class="cylinder-segment" style="transform: rotateY(30deg)"><div class="seg-face holographic-face missing"></div></div>
+                        <div class="cylinder-segment" style="transform: rotateY(60deg)"><div class="seg-face holographic-face missing"></div></div>
+                        <div class="cylinder-segment" style="transform: rotateY(90deg)"><div class="seg-face holographic-face missing"></div></div>
+                        <div class="cylinder-segment" style="transform: rotateY(120deg)"><div class="seg-face holographic-face missing"></div></div>
+                        <div class="cylinder-segment" style="transform: rotateY(150deg)"><div class="seg-face holographic-face missing"></div></div>
+                        <div class="cylinder-segment" style="transform: rotateY(180deg)"><div class="seg-face holographic-face missing"></div></div>
+                        <div class="cylinder-segment" style="transform: rotateY(210deg)"><div class="seg-face holographic-face missing"></div></div>
+                        <div class="cylinder-segment" style="transform: rotateY(240deg)"><div class="seg-face holographic-face missing"></div></div>
+                        <div class="cylinder-segment" style="transform: rotateY(270deg)"><div class="seg-face holographic-face missing"></div></div>
+                        <div class="cylinder-segment" style="transform: rotateY(300deg)"><div class="seg-face holographic-face missing"></div></div>
+                        <div class="cylinder-segment" style="transform: rotateY(330deg)"><div class="seg-face holographic-face missing"></div></div>
                     </div>
                 </div>
                 

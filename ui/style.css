@@ -667,6 +667,43 @@ body {
     backdrop-filter: blur(5px);
 }
 
+/* Holographic Coverage Shell HUD (State Visualizer only) */
+.holographic-shell {
+    pointer-events: none;
+    transform-style: preserve-3d;
+    transition: transform 0.3s ease-out;
+}
+
+.holographic-face {
+    background: rgba(0, 255, 204, 0.03);
+    border: 1px solid rgba(0, 255, 204, 0.15);
+    backdrop-filter: blur(1px);
+    transition: all 0.5s ease;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 0.6rem;
+    font-weight: 800;
+    color: rgba(255, 255, 255, 0.1);
+}
+
+.holographic-face.completed {
+    background: rgba(0, 255, 204, 0.2);
+    border: 1.5px solid var(--accent-color);
+    color: var(--accent-color);
+    box-shadow: 0 0 15px rgba(0, 255, 204, 0.4), inset 0 0 10px rgba(0, 255, 204, 0.2);
+}
+
+.holographic-face.missing {
+    animation: pulse-amber 2s infinite ease-in-out;
+    border-color: rgba(251, 191, 36, 0.3);
+}
+
+@keyframes pulse-amber {
+    0%, 100% { background: rgba(251, 191, 36, 0.05); border-color: rgba(251, 191, 36, 0.2); }
+    50% { background: rgba(251, 191, 36, 0.15); border-color: rgba(251, 191, 36, 0.5); }
+}
+
 .ar-toast {
     position: absolute;
     top: 6rem;
@@ -702,8 +739,8 @@ body {
 }
 
 .box-ghost {
-    width: 150px;
-    height: 200px;
+    width: 140px;
+    height: 180px;
     position: relative;
     transform-style: preserve-3d;
     transition: transform 0.3s ease-out;
@@ -713,30 +750,14 @@ body {
     position: absolute;
     width: 100%;
     height: 100%;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    font-size: 0.7rem;
-    font-weight: 800;
-    color: rgba(255,255,255,0.3);
-    backface-visibility: visible;
-}
-
-.face.completed {
-    background: rgba(0, 255, 204, 0.2);
-    border-color: var(--accent-color);
-    color: var(--accent-color);
-    box-shadow: inset 0 0 15px rgba(0, 255, 204, 0.2);
 }
 
 .front  { transform: translateZ(50px); }
 .back   { transform: rotateY(180deg) translateZ(50px); }
-.left   { transform: rotateY(-90deg) translateZ(75px); width: 100px; left: 25px; }
-.right  { transform: rotateY(90deg) translateZ(75px); width: 100px; left: 25px; }
-.top    { transform: rotateX(90deg) translateZ(100px); height: 100px; top: 50px; }
-.bottom { transform: rotateX(-90deg) translateZ(100px); height: 100px; top: 50px; }
+.left   { transform: rotateY(-90deg) translateZ(70px); width: 100px; left: 20px; }
+.right  { transform: rotateY(90deg) translateZ(70px); width: 100px; left: 20px; }
+.top    { transform: rotateX(90deg) translateZ(90px); height: 100px; top: 40px; }
+.bottom { transform: rotateX(-90deg) translateZ(90px); height: 100px; top: 40px; }
 
 /* Bottle Ghost Guide */
 #ar-bottle-guide {
@@ -748,19 +769,23 @@ body {
 
 .bottle-ghost {
     width: 80px;
-    height: 200px;
+    height: 180px;
     position: relative;
     transform-style: preserve-3d;
-    transition: transform 0.3s ease-out;
 }
 
-.cylinder {
+.cylinder-segment {
     position: absolute;
     width: 100%;
     height: 100%;
-    border: 2px solid rgba(255, 255, 255, 0.2);
-    border-radius: 40px;
-    background: rgba(255, 255, 255, 0.05);
+    transform-style: preserve-3d;
+}
+
+.seg-face {
+    position: absolute;
+    width: 25px;
+    height: 100%;
+    left: 27.5px;
 }
 
 .cap, .base {
@@ -768,13 +793,7 @@ body {
     width: 60px;
     height: 60px;
     left: 10px;
-    border: 1px solid rgba(255, 255, 255, 0.2);
     border-radius: 50%;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    font-size: 0.6rem;
-    color: rgba(255,255,255,0.3);
 }
 
 .cap { top: -30px; transform: rotateX(90deg); }
