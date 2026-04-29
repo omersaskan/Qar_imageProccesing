@@ -298,6 +298,18 @@ class ReconstructionRunner:
         run_start = time.monotonic()
 
         for i, step_name in enumerate(fallback_steps):
+            # Check for external cancellation before each attempt
+            try:
+                from modules.capture_workflow.session_manager import SessionManager
+                sm = SessionManager(data_root=str(settings.data_root))
+                persisted = sm.get_session(job.capture_session_id)
+                if persisted and persisted.status == "failed":
+                    logging.info(f"Reconstruction loop ABORTED for {job.capture_session_id} (Session Cancelled)")
+                    raise RuntimeReconstructionError("Reconstruction cancelled by user.")
+            except Exception as e:
+                if "cancelled" in str(e): raise
+                logging.debug(f"Cancellation check failed: {e}")
+
             attempt_type = ReconstructionAttemptType(step_name)
 
             if attempt_type == ReconstructionAttemptType.UNMASKED:

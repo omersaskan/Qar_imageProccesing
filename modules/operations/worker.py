@@ -278,6 +278,13 @@ class IngestionWorker:
 
     def _advance_session(self, session: CaptureSession, next_status: AssetStatus, log_msg: str):
         try:
+            # ── Check for External Cancellation ───────────────────────────
+            # Reload from disk to see if the user cancelled it via API
+            persisted = self.session_manager.get_session(session.session_id)
+            if persisted and persisted.status == AssetStatus.FAILED:
+                logger.info(f"PIPELINE ABORTED: Session {session.session_id} was cancelled externally.")
+                return
+
             logger.info(
                 f"PIPELINE START: {log_msg} ({session.session_id})",
                 extra={"job_id": session.session_id},
