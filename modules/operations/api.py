@@ -287,6 +287,18 @@ async def upload_video(
                 reports_dir.mkdir(parents=True, exist_ok=True)
                 with open(reports_dir / "ar_quality_manifest.json", "w", encoding="utf-8") as f:
                     json.dump(manifest_data, f, indent=2)
+                
+                # If it's a demo, tag the session metadata
+                if manifest_data.get("is_demo"):
+                    session_file = Path(settings.data_root) / "sessions" / f"{session_id}.json"
+                    if session_file.exists():
+                        with open(session_file, "r+", encoding="utf-8") as f:
+                            s_data = json.load(f)
+                            s_data["test_mode"] = True
+                            s_data["status"] = "demo_capture"
+                            f.seek(0)
+                            json.dump(s_data, f, indent=2)
+                            f.truncate()
             except Exception as e:
                 logger.warning(f"Failed to save quality manifest for {session_id}: {e}")
 
