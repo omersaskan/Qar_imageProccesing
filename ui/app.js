@@ -168,10 +168,10 @@ class MetricsProcessor {
 
     checkQuality(metrics) {
         const reasons = [];
-        if (metrics.blur < this.blurThreshold) reasons.push("Move slower (blur detected)");
-        if (metrics.lighting.avgLuminance < this.lightingMin) reasons.push("Too dark");
-        if (metrics.lighting.avgLuminance > this.lightingMax) reasons.push("Too bright");
-        if (metrics.lighting.highlightRatio > this.highlightRatioThreshold) reasons.push("Reduce harsh highlights");
+        if (metrics.blur < this.blurThreshold) reasons.push("Daha yavaş hareket edin (bulanıklık)");
+        if (metrics.lighting.avgLuminance < this.lightingMin) reasons.push("Ortam çok karanlık");
+        if (metrics.lighting.avgLuminance > this.lightingMax) reasons.push("Ortam çok aydınlık");
+        if (metrics.lighting.highlightRatio > this.highlightRatioThreshold) reasons.push("Sert yansımaları azaltın");
         
         return {
             isAccepted: reasons.length === 0,
@@ -286,12 +286,12 @@ class GateValidator {
         if (profile === 'box') {
             const completed = profileCompletion ? (profileCompletion.faces || []) : [];
             profileIsOk = completed.length >= 6;
-            if (!profileIsOk) missingReq = "Incomplete Box (6 faces required)";
+            if (!profileIsOk) missingReq = "Kutu tamamlanmadı (6 yüzey taranmalı)";
         } else if (profile === 'bottle') {
             const cap = profileCompletion ? profileCompletion.cap : false;
             const base = profileCompletion ? profileCompletion.base : false;
             profileIsOk = cap && base;
-            if (!profileIsOk) missingReq = "Incomplete Bottle (Cap & Base required)";
+            if (!profileIsOk) missingReq = "Şişe tamamlanmadı (Kapak ve Taban gerekli)";
         }
 
         const canFinish = coverageIsOk && hasEnoughFrames && blurIsOk && durationIsOk && profileIsOk;
@@ -305,7 +305,7 @@ class GateValidator {
                 duration: durationIsOk,
                 profile: profileIsOk
             },
-            missingReq: missingReq || (summary.maxGap > this.maxGap ? `Gap too large: ${Math.floor(summary.maxGap)}°` : "")
+            missingReq: missingReq || (summary.maxGap > this.maxGap ? `Açı boşluğu çok büyük: ${Math.floor(summary.maxGap)}°` : "")
         };
     }
 }
@@ -493,14 +493,14 @@ class ARCapture {
         this.productIdInput.value = "";
         
         this.captureBtn.disabled = true;
-        this.statusLabel.textContent = "INITIALIZING...";
+        this.statusLabel.textContent = "BAŞLATILIYOR...";
 
         // 1. Secure Context Check
         const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
         if (isMobile && !window.isSecureContext && window.location.hostname !== "localhost") {
-            this.statusLabel.textContent = "HTTPS REQUIRED ON MOBILE";
+            this.statusLabel.textContent = "HTTPS GEREKLİ";
             this.statusLabel.style.color = "var(--error)";
-            alert("Camera requires HTTPS on mobile for production capture.");
+            alert("Mobil çekim için HTTPS (güvenli bağlantı) gereklidir.");
             return;
         }
 
@@ -639,12 +639,12 @@ class ARCapture {
             this.tracker.addFrame(curAzimuth, quality.isAccepted);
             
             const now = Date.now();
-            if (now - this.lastGuidanceTime > 2000) {
+            if (now - this.lastGuidanceTime > 1500) { // Reduced to 1.5s
                 if (!quality.isAccepted) {
                     this.showGuidanceToast(quality.reasons[0]);
                     this.lastGuidanceTime = now;
                 } else if (isRedundant) {
-                    this.showGuidanceToast("Angle already covered, keep moving!", "info");
+                    this.showGuidanceToast("Bu açı zaten tarandı, ilerlemeye devam edin!", "info");
                     this.lastGuidanceTime = now;
                 }
             }
@@ -665,9 +665,9 @@ class ARCapture {
             this.checkGate(summary);
 
             // Detailed gap guidance
-            if (now - this.lastGuidanceTime > 5000 && summary.percent < 90 && summary.maxGap > 30) {
+            if (now - this.lastGuidanceTime > 3000 && summary.percent < 90 && summary.maxGap > 30) { // Reduced to 3s
                 const target = Math.floor(summary.gapCenter);
-                this.showGuidanceToast(`Move towards ${target}° to fill the gap`, "info");
+                this.showGuidanceToast(`Boşluğu doldurmak için ${target}° açısına doğru dönün`, "info");
                 this.lastGuidanceTime = now;
             }
         }
@@ -686,10 +686,10 @@ class ARCapture {
         this.angleText.textContent = `${Math.floor(azimuth)}°`;
 
         if (this.isRecording) {
-            this.statusLabel.textContent = quality.isAccepted ? "RECORDING..." : "QUALITY WARNING";
+            this.statusLabel.textContent = quality.isAccepted ? "KAYDEDİLİYOR..." : "KALİTE UYARISI";
             this.statusLabel.style.color = quality.isAccepted ? "var(--accent-color)" : "var(--error)";
         } else {
-            this.statusLabel.textContent = "READY";
+            this.statusLabel.textContent = "HAZIR";
             this.statusLabel.style.color = "var(--accent-color)";
         }
     }
@@ -718,20 +718,20 @@ class ARCapture {
         this.captureBtn.style.opacity = this.canFinish ? "1" : "0.5";
         
         if (newlyPassed && this.isRecording) {
-            this.showGuidanceToast("Quality gate passed! You can finish now.", "success");
+            this.showGuidanceToast("Kalite kriterleri sağlandı! Bitirebilirsiniz.", "success");
         }
 
         if (!this.canFinish && this.isRecording) {
-            let msg = validation.missingReq || "Keep rotating";
+            let msg = validation.missingReq || "Dönmeye devam edin";
             
-            if (!validation.reasons.duration) msg = `Capturing... (${Math.max(0, Math.floor(this.gateValidator.minDuration - elapsedSec))}s left)`;
-            else if (!validation.reasons.frames) msg = "Adding detail...";
-            else if (!validation.reasons.blur) msg = "Too fast!";
+            if (!validation.reasons.duration) msg = `Çekiliyor... (${Math.max(0, Math.floor(this.gateValidator.minDuration - elapsedSec))}s kaldı)`;
+            else if (!validation.reasons.frames) msg = "Detay ekleniyor...";
+            else if (!validation.reasons.blur) msg = "Çok hızlı!";
             
             this.statusLabel.textContent = msg;
             this.statusLabel.style.color = "var(--error)";
         } else if (this.isRecording) {
-            this.statusLabel.textContent = this.isDemoMode ? "DEMO MODE: READY" : "READY TO FINISH";
+            this.statusLabel.textContent = this.isDemoMode ? "DEMO MODU: HAZIR" : "BİTİRMEYE HAZIR";
             this.statusLabel.style.color = "var(--accent-color)";
         }
     }
