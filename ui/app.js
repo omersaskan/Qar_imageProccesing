@@ -1,4 +1,17 @@
-const API_BASE = window.MESHYSIZ_API_BASE || (window.location.origin !== "null" && window.location.protocol.startsWith("http") && window.location.hostname !== "localhost" ? window.location.origin + "/api" : "http://localhost:8001/api");
+const API_BASE = window.MESHYSIZ_API_BASE || (
+    window.location.protocol.startsWith("http") && 
+    window.location.hostname !== "localhost" && 
+    window.location.hostname !== "127.0.0.1" 
+    ? window.location.origin + "/api" 
+    : "http://localhost:8001/api"
+);
+
+function escapeHTML(str) {
+    if (!str) return "";
+    const p = document.createElement('p');
+    p.textContent = str;
+    return p.innerHTML;
+}
 const IS_LOCAL_DEV = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
 
 const REJECTION_LABELS = {
@@ -110,12 +123,23 @@ function renderGuidance(guidance) {
 
     nextActionText.textContent = guidance.next_action;
 
-    guidanceMessages.innerHTML = (guidance.messages || []).map(msg => `
-        <div class="guidance-item ${msg.severity}">
-            <span class="symbol">${msg.severity === 'critical' ? '🔴' : msg.severity === 'warning' ? '🟡' : 'ℹ️'}</span>
-            <span class="msg-text">${msg.message}</span>
-        </div>
-    `).join('');
+    guidanceMessages.innerHTML = '';
+    (guidance.messages || []).forEach(msg => {
+        const div = document.createElement('div');
+        div.className = `guidance-item ${msg.severity}`;
+        
+        const symbol = document.createElement('span');
+        symbol.className = 'symbol';
+        symbol.textContent = msg.severity === 'critical' ? '🔴' : msg.severity === 'warning' ? '🟡' : 'ℹ️';
+        
+        const text = document.createElement('span');
+        text.className = 'msg-text';
+        text.textContent = msg.message;
+        
+        div.appendChild(symbol);
+        div.appendChild(text);
+        guidanceMessages.appendChild(div);
+    });
 }
 
 // --- AR Capture Pure Logic ---
@@ -212,6 +236,7 @@ class CoverageTracker {
     }
 
     getMaxGap() {
+        if (this.sectors.every(s => !s)) return 360;
         let maxGap = 0;
         let currentGap = 0;
         
@@ -225,7 +250,7 @@ class CoverageTracker {
                 currentGap = 0;
             }
         }
-        return Math.max(maxGap, currentGap);
+        return Math.min(360, Math.max(maxGap, currentGap));
     }
 
     getLargestGapCenter() {
@@ -711,15 +736,15 @@ class ARCapture {
 
     getMimeType() {
         const types = [
-            'video/webm;codecs=vp9',
-            'video/webm;codecs=vp8',
+            'video/webm;codecs=vp9,opus',
+            'video/webm;codecs=vp8,opus',
             'video/webm',
             'video/mp4'
         ];
         for (const type of types) {
             if (MediaRecorder.isTypeSupported(type)) return type;
         }
-        return '';
+        return null; // Return null instead of empty string
     }
 
     toggleCapture() {
@@ -745,9 +770,10 @@ class ARCapture {
 
             if (!this.isDemoMode) {
                 const mimeType = this.getMimeType();
-                this.mediaRecorder = new MediaRecorder(this.stream, { mimeType });
+                const options = mimeType ? { mimeType } : {};
+                this.mediaRecorder = new MediaRecorder(this.stream, options);
                 this.mediaRecorder.ondataavailable = (e) => {
-                    if (e.data.size > 0) this.chunks.push(e.data);
+                    if (e.data && e.data.size > 0) this.chunks.push(e.data);
                 };
                 this.mediaRecorder.onstop = () => this.uploadResult();
                 this.mediaRecorder.start(1000); // Collect chunks every second
@@ -770,7 +796,12 @@ class ARCapture {
     runMetricsLoop() {
         if (this.modal.classList.contains('hidden')) return;
 
-        this.samplingCtx.drawImage(this.video, 0, 0, 160, 160);
+        if (this.video.readyState >= 2) { // HAVE_CURRENT_DATA
+            this.samplingCtx.drawImage(this.video, 0, 0, 160, 160);
+        } else {
+            requestAnimationFrame(() => this.runMetricsLoop());
+            return;
+        }
         const imageData = this.samplingCtx.getImageData(0, 0, 160, 160);
         
         const blur = this.metrics.analyzeBlur(imageData.data, 160, 160);
@@ -1068,7 +1099,15 @@ class ARCapture {
     }
 
     async uploadResult(blob) {
-        const videoBlob = blob || new Blob(this.chunks, { type: this.mediaRecorder.mimeType });
+        if (this.chunks.length === 0 && !blob) {
+            console.warn("No video chunks collected. Upload aborted.");
+            this.statusLabel.textContent = "HATA: VERİ YOK";
+            this.captureBtn.disabled = false;
+            return;
+        }
+        
+        const mimeType = this.mediaRecorder ? this.mediaRecorder.mimeType : 'video/webm';
+        const videoBlob = blob || new Blob(this.chunks, { type: mimeType });
         const productId = this.productIdInput.value.trim();
         
         const formData = new FormData();
@@ -1204,20 +1243,22 @@ async function fetchLogs() {
 
 function open3DViewer(assetId, status) {
     if (!assetId || assetId === 'null' || assetId === 'undefined') {
-        viewerStatus.innerHTML = '<span style="color: #f87171">❌ Error: Asset ID not found.</span>';
+        viewerStatus.textContent = '❌ Error: Asset ID not found.';
+        viewerStatus.style.color = '#f87171';
         return;
     }
 
     viewerModal.classList.remove('hidden');
     viewerTitle.textContent = `Asset Preview: ${assetId}`;
     mainViewer.src = "";
-    viewerStatus.innerHTML = 'Checking availability...';
+    viewerStatus.textContent = 'Checking availability...';
 
     const timestamp = Date.now();
     const modelUrl = `${API_BASE}/assets/blobs/${assetId}.glb?t=${timestamp}`;
 
     if (status === 'processing' || status === 'CREATED') {
-        viewerStatus.innerHTML = '⚙️ <span style="color: #fbbf24">Processing...</span>';
+        viewerStatus.textContent = '⚙️ Processing...';
+        viewerStatus.style.color = '#fbbf24';
         mainViewer.src = "https://modelviewer.dev/shared-assets/models/Astronaut.glb";
     } else {
         viewerStatus.textContent = "🚀 Fetching...";
@@ -1235,27 +1276,58 @@ function renderProducts() {
         p.id.toLowerCase().includes(state.searchQuery.toLowerCase())
     );
 
-    productGrid.innerHTML = filtered.map(p => {
+    productGrid.innerHTML = '';
+    filtered.forEach(p => {
         const isProcessing = p.status === 'processing';
-        return `
-            <div class="product-card glass ${isProcessing ? 'processing' : ''}" onclick="showProductDetails('${p.id}')">
-                <div class="product-id">${p.id}</div>
-                <div class="badge">${isProcessing ? 'PROCESSING' : `v${p.active_id ? p.active_id.split('_').pop() : 'N/A'}`}</div>
-                <div class="v-count">${p.asset_count} versions</div>
-            </div>
-        `;
-    }).join('');
+        const card = document.createElement('div');
+        card.className = `product-card glass ${isProcessing ? 'processing' : ''}`;
+        card.onclick = () => showProductDetails(p.id);
+        
+        const idDiv = document.createElement('div');
+        idDiv.className = 'product-id';
+        idDiv.textContent = p.id;
+        
+        const badge = document.createElement('div');
+        badge.className = 'badge';
+        badge.textContent = isProcessing ? 'PROCESSING' : `v${p.active_id ? p.active_id.split('_').pop() : 'N/A'}`;
+        
+        const countDiv = document.createElement('div');
+        countDiv.className = 'v-count';
+        countDiv.textContent = `${p.asset_count} versions`;
+        
+        card.appendChild(idDiv);
+        card.appendChild(badge);
+        card.appendChild(countDiv);
+        productGrid.appendChild(card);
+    });
 }
 
 function renderLogs() {
-    logStream.innerHTML = state.logs.map(log => `
-        <div class="log-entry">
-            <span class="log-time">${new Date(log.timestamp).toLocaleTimeString()}</span>
-            <span class="log-level ${log.level}">${log.level}</span>
-            <span class="log-msg">${log.message}</span>
-        </div>
-    `).join('');
+    logStream.innerHTML = '';
+    state.logs.forEach(log => {
+        const entry = document.createElement('div');
+        entry.className = 'log-entry';
+        
+        const time = document.createElement('span');
+        time.className = 'log-time';
+        time.textContent = new Date(log.timestamp).toLocaleTimeString();
+        
+        const level = document.createElement('span');
+        level.className = `log-level ${log.level}`;
+        level.textContent = log.level;
+        
+        const msg = document.createElement('span');
+        msg.className = 'log-msg';
+        msg.textContent = log.message;
+        
+        entry.appendChild(time);
+        entry.appendChild(level);
+        entry.appendChild(msg);
+        logStream.appendChild(entry);
+    });
 }
+        
+
 
 function updateStats() {
     totalProductsEl.textContent = state.products.length;
@@ -1270,14 +1342,14 @@ searchInput.addEventListener('input', (e) => {
 async function showProductDetails(productId) {
     modalBackdrop.classList.remove('hidden');
     document.getElementById('modal-title').textContent = `History: ${productId}`;
-    historyContainer.innerHTML = '<div class="loader">Loading...</div>';
+    historyContainer.textContent = 'Loading...';
 
     try {
         const response = await fetch(`${API_BASE}/products/${productId}/history`);
         const history = await response.json();
         renderHistory(history);
     } catch (err) {
-        historyContainer.innerHTML = `Error: ${err.message}`;
+        historyContainer.textContent = `Error: ${err.message}`;
     }
 }
 
@@ -1304,31 +1376,60 @@ async function cancelSession(sessionId) {
 }
 
 function renderHistory(history) {
-    historyContainer.innerHTML = `
-        <table class="history-table">
-            <thead>
-                <tr><th>Asset ID</th><th>Version</th><th>Status</th><th>Actions</th></tr>
-            </thead>
-            <tbody>
-                ${history.map(item => {
-                    const isProcessing = item.status === 'processing' || item.status === 'CREATED' || item.status === 'uploaded';
-                    return `
-                        <tr>
-                            <td>${item.asset_id}</td>
-                            <td>${item.version}</td>
-                            <td><span class="badge ${item.status.toLowerCase()}">${item.status}</span></td>
-                            <td>
-                                <div class="btn-group">
-                                    <button class="btn-view" onclick="open3DViewer('${item.asset_id}', '${item.status}')">View</button>
-                                    ${isProcessing ? `<button class="btn-cancel" onclick="cancelSession('${item.asset_id}')">Stop</button>` : ''}
-                                </div>
-                            </td>
-                        </tr>
-                    `;
-                }).join('')}
-            </tbody>
-        </table>
-    `;
+    historyContainer.innerHTML = '';
+    const table = document.createElement('table');
+    table.className = 'history-table';
+    
+    const thead = document.createElement('thead');
+    thead.innerHTML = '<tr><th>Asset ID</th><th>Version</th><th>Status</th><th>Actions</th></tr>';
+    table.appendChild(thead);
+    
+    const tbody = document.createElement('tbody');
+    history.forEach(item => {
+        const isProcessing = item.status === 'processing' || item.status === 'CREATED' || item.status === 'uploaded';
+        const tr = document.createElement('tr');
+        
+        const tdId = document.createElement('td');
+        tdId.textContent = item.asset_id;
+        
+        const tdVer = document.createElement('td');
+        tdVer.textContent = item.version;
+        
+        const tdStatus = document.createElement('td');
+        const badge = document.createElement('span');
+        badge.className = `badge ${item.status.toLowerCase()}`;
+        badge.textContent = item.status;
+        tdStatus.appendChild(badge);
+        
+        const tdActions = document.createElement('td');
+        const group = document.createElement('div');
+        group.className = 'btn-group';
+        
+        const btnView = document.createElement('button');
+        btnView.className = 'btn-view';
+        btnView.textContent = 'View';
+        btnView.onclick = () => open3DViewer(item.asset_id, item.status);
+        group.appendChild(btnView);
+        
+        if (isProcessing) {
+            const btnCancel = document.createElement('button');
+            btnCancel.className = 'btn-cancel';
+            btnCancel.textContent = 'Stop';
+            btnCancel.onclick = () => cancelSession(item.asset_id);
+            group.appendChild(btnCancel);
+        }
+        
+        tdActions.appendChild(group);
+        
+        tr.appendChild(tdId);
+        tr.appendChild(tdVer);
+        tr.appendChild(tdStatus);
+        tr.appendChild(tdActions);
+        tbody.appendChild(tr);
+    });
+    
+    table.appendChild(tbody);
+    historyContainer.appendChild(table);
 }
 
 closeModal.addEventListener('click', () => {

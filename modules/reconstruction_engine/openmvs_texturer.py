@@ -68,10 +68,12 @@ class OpenMVSTexturer:
             log_file.write(f"WARNING: Mesh simplification failed: {e}. Using original mesh.\n")
             return input_mesh
 
-    def _run_command(self, cmd: List[str], cwd: Path, log_file) -> None:
-        log_file.write(f"\n--- Running: {' '.join(cmd)} ---\n")
+    def _run_command(self, cmd: List[str], cwd: Path, log_file, timeout: Optional[int] = None) -> None:
+        import time
+        log_file.write(f"\n--- Running: {' '.join(cmd)} (timeout={timeout}s) ---\n")
         log_file.flush()
 
+        start_time = time.time()
         process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
@@ -81,19 +83,47 @@ class OpenMVSTexturer:
             cwd=str(cwd),
         )
 
-        if process.stdout:
-            for line in process.stdout:
-                log_file.write(line)
-                log_file.flush()
-
-        process.wait()
-        if process.returncode != 0:
-            # Fix 8: Improve failure diagnostics
-            log_file.write(f"\nERROR: Command failed with exit code {process.returncode}\n")
-            log_file.write(f"Check output above for errors.\n")
-            raise RuntimeError(
-                f"OpenMVS command failed with exit code {process.returncode}: {' '.join(cmd)}"
-            )
+        try:
+            while True:
+                # Use a non-blocking way to read if possible, but readline() is usually fine 
+                # if we check timeout frequently. 
+                # However, readline() blocks. Let's use communicate or a better loop.
+                if process.stdout:
+                    line = process.stdout.readline()
+                    if line:
+                        log_file.write(line)
+                        log_file.flush()
+                    elif process.poll() is not None:
+                        break
+                
+                if timeout and (time.time() - start_time) > timeout:
+                    process.kill()
+                    log_file.write("\n\n!!! ERROR: TIMEOUT EXCEEDED !!!\n")
+                    log_file.write(f"Process was killed after {timeout} seconds to prevent hang.\n")
+                    # Drain any remaining buffer
+                    remaining_out, _ = process.communicate()
+                    if remaining_out:
+                        log_file.write(remaining_out)
+                    log_file.flush()
+                    raise RuntimeError(f"OpenMVS command timed out after {timeout}s: {' '.join(cmd)}")
+                
+                if not line and process.poll() is not None:
+                    break
+                    
+            process.wait()
+            if process.returncode != 0:
+                log_file.write(f"\nERROR: Command failed with exit code {process.returncode}\n")
+                log_file.write(f"Check output above for errors.\n")
+                raise RuntimeError(
+                    f"OpenMVS command failed with exit code {process.returncode}: {' '.join(cmd)}"
+                )
+        except Exception as e:
+            if "timed out" in str(e):
+                raise
+            # If any other error occurs, make sure to kill the process
+            if process.poll() is None:
+                process.kill()
+            raise
 
     def _create_compatible_image_folder(
         self, 
@@ -352,7 +382,7 @@ class OpenMVSTexturer:
                 "--working-folder", str(dense_workspace),
                 "--image-folder", str(compatible_image_folder),
             ]
-            self._run_command(cmd_interface, output_dir, log_file)
+            self._run_command(cmd_interface, output_dir, log_file, timeout=settings.texture_timeout_sec)
 
             if not scene_mvs.exists():
                 raise RuntimeError("Failed to generate scene.mvs")
@@ -399,7 +429,7 @@ class OpenMVSTexturer:
                             "--image-folder", str(image_folder),
                         ]
                         try:
-                            self._run_command(cmd_raw, output_dir, log_file)
+                            self._run_command(cmd_raw, output_dir, log_file, timeout=settings.texture_timeout_sec)
                             current_scene = raw_scene
                         except Exception as raw_err:
                             log_file.write(f"Failed to create raw scene: {raw_err}. Reverting to compatible.\n")
@@ -421,7 +451,7 @@ class OpenMVSTexturer:
                 ]
                 
                 try:
-                    self._run_command(cmd_texture, output_dir, log_file)
+                    self._run_command(cmd_texture, output_dir, log_file, timeout=settings.texture_timeout_sec)
                     # Verify output
                     if out_obj.exists():
                         # Quick check for texture atlas

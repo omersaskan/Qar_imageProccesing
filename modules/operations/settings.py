@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Optional
+from typing import Optional, List
 from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
@@ -33,6 +33,7 @@ class Settings(BaseSettings):
         r"C:\Users\Lenovo\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-8.1-full_build\bin\ffmpeg.exe", 
         validation_alias="FFMPEG_PATH"
     )
+    ffprobe_path: Optional[str] = Field(None, validation_alias="FFPROBE_PATH")
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -41,6 +42,18 @@ class Settings(BaseSettings):
         import os
         if not os.environ.get("OPENMVS_BIN_PATH") and os.environ.get("OPENMVS_BIN"):
             self.openmvs_path = os.environ.get("OPENMVS_BIN")
+        
+        # Derive ffprobe from ffmpeg if not set
+        if not self.ffprobe_path and self.ffmpeg_path:
+            fp = Path(self.ffmpeg_path)
+            if fp.name == "ffmpeg.exe":
+                probe_p = fp.parent / "ffprobe.exe"
+                if probe_p.exists():
+                    self.ffprobe_path = str(probe_p)
+            elif fp.name == "ffmpeg":
+                probe_p = fp.parent / "ffprobe"
+                if probe_p.exists():
+                    self.ffprobe_path = str(probe_p)
     use_gpu: bool = Field(True, validation_alias="RECON_USE_GPU")
     gpu_index: str = Field("0", validation_alias="RECON_GPU_INDEX")
     recon_max_image_size: int = Field(2000, validation_alias="RECON_MAX_IMAGE_SIZE")
@@ -99,6 +112,10 @@ class Settings(BaseSettings):
     min_video_height: int = Field(720, validation_alias="MIN_VIDEO_HEIGHT")
     min_video_fps: float = Field(20.0, validation_alias="MIN_VIDEO_FPS")
     
+    # --- SECURITY: CORS Allowlist ---
+    # List of origins allowed to access the API. Defaults to ["*"] if empty.
+    cors_allow_origins: List[str] = Field(default_factory=lambda: ["*"], validation_alias="CORS_ALLOW_ORIGINS")
+
     # --- AR CAPTURE QUALITY GATING ---
     ar_min_coverage: float = Field(90.0, validation_alias="AR_MIN_COVERAGE")
     ar_max_gap: float = Field(45.0, validation_alias="AR_MAX_GAP")
@@ -163,6 +180,7 @@ class Settings(BaseSettings):
     texture_retry_raw_all: bool = Field(True, validation_alias="TEXTURE_RETRY_RAW_ALL")
     texture_max_selected_frames: int = Field(20, validation_alias="TEXTURE_MAX_SELECTED_FRAMES")
     texture_neutralization_type: str = Field("cream", validation_alias="TEXTURE_NEUTRALIZATION_TYPE")
+    texture_timeout_sec: int = Field(600, validation_alias="TEXTURE_TIMEOUT_SEC")
 
     # --- TEXTURE QUALITY QA ---
     max_black_pixel_ratio: float = Field(0.20, validation_alias="MAX_BLACK_PIXEL_RATIO")
@@ -368,6 +386,37 @@ class Settings(BaseSettings):
             return usage.free / (1024 ** 3)
         except Exception:  # noqa: BLE001
             return float("inf")
+
+    def probe_ffmpeg(self) -> dict:
+        """Probe FFmpeg binary with -version."""
+        return self._probe_binary(self.ffmpeg_path, ["-version"])
+
+    def probe_ffprobe(self) -> dict:
+        """Probe ffprobe binary with -version."""
+        return self._probe_binary(self.ffprobe_path, ["-version"])
+
+    def _probe_binary(self, path: Optional[str], args: list[str]) -> dict:
+        """Generic binary prober."""
+        import subprocess
+        if not path:
+            return {"ok": False, "version_line": None, "error": "Path not configured"}
+        
+        binary = Path(path)
+        if not binary.exists():
+            return {"ok": False, "version_line": None, "error": f"Binary not found at {path}"}
+            
+        try:
+            result = subprocess.run(
+                [str(binary)] + args,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            combined = (result.stdout + result.stderr).strip()
+            first_line = combined.splitlines()[0] if combined else "(no output)"
+            return {"ok": True, "version_line": first_line, "error": None}
+        except Exception as exc:
+            return {"ok": False, "version_line": None, "error": str(exc)}
 
     def validate_setup(self):
         """Validates that the current environment has all necessary configuration."""

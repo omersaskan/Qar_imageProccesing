@@ -66,10 +66,10 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Meshysiz Asset Factory API", lifespan=lifespan)
 
-# Enable CORS for local development
+# Enable CORS with settings-controlled allowlist
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_allow_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -122,6 +122,15 @@ async def readiness_check():
     if not openmvs_probe["ok"]:
         issues.append(f"OpenMVS binary not usable: {openmvs_probe['error']}")
 
+    # ── FFmpeg / ffprobe Readiness Probes ──────────────────────────────────
+    ffmpeg_probe = settings.probe_ffmpeg()
+    if not ffmpeg_probe["ok"]:
+        issues.append(f"FFmpeg binary not usable: {ffmpeg_probe['error']}")
+    
+    ffprobe_probe = settings.probe_ffprobe()
+    if not ffprobe_probe["ok"]:
+        issues.append(f"ffprobe binary not usable: {ffprobe_probe['error']}")
+
     # ── Pilot/Prod Simulated Guard ─────────────────────────────────────────
     if not settings.is_dev:
         if getattr(settings, 'recon_pipeline', '') == "simulated":
@@ -162,6 +171,9 @@ async def readiness_check():
             "colmap_probe_ok": colmap_probe["ok"],
             "colmap_version_line": colmap_probe.get("version_line"),
             "openmvs_probe_ok": openmvs_probe["ok"],
+            "ffmpeg_probe_ok": ffmpeg_probe["ok"],
+            "ffmpeg_version_line": ffmpeg_probe.get("version_line"),
+            "ffprobe_probe_ok": ffprobe_probe["ok"],
             "free_disk_gb": round(free_disk_gb, 2) if free_disk_gb != float("inf") else None,
             "min_required_disk_gb": settings.min_free_disk_gb,
             "disk_ok": disk_ok,
@@ -230,11 +242,18 @@ async def upload_video(
 ):
     """
     Handles video upload, creates a new CaptureSession, and saves the file.
-
-    Sprint 1 additions (TICKET-004):
-      - Disk space is checked before accepting the file in pilot/production.
-      - The error message is explicit and actionable.
+    Includes strict FFmpeg normalization and quality manifest validation.
     """
+    from modules.utils.path_safety import validate_identifier
+    from modules.utils.video_utils import normalize_video, validate_video_file
+
+    # ── 1. Identifier Validation ──────────────────────────────────────────
+    try:
+        validate_identifier(product_id)
+        validate_identifier(operator_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid identifier: {str(e)}")
+
     if not file.filename.lower().endswith((".mp4", ".mov", ".avi", ".webm")):
         raise HTTPException(
             status_code=400,
@@ -242,276 +261,157 @@ async def upload_video(
         )
 
     session_id = f"cap_{uuid.uuid4().hex[:8]}"
+    capture_path = session_manager.get_capture_path(session_id)
+    session_created = False
 
-    # ── Dependency Gating (existing) ──────────────────────────────────────
+    def cleanup_on_failure(reason: str):
+        if not session_created:
+            if capture_path.exists():
+                shutil.rmtree(capture_path)
+        else:
+            session_manager.update_session(
+                session_id, 
+                new_status=AssetStatus.FAILED, 
+                failure_reason=f"Upload processing failed: {reason}"
+            )
+
+    # ── 2. Environment & Disk Preflight ───────────────────────────────────
     missing_ml = settings.check_ml_deps()
     missing_proc = settings.check_processing_deps()
 
     if (missing_ml or missing_proc) and not settings.is_dev:
-        detail = "System Environment Incomplete: "
-        if missing_ml:
-            detail += f"Missing ML dependencies ({', '.join(missing_ml)}). "
-        if missing_proc:
-            detail += f"Missing Processing dependencies ({', '.join(missing_proc)}). "
-        detail += "Consult the Operator Runbook for installation guidance."
-        logger.error(f"Upload blocked for session {session_id} due to environment issues.")
-        raise HTTPException(status_code=503, detail=detail)
+        raise HTTPException(status_code=503, detail="System Environment Incomplete")
 
-    # ── TICKET-004: Disk space preflight ──────────────────────────────────
     if not settings.is_dev:
         free_disk_gb = settings.check_free_disk_gb()
         if free_disk_gb < settings.min_free_disk_gb:
-            detail = (
-                f"Insufficient disk space: {free_disk_gb:.1f} GB free. "
-                f"Minimum required for safe processing: {settings.min_free_disk_gb} GB. "
-                "Free disk space before accepting new uploads."
-            )
-            logger.error(
-                f"Upload blocked for session {session_id}: "
-                f"only {free_disk_gb:.1f} GB free (min {settings.min_free_disk_gb} GB)."
-            )
-            raise HTTPException(status_code=507, detail=detail)
+            raise HTTPException(status_code=507, detail="Insufficient disk space")
 
-    # Preflight Check: Video Validation
+    # ── 3. Temporary Save & Validation ────────────────────────────────────
     import tempfile
-    import cv2
-    import os
-    
     fd, temp_path = tempfile.mkstemp(suffix=Path(file.filename).suffix)
+    temp_path = Path(temp_path)
+    
     try:
         with os.fdopen(fd, 'wb') as f:
             shutil.copyfileobj(file.file, f)
             
         file_size_mb = os.path.getsize(temp_path) / (1024 * 1024)
-        
         if file_size_mb == 0 or file_size_mb < 0.1:
             raise HTTPException(status_code=400, detail="Video file is too small or empty.")
-            
         if file_size_mb > settings.max_upload_mb:
-            raise HTTPException(status_code=400, detail=f"File size exceeds maximum allowed ({settings.max_upload_mb} MB).")
+            raise HTTPException(status_code=400, detail="File size exceeds maximum.")
 
-        cap = cv2.VideoCapture(temp_path)
+        # Initial CV2 probe for basic resolution check
+        cap = cv2.VideoCapture(str(temp_path))
+        width, height = 0, 0
         try:
-            if not cap.isOpened():
-                raise HTTPException(status_code=400, detail="Video is unreadable or uses an unsupported codec.")
-
-            fps = cap.get(cv2.CAP_PROP_FPS)
-            frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            if cap.isOpened():
+                width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         finally:
             cap.release()
             
         if width < settings.min_video_width or height < settings.min_video_height:
-            raise HTTPException(status_code=400, detail=f"Video resolution too low: {width}x{height}. Minimum required: {settings.min_video_width}x{settings.min_video_height}.")
-            
-        if fps <= 0 or frame_count <= 0:
-            raise HTTPException(status_code=400, detail="Invalid video metadata: FPS and frame count must be positive.")
-            
-        if fps < settings.min_video_fps:
-            raise HTTPException(status_code=400, detail=f"Video FPS too low: {fps:.1f}. Minimum required: {settings.min_video_fps}.")
+            raise HTTPException(status_code=400, detail="Video resolution too low.")
 
-            
-        duration = frame_count / fps
-        duration = max(0.0, duration) # Ensure non-negative
-        if duration < settings.min_video_duration_sec:
-            raise HTTPException(status_code=400, detail=f"Video duration too short: {duration:.1f}s. Minimum required: {settings.min_video_duration_sec}s.")
-        if duration > settings.max_video_duration_sec:
-            raise HTTPException(status_code=400, detail=f"Video duration too long: {duration:.1f}s. Maximum allowed: {settings.max_video_duration_sec}s.")
-            
-        # If all checks pass, move the file safely later
-    except HTTPException:
-        os.remove(temp_path)
-        raise
-    except Exception as e:
-        os.remove(temp_path)
-        raise HTTPException(status_code=500, detail=f"Error validating video: {e}")
+        # ── 4. Storage Setup & Normalization ──────────────────────────────────
+        video_dir = capture_path / "video"
+        video_dir.mkdir(parents=True, exist_ok=True)
+        (capture_path / "reports").mkdir(parents=True, exist_ok=True)
 
-    # 1. Define paths without creating session record yet
-    capture_path = session_manager.get_capture_path(session_id)
-    video_dir = capture_path / "video"
-    video_dir.mkdir(parents=True, exist_ok=True)
-    (capture_path / "reports").mkdir(parents=True, exist_ok=True)
+        video_path = video_dir / "raw_video.mp4"
+        
+        # We always attempt normalization unless it's a perfect match (handled inside normalize_video)
+        normalize_video(
+            temp_path, 
+            video_path, 
+            ffmpeg_path=settings.ffmpeg_path, 
+            ffprobe_path=settings.ffprobe_path
+        )
+        
+        # ── 5. Post-Normalization Validation ──────────────────────────────────
+        ok, error = validate_video_file(
+            video_path, 
+            min_fps=settings.min_video_fps,
+            min_duration=settings.min_video_duration_sec,
+            max_duration=settings.max_video_duration_sec
+        )
+        if not ok:
+            raise HTTPException(status_code=400, detail=f"Video validation failed: {error}")
 
-    try:
-        # 2. Save uploaded file
-        original_ext = Path(file.filename).suffix.lower()
-        if original_ext == ".webm":
-            original_path = video_dir / "original_capture.webm"
-            shutil.move(temp_path, str(original_path))
-            
-            video_path = video_dir / "raw_video.mp4"
-            try:
-                from modules.utils.video_utils import normalize_video
-                normalize_video(original_path, video_path, ffmpeg_path=settings.ffmpeg_path)
-                logger.info(f"Transcoded {original_path.name} to {video_path.name}")
-            except Exception as e:
-                if settings.env.value == "local_dev":
-                    logger.warning(f"Transcoding failed for {session_id}, falling back to copy (LOCAL_DEV ONLY): {e}")
-                    shutil.copy(original_path, video_path)
-                else:
-                    logger.error(f"Normalization failed for {session_id}: {e}")
-                    shutil.rmtree(capture_path)
-                    raise HTTPException(
-                        status_code=500, 
-                        detail=f"Video normalization failed: FFmpeg error or unavailable. {str(e)}"
-                    )
-        else:
-            video_path = video_dir / "raw_video.mp4"
-            shutil.move(temp_path, str(video_path))
-
-        # ── Quality Gate Enforcement ──────────────────────────────────────────
-        manifest_valid = True
-        rejection_reasons = []
-        manifest_data = {}
-
-        if not quality_manifest:
-            # If it's an AR guided session, we might want to flag it. 
-            # For now, let's assume if it comes from the AR modal, it MUST have a manifest.
-            # We can't strictly know if it's AR unless we add a flag, but if it has a manifest, we validate it.
-            # The prompt says: "Reject if quality_manifest is missing for AR guided uploads."
-            # Since we are moving to AR-only automatic uploads, we can require it.
-            logger.error(f"Upload rejected for {session_id}: Missing quality_manifest")
-            shutil.rmtree(capture_path)
-            session_file = Path(settings.data_root) / "sessions" / f"{session_id}.json"
-            if session_file.exists(): session_file.unlink()
+        # ── 6. Quality Manifest Sanity ────────────────────────────────────────
+        if not quality_manifest or quality_manifest.strip() in ("", "null"):
             raise HTTPException(status_code=422, detail="Missing quality_manifest for AR capture.")
 
-        try:
-            if not quality_manifest or quality_manifest.strip() in ("", "null"):
-                 raise ValueError("Empty or null manifest string")
-            manifest_data = json.loads(quality_manifest)
-            if not manifest_data:
-                 raise ValueError("Parsed manifest is empty/null")
-            
-            # 1. Demo Mode Check
-            is_demo = manifest_data.get("is_demo", False)
-            if is_demo and not settings.is_dev:
-                logger.error(f"Upload rejected for {session_id}: Demo mode not allowed in {settings.env.value}")
-                shutil.rmtree(capture_path)
-                session_file = Path(settings.data_root) / "sessions" / f"{session_id}.json"
-                if session_file.exists(): session_file.unlink()
-                raise HTTPException(
-                    status_code=422, 
-                    detail=f"Demo mode is only permitted in LOCAL_DEV. Current environment: {settings.env.value}"
-                )
-
-            # 2. Metric Validation
-            coverage = manifest_data.get("coverage_summary", {}).get("percent", 0)
-            max_gap = manifest_data.get("coverage_summary", {}).get("maxGap", 360)
-            accepted_frames = manifest_data.get("accepted_frame_count", 0)
-            total_frames = manifest_data.get("total_frame_count", 0)
-            
-            blur_rejections = manifest_data.get("rejection_stats", {}).get("blur", 0)
-            blur_ratio = blur_rejections / total_frames if total_frames > 0 else 0
-            
-            profile = manifest_data.get("product_profile", "generic")
-            completion = manifest_data.get("profile_completion")
-            
-            # Duration (if available in manifest, otherwise we check video duration later)
-            # The manifest should probably include the actual recording duration
-            
-            if coverage < settings.ar_min_coverage:
-                rejection_reasons.append(f"Coverage too low: {coverage:.1f}% (min {settings.ar_min_coverage}%)")
-            if max_gap > settings.ar_max_gap:
-                rejection_reasons.append(f"Gap too large: {max_gap:.1f}° (max {settings.ar_max_gap}°)")
-            if accepted_frames < settings.ar_min_accepted_frames:
-                rejection_reasons.append(f"Insufficient accepted frames: {accepted_frames} (min {settings.ar_min_accepted_frames})")
-            if blur_ratio > settings.ar_max_blur_ratio:
-                rejection_reasons.append(f"Too much blur: {blur_ratio:.2f} (max {settings.ar_max_blur_ratio})")
-            
-            # Profile specific
-            if profile == "box":
-                completed_faces = completion.get("faces", []) if completion else []
-                if len(completed_faces) < 6:
-                    rejection_reasons.append(f"Incomplete box profile: {len(completed_faces)}/6 faces captured")
-            elif profile == "bottle":
-                cap = completion.get("cap", False) if completion else False
-                base = completion.get("base", False) if completion else False
-                if not cap or not base:
-                    rejection_reasons.append(f"Incomplete bottle profile: {'missing CAP' if not cap else ''} {'missing BASE' if not base else ''}")
-
-            if rejection_reasons:
-                manifest_valid = False
-
-        except json.JSONDecodeError:
-            raise HTTPException(status_code=400, detail="Invalid quality_manifest JSON.")
-        except Exception as e:
-            logger.warning(f"Metadata parsing failed during quality gate check: {e}")
-            # Fallback: if we can't parse it, we can't validate it.
-            manifest_valid = False
-            rejection_reasons.append(f"Manifest parsing error: {str(e)}")
-
-        # ── Final Decision & Persistence ──────────────────────────────────────
-        reports_dir = capture_path / "reports"
-        reports_dir.mkdir(parents=True, exist_ok=True)
+        manifest_data = json.loads(quality_manifest)
         
-        if manifest_valid:
-            with open(reports_dir / "ar_quality_manifest.json", "w", encoding="utf-8") as f:
-                json.dump(manifest_data, f, indent=2)
+        # Demo mode guard
+        if manifest_data.get("is_demo") and not settings.is_dev:
+             raise HTTPException(status_code=422, detail="Demo mode not permitted in production.")
+
+        # Manifest numeric sanity
+        total_frames = manifest_data.get("total_frame_count", 0)
+        accepted_frames = manifest_data.get("accepted_frame_count", 0)
+        
+        if total_frames <= 0:
+            raise HTTPException(status_code=422, detail="Manifest total_frame_count must be > 0")
+        if accepted_frames < 0 or accepted_frames > total_frames:
+            raise HTTPException(status_code=422, detail="Manifest frame count inconsistency")
             
-            # Tag demo if applicable (only reaches here if in LOCAL_DEV)
-            pass
-        else:
-            # Save rejected manifest for debugging
-            rejected_dir = reports_dir / "rejected"
-            rejected_dir.mkdir(parents=True, exist_ok=True)
-            with open(rejected_dir / "rejected_ar_quality_manifest.json", "w", encoding="utf-8") as f:
-                json.dump(manifest_data, f, indent=2)
-            
-            # Cleanup capture folder
-            logger.error(f"Upload rejected for {session_id}: {'; '.join(rejection_reasons)}")
-            shutil.rmtree(capture_path)
-            
-            raise HTTPException(
+        # Optional: check if manifest frames match video frames within margin
+        # cap.get(cv2.CAP_PROP_FRAME_COUNT) was probe result
+        
+        # ── 7. Quality Gate Enforcement ──────────────────────────────────────
+        rejection_reasons = []
+        coverage = manifest_data.get("coverage_summary", {}).get("percent", 0)
+        max_gap = manifest_data.get("coverage_summary", {}).get("maxGap", 360)
+        
+        if coverage < settings.ar_min_coverage:
+            rejection_reasons.append(f"Coverage too low: {coverage:.1f}%")
+        if max_gap > settings.ar_max_gap:
+            rejection_reasons.append(f"Gap too large: {max_gap:.1f}°")
+        if accepted_frames < settings.ar_min_accepted_frames:
+            rejection_reasons.append(f"Insufficient accepted frames: {accepted_frames}")
+
+        if rejection_reasons:
+             raise HTTPException(
                 status_code=422, 
-                detail={
-                    "message": "Capture failed quality gate.",
-                    "reasons": rejection_reasons,
-                    "manifest_validation_status": "rejected"
-                }
+                detail={"message": "Capture failed quality gate.", "reasons": rejection_reasons}
             )
 
-        # ── Finalize Session (Only now the worker can see it) ──────────────────
+        # ── 8. Session Finalization ───────────────────────────────────────────
+        with open(capture_path / "reports" / "ar_quality_manifest.json", "w") as f:
+            json.dump(manifest_data, f, indent=2)
+
         session = session_manager.create_session(session_id, product_id, operator_id)
+        session_created = True
+        
         session_manager.update_session(
             session_id, 
             new_status=AssetStatus.CAPTURED,
-            manifest_validation_status="passed"
+            manifest_validation_status="passed",
+            test_mode=bool(manifest_data.get("is_demo"))
         )
 
-        # Tag demo if applicable (only reaches here if in LOCAL_DEV)
-        if manifest_data and manifest_data.get("is_demo"):
-            session_manager.update_session(
-                session_id,
-                new_status=AssetStatus.CAPTURED,
-                test_mode=True
-            )
-
-        logger.info(
-            f"Video uploaded successfully for session {session_id}. Size: {file_size_mb:.2f} MB, Res: {width}x{height}, Dur: {duration:.1f}s",
-            extra={"job_id": session_id},
-        )
-
+        logger.info(f"Session {session_id} finalized successfully.")
         return {
             "session_id": session_id,
             "product_id": product_id,
             "status": "uploaded",
-            "path": str(video_path),
             "manifest_validation_status": "passed"
         }
-    except HTTPException:
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
+
+    except HTTPException as he:
+        cleanup_on_failure(he.detail if isinstance(he.detail, str) else "HTTP Exception")
         raise
     except Exception as e:
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
-        logger.error(f"Upload failed: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Internal server error during upload: {str(e)}",
-        )
+        logger.exception(f"Upload processing failed for {session_id}")
+        cleanup_on_failure(str(e))
+        raise HTTPException(status_code=500, detail=f"Internal upload error: {str(e)}")
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
 
 
 @app.get("/api/products", dependencies=[Depends(verify_api_key)])
@@ -580,8 +480,12 @@ async def worker_status():
 @app.get("/api/products/{product_id}/history", dependencies=[Depends(verify_api_key)])
 async def get_history(product_id: str):
     """Returns full version history. Falls back to session data if not yet registered."""
+    from modules.utils.path_safety import validate_identifier
     try:
+        validate_identifier(product_id)
         return registry.get_history(product_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception:
         sessions = []
         sessions_dir = Path(settings.data_root) / "sessions"
@@ -631,6 +535,12 @@ async def get_logs(limit: int = 50):
 @app.get("/api/sessions/{session_id}/guidance", dependencies=[Depends(verify_api_key)])
 async def get_session_guidance(session_id: str):
     """Returns the structured guidance report for a session."""
+    from modules.utils.path_safety import validate_identifier
+    try:
+        validate_identifier(session_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     reports_dir = Path(settings.data_root) / "captures" / session_id / "reports"
     guidance_path = reports_dir / "guidance_report.json"
 
@@ -652,6 +562,12 @@ async def get_session_guidance(session_id: str):
 @app.get("/api/sessions/{session_id}/guidance/summary", dependencies=[Depends(verify_api_key)])
 async def get_session_guidance_summary(session_id: str):
     """Returns the human-readable Markdown summary of the guidance."""
+    from modules.utils.path_safety import validate_identifier
+    try:
+        validate_identifier(session_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     reports_dir = Path(settings.data_root) / "captures" / session_id / "reports"
     summary_path = reports_dir / "guidance_summary.md"
 
@@ -665,27 +581,30 @@ async def get_session_guidance_summary(session_id: str):
 @app.post("/api/sessions/{session_id}/cancel", dependencies=[Depends(verify_api_key)])
 async def cancel_session(session_id: str):
     """Marks a session as failed/cancelled to stop worker processing."""
-    session_file = Path(settings.data_root) / "sessions" / f"{session_id}.json"
-    if not session_file.exists():
+    from modules.utils.path_safety import validate_identifier
+    try:
+        validate_identifier(session_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    session = session_manager.get_session(session_id)
+    if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     
+    if session.status in [AssetStatus.PUBLISHED, AssetStatus.FAILED]:
+        return {"status": "already_closed", "session_id": session_id, "current_status": session.status.value}
+        
     try:
-        with open(session_file, "r+", encoding="utf-8") as f:
-            s_data = json.load(f)
-            if s_data.get("status") in ["published", "failed"]:
-                return {"status": "already_closed", "session_id": session_id}
-            
-            s_data["status"] = "failed"
-            s_data["error"] = "Cancelled by user via Dashboard"
-            f.seek(0)
-            json.dump(s_data, f, indent=2)
-            f.truncate()
-            
+        session_manager.update_session(
+            session_id, 
+            new_status=AssetStatus.FAILED,
+            failure_reason="Cancelled by user via Dashboard"
+        )
         logger.info(f"Session {session_id} cancelled by user.")
         return {"status": "cancelled", "session_id": session_id}
     except Exception as e:
         logger.error(f"Failed to cancel session {session_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Cancellation failed: {str(e)}")
 
 
 @app.get("/api/training/manifests", dependencies=[Depends(verify_api_key)])

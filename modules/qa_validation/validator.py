@@ -203,6 +203,17 @@ class AssetValidator:
             is_mobile_ready=is_mobile_ready,
             delivery_status=delivery_status,
             
+            # Robust Scoring (Phase 3)
+            flatness_score=float(iso_stats.get("flatness_score", 1.0)),
+            compactness_score=float(iso_stats.get("compactness_score", 1.0)),
+            selected_component_score=float(iso_stats.get("selected_component_score", 1.0)),
+
+            # Semantic Isolation Guidance (Phase 2)
+            mask_support_ratio=float(iso_stats.get("mask_support_ratio", 0.0)),
+            point_cloud_support_ratio=float(iso_stats.get("point_cloud_support_ratio", 0.0)),
+            supported_view_count=int(iso_stats.get("supported_view_count", 0)),
+            isolation_confidence=float(iso_stats.get("isolation_confidence", 0.0)),
+
             # Hardening metrics
             geometry_contamination_score=geometry_contamination_score,
             texture_background_contamination_ratio=texture_background_contamination_ratio,

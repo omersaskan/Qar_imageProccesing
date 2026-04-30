@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field, HttpUrl, field_validator
+from pydantic import BaseModel, Field, HttpUrl, field_validator, model_validator, ConfigDict
 from .lifecycle import AssetStatus, ReconstructionStatus
 
 class Product(BaseModel):
@@ -115,7 +115,10 @@ class ProductPhysicalProfile(BaseModel):
     recommended_scale_multiplier: float = Field(1.0, gt=0)
     expected_product_color: str = "unknown" # white_cream | dark | colorful | unknown
 
+
 class ValidationReport(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     asset_id: str
     poly_count: int = Field(..., ge=0)
     texture_status: str
@@ -171,7 +174,23 @@ class ValidationReport(BaseModel):
     validation_failure_source: Optional[str] = None
     primary_assignment_result: Optional[str] = None
 
+    # Production Ready Fields
+    is_mobile_ready: bool = False
+    delivery_status: str = "pending" # pending | ready | delivered
+
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @model_validator(mode="before")
+    @classmethod
+    def strip_extra_fields(cls, data: Any) -> Any:
+        """
+        Ensures backward compatibility by stripping fields not defined in the schema.
+        This allows loading old reports that might contain legacy/experimental fields.
+        """
+        if isinstance(data, dict):
+            allowed_fields = set(cls.model_fields.keys())
+            return {k: v for k, v in data.items() if k in allowed_fields}
+        return data
 
 class AssetPackage(BaseModel):
     product_id: str

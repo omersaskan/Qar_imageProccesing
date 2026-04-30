@@ -238,7 +238,7 @@ class TexturingService:
                             texture_results = retry_results
                             generated_textures = retry_results["texture_atlas_paths"]
                         else:
-                            logger.warning(f"Retry with Top 12 frames still contaminated ({bg_ratio:.3f}). Trying masked sources...")
+                            logger.warning(f"Retry with Top 12 frames still contaminated ({leakage:.3f}). Trying masked sources...")
                             
                             # Retry 2: Masked sources
                             # We need to find the masked_images_dir from previous run if possible
