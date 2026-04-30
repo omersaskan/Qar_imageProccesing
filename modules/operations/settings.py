@@ -184,6 +184,40 @@ class Settings(BaseSettings):
     sam2_mode: str = Field("image", validation_alias="SAM2_MODE")
     sam2_max_frames: int = Field(0, validation_alias="SAM2_MAX_FRAMES")
 
+    # --- PHASE A: AR MASK PREVIEW ---
+    sam_mask_preview_enabled: bool = Field(False, validation_alias="SAM_MASK_PREVIEW_ENABLED")
+    segmentation_preview_provider: str = Field("legacy", validation_alias="SEGMENTATION_PREVIEW_PROVIDER")
+    sam_mask_min_confidence: float = Field(0.75, validation_alias="SAM_MASK_MIN_CONFIDENCE")
+    sam_mask_preview_timeout_sec: int = Field(5, validation_alias="SAM_MASK_PREVIEW_TIMEOUT_SEC")
+    sam_mask_preview_max_image_size: int = Field(768, validation_alias="SAM_MASK_PREVIEW_MAX_IMAGE_SIZE")
+    sam_mask_preview_review_only: bool = Field(True, validation_alias="SAM_MASK_PREVIEW_REVIEW_ONLY")
+
+    # --- SAM3 SEGMENTATION ---
+    sam3_enabled: bool = Field(False, validation_alias="SAM3_ENABLED")
+    sam3_device: str = Field("cuda", validation_alias="SAM3_DEVICE")
+    sam3_mode: str = Field("video", validation_alias="SAM3_MODE")
+    sam3_text_prompt: str = Field("product", validation_alias="SAM3_TEXT_PROMPT")
+    sam3_checkpoint: str = Field("", validation_alias="SAM3_CHECKPOINT")
+    sam3_config: str = Field("", validation_alias="SAM3_CONFIG")
+    sam3_fallback_to_sam2: bool = Field(True, validation_alias="SAM3_FALLBACK_TO_SAM2")
+    sam3_review_only: bool = Field(True, validation_alias="SAM3_REVIEW_ONLY")
+    sam3_max_keyframes: int = Field(3, validation_alias="SAM3_MAX_KEYFRAMES")
+
+    # --- AI 3D GENERATION (Phase B/C Scaffolds) ---
+    ai_3d_provider: str = Field("none", validation_alias="AI_3D_PROVIDER")
+    ai_3d_preview_enabled: bool = Field(False, validation_alias="AI_3D_PREVIEW_ENABLED")
+    
+    sam3d_enabled: bool = Field(False, validation_alias="SAM3D_ENABLED")
+    sam3d_output_format: str = Field("glb", validation_alias="SAM3D_OUTPUT_FORMAT")
+    sam3d_require_review: bool = Field(True, validation_alias="SAM3D_REQUIRE_REVIEW")
+    sam3d_device: str = Field("cuda", validation_alias="SAM3D_DEVICE")
+    sam3d_checkpoint: str = Field("", validation_alias="SAM3D_CHECKPOINT")
+    sam3d_config: str = Field("", validation_alias="SAM3D_CONFIG")
+
+    meshy_enabled: bool = Field(False, validation_alias="MESHY_ENABLED")
+    meshy_api_key: str = Field("", validation_alias="MESHY_API_KEY")
+    meshy_require_review: bool = Field(True, validation_alias="MESHY_REQUIRE_REVIEW")
+
     # --- PHASE 6.2: DEPTH ANYTHING (scaffold only, disabled) ---
     depth_anything_enabled: bool = Field(False, validation_alias="DEPTH_ANYTHING_ENABLED")
     depth_anything_device: str = Field("cuda", validation_alias="DEPTH_ANYTHING_DEVICE")

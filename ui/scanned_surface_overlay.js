@@ -19,6 +19,10 @@ class ScannedSurfaceFilter {
         this.rippleOpacity = 0;
         this.scanOffset = 0;
         
+        this.externalMask = null;
+        this.maskConfidence = 0;
+        this.maskMinConfidence = 0.75;
+        
         this.resize();
         window.addEventListener('resize', () => this.resize());
     }
@@ -72,7 +76,45 @@ class ScannedSurfaceFilter {
         this.scanOffset = (this.scanOffset + 2) % 100;
     }
 
+    /**
+     * Set an external mask received from the backend (e.g. SAM2/SAM3)
+     */
+    setExternalMask(maskData) {
+        if (!maskData) {
+            this.externalMask = null;
+            this.maskConfidence = 0;
+            return;
+        }
+
+        this.externalMask = maskData;
+        this.maskConfidence = maskData.confidence || 0;
+    }
+
     getSilhouettePath(profile) {
+        // Prefer high-confidence external mask
+        if (this.externalMask && this.externalMask.mask && this.maskConfidence >= this.maskMinConfidence) {
+            const path = new Path2D();
+            const mask = this.externalMask.mask;
+            const mw = this.externalMask.mask_width;
+            const mh = this.externalMask.mask_height;
+            
+            // Scale mask to current canvas size
+            const scaleX = this.width / mw;
+            const scaleY = this.height / mh;
+
+            if (this.externalMask.mask_format === 'polygon' && Array.isArray(mask)) {
+                if (mask.length > 0) {
+                    path.moveTo(mask[0][0] * scaleX, mask[0][1] * scaleY);
+                    for (let i = 1; i < mask.length; i++) {
+                        path.lineTo(mask[i][0] * scaleX, mask[i][1] * scaleY);
+                    }
+                    path.closePath();
+                    return path;
+                }
+            }
+            // Add other formats (RLE etc) if implemented later
+        }
+
         const cx = this.width / 2;
         const cy = this.height / 2;
         const size = Math.min(this.width, this.height) * 0.45;

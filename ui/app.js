@@ -543,12 +543,12 @@ class ARCapture {
         this.canFinish = false;
         this.startTime = null;
         
-        this.stats = {
-            totalCount: 0,
-            acceptedCount: 0,
-            rejectionReasons: {},
             selectedIndices: []
         };
+        
+        this.maskInFlight = false;
+        this.lastMaskRequestTime = 0;
+        this.maskMinInterval = 2000; // 2 seconds between requests
 
         this.toastTimeout = null;
         this.lastGuidanceTime = 0;
@@ -788,6 +788,11 @@ class ARCapture {
             const isRedundant = this.tracker.isAngleCovered(curAzimuth);
             this.tracker.addFrame(curAzimuth, quality.isAccepted);
             
+            // Phase A: Mask Handshake
+            if (quality.isAccepted && !this.maskInFlight && (Date.now() - this.lastMaskRequestTime > this.maskMinInterval)) {
+                this.requestMaskPreview();
+            }
+            
             const now = Date.now();
             // Rate-limited Guidance (Short Turkish Messages)
             if (now - this.lastGuidanceTime > 2000) {
@@ -798,6 +803,53 @@ class ARCapture {
                     else this.showGuidanceToast("Kaliteyi artır");
                     this.lastGuidanceTime = now;
                 } else if (isRedundant) {
+            // ... (rest of existing logic)
+        }
+    }
+
+    async requestMaskPreview() {
+        if (this.maskInFlight || !this.isRecording) return;
+        this.maskInFlight = true;
+        this.lastMaskRequestTime = Date.now();
+
+        try {
+            // 1. Capture high-quality frame from video
+            const offscreen = document.createElement('canvas');
+            offscreen.width = this.video.videoWidth;
+            offscreen.height = this.video.videoHeight;
+            const ctx = offscreen.getContext('2d');
+            ctx.drawImage(this.video, 0, 0);
+
+            const blob = await new Promise(resolve => offscreen.toBlob(resolve, 'image/jpeg', 0.85));
+            if (!blob) throw new Error("Failed to capture blob");
+
+            const formData = new FormData();
+            formData.append('file', blob, 'preview.jpg');
+
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+            const response = await fetch(`${API_BASE}/ar/mask-preview`, {
+                method: 'POST',
+                body: formData,
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            
+            const maskData = await response.json();
+            this.surfaceFilter.setExternalMask(maskData);
+
+        } catch (err) {
+            console.warn("Mask preview handshake failed:", err);
+            // On failure, clear mask to trigger fallback
+            this.surfaceFilter.setExternalMask(null);
+        } finally {
+            this.maskInFlight = false;
+        }
+    }
+}
                     this.showGuidanceToast("Bu açı tamamlandı", "info");
                     this.lastGuidanceTime = now;
                 } else if (summary.percent < 90 && summary.maxGap > 45) {

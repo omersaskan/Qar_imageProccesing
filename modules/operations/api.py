@@ -30,6 +30,9 @@ from modules.operations.logging_config import get_component_logger, setup_loggin
 from modules.operations.worker import worker_instance
 from modules.operations.settings import settings, AppEnvironment
 import mimetypes
+import cv2
+import numpy as np
+from modules.ai_segmentation.preview_providers import get_preview_provider
 
 # Initialize unified logging
 setup_logging()
@@ -164,6 +167,55 @@ async def readiness_check():
             "disk_ok": disk_ok,
         },
     }
+
+
+@app.post("/api/ar/mask-preview", dependencies=[Depends(verify_api_key)])
+async def get_mask_preview(
+    file: UploadFile = File(...),
+):
+    """
+    Lightweight endpoint for real-time AR mask preview.
+    Does NOT create a session or persist data.
+    """
+    if not settings.sam_mask_preview_enabled:
+        return {
+            "provider": settings.segmentation_preview_provider,
+            "mask_format": "polygon",
+            "mask": [],
+            "confidence": 0.0,
+            "fallback_used": True,
+            "detail": "SAM_MASK_PREVIEW_ENABLED is false"
+        }
+
+    try:
+        contents = await file.read()
+        nparr = np.frombuffer(contents, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        
+        if img is None:
+            raise HTTPException(status_code=400, detail="Invalid image data")
+
+        # Resize for performance if needed
+        h, w = img.shape[:2]
+        max_size = settings.sam_mask_preview_max_image_size
+        if max(h, w) > max_size:
+            scale = max_size / max(h, w)
+            img = cv2.resize(img, (int(w * scale), int(h * scale)))
+
+        provider = get_preview_provider()
+        mask_data = provider.get_mask(img)
+        
+        return mask_data
+    except Exception as e:
+        logger.error(f"Mask preview failed: {e}")
+        return {
+            "provider": settings.segmentation_preview_provider,
+            "mask_format": "polygon",
+            "mask": [],
+            "confidence": 0.0,
+            "fallback_used": True,
+            "error": str(e)
+        }
 
 
 @app.post("/api/sessions/upload", dependencies=[Depends(verify_api_key)])
