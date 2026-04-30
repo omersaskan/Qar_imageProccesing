@@ -810,14 +810,35 @@ class ARCapture {
                     this.showGuidanceToast("Bu açı tamamlandı", "info");
                     this.lastGuidanceTime = now;
                 } else if (summary.percent < 90 && summary.maxGap > 45) {
-                    this.showGuidanceToast("Yavaşça dönmeye devam et");
-                    this.lastGuidanceTime = now;
-                } else if (this.stats.acceptedCount < 100) {
-                    this.showGuidanceToast("Biraz daha detay yakala");
+                    this.showGuidanceToast("Eksik yöne dön", "info");
                     this.lastGuidanceTime = now;
                 }
             }
+
+            if (quality.isAccepted) {
+                this.stats.acceptedCount++;
+                if (this.stats.acceptedCount % 10 === 0) {
+                    this.stats.selectedIndices.push({ t: Date.now() - this.startTime, a: curAzimuth });
+                }
+            } else {
+                quality.reasons.forEach(r => {
+                    this.stats.rejectionReasons[r] = (this.stats.rejectionReasons[r] || 0) + 1;
+                });
+            }
+            
+            const updatedSummary = this.tracker.getSummary();
+            this.updateProgress(updatedSummary.percent, updatedSummary.sectors);
+            
+            // Update shell again with latest sectors if recording
+            if (this.profile === 'bottle') this.bottleGuide.update(curAzimuth, curTilt, quality.isAccepted, updatedSummary.sectors);
+            if (this.profile === 'generic') this.genericGuide.update(curAzimuth, curTilt, quality.isAccepted, updatedSummary.sectors);
+
+            this.checkGate(updatedSummary);
+            this.updateDirectionalArrow(updatedSummary, curAzimuth, quality.isAccepted && !isRedundant);
+            this.surfaceFilter.update(curAzimuth, curTilt, this.profile, updatedSummary, quality.isAccepted && !isRedundant);
         }
+
+        requestAnimationFrame(() => this.runMetricsLoop());
     }
 
     async requestMaskPreview() {
@@ -861,40 +882,6 @@ class ARCapture {
         } finally {
             this.maskInFlight = false;
         }
-    }
-}
-                    this.showGuidanceToast("Bu açı tamamlandı", "info");
-                    this.lastGuidanceTime = now;
-                } else if (summary.percent < 90 && summary.maxGap > 45) {
-                    this.showGuidanceToast("Eksik yöne dön", "info");
-                    this.lastGuidanceTime = now;
-                }
-            }
-
-            if (quality.isAccepted) {
-                this.stats.acceptedCount++;
-                if (this.stats.acceptedCount % 10 === 0) {
-                    this.stats.selectedIndices.push({ t: Date.now() - this.startTime, a: curAzimuth });
-                }
-            } else {
-                quality.reasons.forEach(r => {
-                    this.stats.rejectionReasons[r] = (this.stats.rejectionReasons[r] || 0) + 1;
-                });
-            }
-            
-            const updatedSummary = this.tracker.getSummary();
-            this.updateProgress(updatedSummary.percent, updatedSummary.sectors);
-            
-            // Update shell again with latest sectors if recording
-            if (this.profile === 'bottle') this.bottleGuide.update(curAzimuth, curTilt, quality.isAccepted, updatedSummary.sectors);
-            if (this.profile === 'generic') this.genericGuide.update(curAzimuth, curTilt, quality.isAccepted, updatedSummary.sectors);
-
-            this.checkGate(updatedSummary);
-            this.updateDirectionalArrow(updatedSummary, curAzimuth, quality.isAccepted && !isRedundant);
-            this.surfaceFilter.update(curAzimuth, curTilt, this.profile, updatedSummary, quality.isAccepted && !isRedundant);
-        }
-
-        requestAnimationFrame(() => this.runMetricsLoop());
     }
 
     updateUIIndicators(quality, blur, lighting, azimuth) {
