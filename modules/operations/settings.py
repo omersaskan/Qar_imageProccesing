@@ -93,7 +93,7 @@ class Settings(BaseSettings):
 
     # Upload Preflight Strict Defaults
     max_upload_mb: float = Field(500.0, validation_alias="MAX_UPLOAD_MB")
-    min_video_duration_sec: float = Field(0.0, validation_alias="MIN_VIDEO_DURATION_SEC")
+    min_video_duration_sec: float = Field(15.0, validation_alias="MIN_VIDEO_DURATION_SEC")
     max_video_duration_sec: float = Field(120.0, validation_alias="MAX_VIDEO_DURATION_SEC")
     min_video_width: int = Field(720, validation_alias="MIN_VIDEO_WIDTH")
     min_video_height: int = Field(720, validation_alias="MIN_VIDEO_HEIGHT")

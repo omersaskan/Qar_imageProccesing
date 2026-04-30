@@ -12,10 +12,7 @@ TEST_PRODUCT = "test_hardening_product"
 def create_valid_tiny_video(path, ext=".mp4"):
     fourcc = cv2.VideoWriter_fourcc(*'mp4v') if ext == ".mp4" else cv2.VideoWriter_fourcc(*'VP80')
     out = cv2.VideoWriter(str(path), fourcc, 20.0, (720, 720))
-    # Create 20 frames (1 second at 20fps)
-    # Wait, the server requires 15s for AR? 
-    # Actually, the preflight check uses settings.min_video_duration_sec which is 8.0s
-    for _ in range(160): # 8 seconds
+    for _ in range(300): # 15 seconds at 20fps
         frame = np.random.randint(0, 255, (720, 720, 3), dtype=np.uint8)
         out.write(frame)
     out.release()

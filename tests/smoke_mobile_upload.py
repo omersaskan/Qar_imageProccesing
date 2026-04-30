@@ -15,7 +15,7 @@ def create_valid_tiny_video(path, ext=".mp4"):
     temp_path = Path(f"temp_{uuid.uuid4().hex}.mp4")
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     out = cv2.VideoWriter(str(temp_path), fourcc, 20.0, (720, 720))
-    for _ in range(200): 
+    for _ in range(300): # 15 seconds at 20fps
         frame = np.random.randint(0, 255, (720, 720, 3), dtype=np.uint8)
         out.write(frame)
     out.release()
@@ -99,7 +99,7 @@ def test_mobile_smoke_success():
     status_data = status_resp.json()
     
     print(f"Session {session_id} status: {status_data['status']}")
-    assert status_data['status'] in ["extracting", "failed", "processing", "reconstructing", "uploaded"], f"Unexpected status: {status_data['status']}"
+    assert status_data['status'] in ["captured", "extracting", "failed", "processing", "reconstructing", "uploaded"], f"Unexpected status: {status_data['status']}"
 
     # Cleanup
     if video_path.exists(): video_path.unlink()

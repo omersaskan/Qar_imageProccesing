@@ -516,7 +516,7 @@ class IngestionWorker:
             from modules.shared_contracts.models import ReconstructionJobDraft
 
             frames_dir = self.session_manager.captures_dir / session.session_id / "frames"
-            if not frames_dir.exists():
+            if not frames_dir.exists() or not list(frames_dir.glob("*.jpg")):
                 session = self._handle_frame_extraction(session)
                 if session.status == AssetStatus.RECAPTURE_REQUIRED:
                     return session
@@ -524,7 +524,7 @@ class IngestionWorker:
             input_frames = [str(f) for f in frames_dir.glob("*.jpg")]
             if not input_frames:
                 raise IrrecoverableError(
-                    f"No frames available for reconstruction in {session.session_id}"
+                    f"No frames available for reconstruction in {session.session_id} even after extraction attempt."
                 )
 
             # TICKET-007: Re-use saved coverage report from frame extraction.

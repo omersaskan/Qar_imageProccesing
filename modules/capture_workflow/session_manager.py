@@ -31,7 +31,6 @@ class SessionManager:
         # Setup capture folder structure
         session_capture_dir = validate_safe_path(self.captures_dir, session_id)
         ensure_dir(session_capture_dir / "video")
-        ensure_dir(session_capture_dir / "frames")
         ensure_dir(session_capture_dir / "reports")
         
         # Record initial event

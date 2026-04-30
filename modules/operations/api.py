@@ -305,10 +305,10 @@ async def upload_video(
         if width < settings.min_video_width or height < settings.min_video_height:
             raise HTTPException(status_code=400, detail=f"Video resolution too low: {width}x{height}. Minimum required: {settings.min_video_width}x{settings.min_video_height}.")
             
-        if fps < settings.min_video_fps:
-            raise HTTPException(status_code=400, detail=f"Video FPS too low: {fps:.1f}. Minimum required: {settings.min_video_fps}.")
+        if fps <= 0 or frame_count <= 0:
+            raise HTTPException(status_code=400, detail="Invalid video metadata: FPS and frame count must be positive.")
             
-        duration = frame_count / fps if fps > 0 else 0
+        duration = frame_count / fps
         duration = max(0.0, duration) # Ensure non-negative
         if duration < settings.min_video_duration_sec:
             raise HTTPException(status_code=400, detail=f"Video duration too short: {duration:.1f}s. Minimum required: {settings.min_video_duration_sec}s.")
@@ -328,7 +328,6 @@ async def upload_video(
     video_dir = capture_path / "video"
     video_dir.mkdir(parents=True, exist_ok=True)
     (capture_path / "reports").mkdir(parents=True, exist_ok=True)
-    (capture_path / "frames").mkdir(parents=True, exist_ok=True)
 
     try:
         # 2. Save uploaded file
