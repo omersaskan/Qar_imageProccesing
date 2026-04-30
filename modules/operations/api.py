@@ -315,6 +315,11 @@ async def upload_video(
 
         video_path = video_dir / "raw_video.mp4"
         
+        # Save original for diagnostics
+        original_ext = Path(file.filename).suffix
+        original_path = video_dir / f"original_capture{original_ext}"
+        shutil.copy2(temp_path, original_path)
+        
         # FFmpeg normalization handles WebM/MOV/AVI and converts to standard H.264
         normalize_video(
             temp_path, 
