@@ -276,6 +276,12 @@ async def upload_video(
             )
 
     # ── 2. Environment & Disk Preflight ───────────────────────────────────
+    if not settings.ffprobe_path or not Path(settings.ffprobe_path).exists():
+        raise HTTPException(
+            status_code=503, 
+            detail="System Environment Incomplete: ffprobe binary missing. Contact administrator."
+        )
+
     missing_ml = settings.check_ml_deps()
     missing_proc = settings.check_processing_deps()
 
@@ -287,7 +293,7 @@ async def upload_video(
         if free_disk_gb < settings.min_free_disk_gb:
             raise HTTPException(status_code=507, detail="Insufficient disk space")
 
-    # ── 3. Temporary Save & Validation ────────────────────────────────────
+    # ── 3. Temporary Save ─────────────────────────────────────────────────
     import tempfile
     fd, temp_path = tempfile.mkstemp(suffix=Path(file.filename).suffix)
     temp_path = Path(temp_path)
@@ -302,19 +308,6 @@ async def upload_video(
         if file_size_mb > settings.max_upload_mb:
             raise HTTPException(status_code=400, detail="File size exceeds maximum.")
 
-        # Initial CV2 probe for basic resolution check
-        cap = cv2.VideoCapture(str(temp_path))
-        width, height = 0, 0
-        try:
-            if cap.isOpened():
-                width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        finally:
-            cap.release()
-            
-        if width < settings.min_video_width or height < settings.min_video_height:
-            raise HTTPException(status_code=400, detail="Video resolution too low.")
-
         # ── 4. Storage Setup & Normalization ──────────────────────────────────
         video_dir = capture_path / "video"
         video_dir.mkdir(parents=True, exist_ok=True)
@@ -322,16 +315,18 @@ async def upload_video(
 
         video_path = video_dir / "raw_video.mp4"
         
-        # We always attempt normalization unless it's a perfect match (handled inside normalize_video)
+        # FFmpeg normalization handles WebM/MOV/AVI and converts to standard H.264
         normalize_video(
             temp_path, 
             video_path, 
             ffmpeg_path=settings.ffmpeg_path, 
-            ffprobe_path=settings.ffprobe_path
+            ffprobe_path=settings.ffprobe_path,
+            timeout=settings.video_normalize_timeout_sec
         )
         
         # ── 5. Post-Normalization Validation ──────────────────────────────────
-        ok, error = validate_video_file(
+        # Now that it's a standard MP4, OpenCV MUST be able to read it.
+        ok, error, video_meta = validate_video_file(
             video_path, 
             min_fps=settings.min_video_fps,
             min_duration=settings.min_video_duration_sec,
@@ -340,29 +335,48 @@ async def upload_video(
         if not ok:
             raise HTTPException(status_code=400, detail=f"Video validation failed: {error}")
 
-        # ── 6. Quality Manifest Sanity ────────────────────────────────────────
+        # Basic resolution gate
+        if video_meta["width"] < settings.min_video_width or video_meta["height"] < settings.min_video_height:
+             raise HTTPException(
+                 status_code=400, 
+                 detail=f"Video resolution too low: {video_meta['width']}x{video_meta['height']} < {settings.min_video_width}x{settings.min_video_height}"
+             )
+
+        # ── 6. Quality Manifest Validation ────────────────────────────────────
         if not quality_manifest or quality_manifest.strip() in ("", "null"):
             raise HTTPException(status_code=422, detail="Missing quality_manifest for AR capture.")
 
-        manifest_data = json.loads(quality_manifest)
+        try:
+            manifest_data = json.loads(quality_manifest)
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="Malformed JSON in quality_manifest")
         
         # Demo mode guard
         if manifest_data.get("is_demo") and not settings.is_dev:
              raise HTTPException(status_code=422, detail="Demo mode not permitted in production.")
 
         # Manifest numeric sanity
-        total_frames = manifest_data.get("total_frame_count", 0)
-        accepted_frames = manifest_data.get("accepted_frame_count", 0)
+        m_total_frames = manifest_data.get("total_frame_count", 0)
+        m_accepted_frames = manifest_data.get("accepted_frame_count", 0)
+        m_blur_rejections = manifest_data.get("blur_rejection_count", 0)
         
-        if total_frames <= 0:
+        if m_total_frames <= 0:
             raise HTTPException(status_code=422, detail="Manifest total_frame_count must be > 0")
-        if accepted_frames < 0 or accepted_frames > total_frames:
-            raise HTTPException(status_code=422, detail="Manifest frame count inconsistency")
+        if m_accepted_frames < 0 or m_accepted_frames > m_total_frames:
+            raise HTTPException(status_code=422, detail="Manifest accepted_frame_count inconsistency")
+        if m_blur_rejections < 0 or m_blur_rejections > m_total_frames:
+            raise HTTPException(status_code=422, detail="Manifest blur_rejection_count inconsistency")
             
-        # Optional: check if manifest frames match video frames within margin
-        # cap.get(cv2.CAP_PROP_FRAME_COUNT) was probe result
+        # Manifest-vs-Video consistency
+        v_frame_count = video_meta["frame_count"]
+        tolerance = settings.ar_manifest_frame_count_tolerance
+        if m_total_frames > v_frame_count * (1.0 + tolerance):
+            raise HTTPException(
+                status_code=422, 
+                detail=f"Manifest total_frame_count ({m_total_frames}) exceeds video frame count ({v_frame_count}) by >{tolerance*100}%"
+            )
         
-        # ── 7. Quality Gate Enforcement ──────────────────────────────────────
+        # ── 7. AR Quality Gate Enforcement ───────────────────────────────────
         rejection_reasons = []
         coverage = manifest_data.get("coverage_summary", {}).get("percent", 0)
         max_gap = manifest_data.get("coverage_summary", {}).get("maxGap", 360)
@@ -371,8 +385,34 @@ async def upload_video(
             rejection_reasons.append(f"Coverage too low: {coverage:.1f}%")
         if max_gap > settings.ar_max_gap:
             rejection_reasons.append(f"Gap too large: {max_gap:.1f}°")
-        if accepted_frames < settings.ar_min_accepted_frames:
-            rejection_reasons.append(f"Insufficient accepted frames: {accepted_frames}")
+        if m_accepted_frames < settings.ar_min_accepted_frames:
+            rejection_reasons.append(f"Insufficient accepted frames: {m_accepted_frames}")
+
+        # Blur ratio gate
+        blur_ratio = m_blur_rejections / m_total_frames
+        if blur_ratio > settings.ar_max_blur_ratio:
+            rejection_reasons.append(f"Blur ratio too high: {blur_ratio:.2%} > {settings.ar_max_blur_ratio:.2%}")
+
+        # Accepted ratio gate
+        accepted_ratio = m_accepted_frames / m_total_frames
+        if accepted_ratio < settings.ar_min_accepted_ratio:
+            rejection_reasons.append(f"Accepted frame ratio too low: {accepted_ratio:.2%} < {settings.ar_min_accepted_ratio:.2%}")
+
+        # Profile-specific gates
+        profile_type = manifest_data.get("profile_type", "generic").lower()
+        comp = manifest_data.get("profile_completion")
+        
+        if profile_type in ("box", "bottle"):
+            if not comp:
+                rejection_reasons.append(f"Missing profile_completion data for {profile_type}")
+            else:
+                if profile_type == "box":
+                    faces = comp.get("faces", [])
+                    if len(faces) < 6:
+                        rejection_reasons.append(f"Box requires 6 completed faces, got {len(faces)}")
+                elif profile_type == "bottle":
+                    if not comp.get("cap") or not comp.get("base"):
+                        rejection_reasons.append("Bottle requires both cap and base coverage")
 
         if rejection_reasons:
              raise HTTPException(

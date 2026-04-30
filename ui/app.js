@@ -1,10 +1,4 @@
-const API_BASE = window.MESHYSIZ_API_BASE || (
-    window.location.protocol.startsWith("http") && 
-    window.location.hostname !== "localhost" && 
-    window.location.hostname !== "127.0.0.1" 
-    ? window.location.origin + "/api" 
-    : "http://localhost:8001/api"
-);
+const API_BASE = window.MESHYSIZ_API_BASE || (window.location.origin + "/api");
 
 function escapeHTML(str) {
     if (!str) return "";
@@ -578,6 +572,7 @@ class ARCapture {
         this.maskInFlight = false;
         this.lastMaskRequestTime = 0;
         this.maskMinInterval = 2000; // 2 seconds between requests
+        this.shouldUploadOnStop = false;
 
         this.toastTimeout = null;
         this.lastGuidanceTime = 0;
@@ -722,6 +717,7 @@ class ARCapture {
     }
 
     stop() {
+        this.shouldUploadOnStop = false; // Guard: stopping or closing should NOT trigger upload
         if (this.stream) {
             this.stream.getTracks().forEach(track => track.stop());
         }
@@ -775,7 +771,13 @@ class ARCapture {
                 this.mediaRecorder.ondataavailable = (e) => {
                     if (e.data && e.data.size > 0) this.chunks.push(e.data);
                 };
-                this.mediaRecorder.onstop = () => this.uploadResult();
+                this.mediaRecorder.onstop = () => {
+                    if (this.shouldUploadOnStop) {
+                        this.uploadResult();
+                    } else {
+                        console.log("MediaRecorder stopped (Upload suppressed)");
+                    }
+                };
                 this.mediaRecorder.start(1000); // Collect chunks every second
             }
         } else {
@@ -1051,6 +1053,8 @@ class ARCapture {
             alert("Capture quality gate not met. Please follow the guidance before finishing.");
             return;
         }
+
+        this.shouldUploadOnStop = true; // Set flag ONLY when user explicitly finishes a valid capture
 
         this.isRecording = false;
         this.captureBtn.classList.remove('recording');

@@ -108,9 +108,10 @@ class Settings(BaseSettings):
     max_upload_mb: float = Field(500.0, validation_alias="MAX_UPLOAD_MB")
     min_video_duration_sec: float = Field(15.0, validation_alias="MIN_VIDEO_DURATION_SEC")
     max_video_duration_sec: float = Field(120.0, validation_alias="MAX_VIDEO_DURATION_SEC")
-    min_video_width: int = Field(720, validation_alias="MIN_VIDEO_WIDTH")
-    min_video_height: int = Field(720, validation_alias="MIN_VIDEO_HEIGHT")
     min_video_fps: float = Field(20.0, validation_alias="MIN_VIDEO_FPS")
+    
+    video_probe_timeout_sec: int = Field(30, validation_alias="VIDEO_PROBE_TIMEOUT_SEC")
+    video_normalize_timeout_sec: int = Field(180, validation_alias="VIDEO_NORMALIZE_TIMEOUT_SEC")
     
     # --- SECURITY: CORS Allowlist ---
     # List of origins allowed to access the API. Defaults to ["*"] if empty.
@@ -122,6 +123,8 @@ class Settings(BaseSettings):
     ar_min_accepted_frames: int = Field(100, validation_alias="AR_MIN_ACCEPTED_FRAMES")
     ar_max_blur_ratio: float = Field(0.3, validation_alias="AR_MAX_BLUR_RATIO")
     ar_min_duration_sec: float = Field(15.0, validation_alias="AR_MIN_DURATION_SEC")
+    ar_manifest_frame_count_tolerance: float = Field(0.20, validation_alias="AR_MANIFEST_FRAME_COUNT_TOLERANCE")
+    ar_min_accepted_ratio: float = Field(0.35, validation_alias="AR_MIN_ACCEPTED_RATIO")
 
     # --- RECONSTRUCTION ENGINES ---
     # Global switch for the default pipeline: "colmap_dense" or "colmap_openmvs"

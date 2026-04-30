@@ -159,27 +159,90 @@ class FrameExtractor:
     def extract_keyframes(self, video_path: str, output_dir: str) -> tuple[List[str], Dict[str, Any]]:
         import os
         import hashlib
+        import shutil
+        from datetime import datetime
+        from modules.operations.settings import settings, AppEnvironment
+
+        # ── 1. Cache Key Calculation ──────────────────────────────────────────
+        # Hash must include video content, parameters, and model versions
+        video_p = Path(video_path)
+        sha256 = "unknown"
+        try:
+            h = hashlib.sha256()
+            with open(video_path, "rb") as f:
+                # Read first 1MB and last 1MB for speed-efficient content hashing
+                h.update(f.read(1024 * 1024))
+                if video_p.stat().st_size > 2 * 1024 * 1024:
+                    f.seek(-1024 * 1024, 2)
+                    h.update(f.read(1024 * 1024))
+            sha256 = h.hexdigest()
+        except Exception:
+            pass
+
+        cache_data = {
+            "sha256": sha256,
+            "size": video_p.stat().st_size,
+            "sample_rate": self.thresholds.frame_sample_rate,
+            "min_blur": self.thresholds.min_blur_score,
+            "min_similarity": self.thresholds.min_similarity_score,
+            "seg_backend": self.seg_config.provider,
+            "seg_model": self.seg_config.model_path if hasattr(self.seg_config, "model_path") else "default",
+            "rembg_model": getattr(self.seg_config, "rembg_model", "u2net"),
+            "rembg_threshold": getattr(self.seg_config, "rembg_threshold", 0.5),
+        }
+        current_hash = hashlib.md5(json.dumps(cache_data, sort_keys=True).encode()).hexdigest()
         
-        # Calculate manifest hash for retry safety
-        manifest_data = f"{video_path}_{self.thresholds.min_similarity_score}_{self.thresholds.min_blur_score}"
-        current_hash = hashlib.md5(manifest_data.encode()).hexdigest()
+        # ── 2. Skip Extraction (Cache) Logic ──────────────────────────────────
+        skip_allowed = (os.getenv("SKIP_EXTRACTION") == "true" and settings.env == AppEnvironment.LOCAL_DEV)
         
-        if os.getenv("SKIP_EXTRACTION") == "true":
-            output_path = Path(output_dir)
-            manifest_path = output_path / "extraction_manifest.json"
-            
+        output_path = Path(output_dir)
+        manifest_path = output_path / "extraction_manifest.json"
+
+        if skip_allowed:
             if manifest_path.exists():
-                with open(manifest_path, "r") as f:
-                    cached_manifest = json.load(f)
-                    if cached_manifest.get("manifest_hash") == current_hash:
-                        existing_frames = sorted([str(f) for f in output_path.glob("*.jpg")])
-                        if existing_frames:
-                            logger.info(f"SKIP_EXTRACTION=true: Found {len(existing_frames)} verified frames. Skipping.")
-                            return existing_frames, {"status": "skipped", "count": len(existing_frames), "verified": True}
-                    else:
-                        logger.warning("SKIP_EXTRACTION=true but hash mismatch! Re-extracting for safety.")
-            else:
-                 logger.warning("SKIP_EXTRACTION=true but manifest missing. Re-extracting.")
+                try:
+                    with open(manifest_path, "r") as f:
+                        cached_manifest = json.load(f)
+                        if cached_manifest.get("manifest_hash") == current_hash:
+                            existing_frames = sorted([str(f) for f in output_path.glob("*.jpg")])
+                            if existing_frames:
+                                logger.info(f"SKIP_EXTRACTION: Found {len(existing_frames)} valid frames. Skipping.")
+                                return existing_frames, {"status": "skipped", "count": len(existing_frames), "verified": True}
+                except Exception as e:
+                    logger.warning(f"Cache manifest corrupted: {e}")
+            logger.warning("SKIP_EXTRACTION requested but cache invalid/missing. Proceeding with extraction.")
+        
+        # ── 3. Stale Artifact Hygiene ─────────────────────────────────────────
+        logger.info(f"Cleaning stale extraction artifacts in {output_path}...")
+        
+        # Files in root: *.jpg (frames)
+        for f in output_path.glob("*.jpg"):
+            f.unlink(missing_ok=True)
+            
+        # Masks and metadata
+        masks_dir = output_path / "masks"
+        if masks_dir.exists():
+            for f in masks_dir.glob("*.png"): f.unlink(missing_ok=True)
+            for f in masks_dir.glob("*.json"): f.unlink(missing_ok=True)
+            
+        # Masked previews
+        masked_dir = output_path / "masked"
+        if masked_dir.exists():
+            for f in masked_dir.glob("*.jpg"): f.unlink(missing_ok=True)
+            
+        # Debug artifacts
+        debug_dir = output_path / "debug"
+        if debug_dir.exists():
+            # Move to timestamped folder instead of simple delete
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            debug_backup = output_path / f"debug_run_{ts}"
+            try:
+                shutil.move(str(debug_dir), str(debug_backup))
+            except Exception:
+                shutil.rmtree(debug_dir, ignore_errors=True)
+
+        if manifest_path.exists():
+            manifest_path.unlink()
 
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
