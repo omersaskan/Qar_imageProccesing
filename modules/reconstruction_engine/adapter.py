@@ -344,8 +344,6 @@ class OpenMVSCommandBuilder:
             "0",
             "--max-threads",
             "0",
-            "--export-type",
-            "ply",
         ]
 
     def reconstruct_mesh(self, input_mvs: Path, output_mesh_ply: Path) -> List[str]:
@@ -381,8 +379,6 @@ class OpenMVSCommandBuilder:
             str(input_mesh_ply),
             "-o",
             str(output_obj),
-            "--export-type",
-            "obj",
             "--working-folder",
             str(input_scene_mvs.parent),
             "--resolution-level",
@@ -1719,6 +1715,32 @@ class OpenMVSAdapter(COLMAPAdapter):
                 log_file.write(f"scene.mvs exists: {mvs_dense.exists()}\n")
                 if mvs_dense.exists():
                     log_file.write(f"scene.mvs size: {mvs_dense.stat().st_size} bytes\n")
+
+                # SPRINT 5C: Simplify mesh to prevent OpenMVS TextureMesh crash
+                simplified_mesh_ply = dense_dir / "project_mesh_simplified.ply"
+                try:
+                    log_file.write("Simplifying mesh to 60000 faces to prevent OpenMVS TextureMesh crash...\n")
+                    mesh = trimesh.load(str(project_mesh_ply))
+                    if isinstance(mesh, trimesh.Scene):
+                        mesh = mesh.dump(concatenate=True)
+                    if len(mesh.faces) > 60000:
+                        try:
+                            import fast_simplification
+                            ratio = 60000 / len(mesh.faces)
+                            points, faces = fast_simplification.simplify(mesh.vertices, mesh.faces, ratio)
+                            new_mesh = trimesh.Trimesh(vertices=points, faces=faces)
+                            new_mesh.export(str(simplified_mesh_ply))
+                            project_mesh_ply = simplified_mesh_ply
+                            log_file.write(f"Mesh simplified to {len(new_mesh.faces)} faces using fast_simplification.\n")
+                        except ImportError:
+                            new_mesh = mesh.simplify_quadratic(60000)
+                            new_mesh.export(str(simplified_mesh_ply))
+                            project_mesh_ply = simplified_mesh_ply
+                            log_file.write(f"Mesh simplified to {len(new_mesh.faces)} faces using trimesh.\n")
+                    else:
+                        log_file.write(f"Mesh face count ({len(mesh.faces)}) is safe, skipping simplification.\n")
+                except Exception as e:
+                    log_file.write(f"Warning: Failed to simplify mesh: {e}\n")
 
                 self._run_command(
                     self.mvs_builder.texture_mesh(mvs_dense, project_mesh_ply, project_textured_obj),

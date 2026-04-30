@@ -232,7 +232,7 @@ class ReconstructionRunner:
         texture_penalty = 0.0
         if has_texture:
             score += 3000.0
-        elif settings.require_textured_output:
+        elif settings.require_textured_output and results.get("engine_used") != "colmap_dense":
             texture_penalty = -4000.0
             score += texture_penalty
 
@@ -409,6 +409,8 @@ class ReconstructionRunner:
 
                 results = primary_results
                 engine_used = current_adapter.engine_type
+                if results and isinstance(results, dict):
+                    results["engine_used"] = engine_used
 
                 if primary_error and current_adapter.engine_type == "colmap_openmvs":
                     if settings.require_textured_output:
@@ -513,6 +515,10 @@ class ReconstructionRunner:
                 logging.error(f"Attempt {i} ({step_name}) crashed: {e}")
 
             audit.attempts.append(attempt_res)
+
+            if attempt_res.status == "success" and attempt_res.metrics_rank_score >= self.min_acceptable_score:
+                logging.info(f"Attempt {i} ({step_name}) score {attempt_res.metrics_rank_score:.1f} is acceptable. Skipping remaining fallbacks.")
+                break
 
         if best_results is None:
             audit.final_status = "recapture_required"
