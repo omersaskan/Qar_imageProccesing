@@ -50,8 +50,8 @@ py -m modules.operations.api
 
 ### Verification
 1. **Smoke Check**: Run `./scripts/smoke_check.sh` to verify imports and binary probes.
-2. **Web UI**: Once started, visit `http://localhost:8000` to access the capture dashboard.
-3. **API Docs**: Interactive Swagger documentation is available at `http://localhost:8000/docs`.
+2. **Web UI**: Once started, visit `http://localhost:8001` to access the capture dashboard.
+3. **API Docs**: Interactive Swagger documentation is available at `http://localhost:8001/docs`.
 
 ---
 

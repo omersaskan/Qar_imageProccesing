@@ -276,7 +276,7 @@ async def upload_video(
             )
 
     # ── 2. Environment & Disk Preflight ───────────────────────────────────
-    if not settings.ffprobe_path or not Path(settings.ffprobe_path).exists():
+    if not settings.ffprobe_path or not settings.resolve_executable(settings.ffprobe_path):
         raise HTTPException(
             status_code=503, 
             detail="System Environment Incomplete: ffprobe binary missing. Contact administrator."

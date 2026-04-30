@@ -418,13 +418,13 @@ class Settings(BaseSettings):
         if not path:
             return {"ok": False, "version_line": None, "error": "Path not configured"}
         
-        binary = Path(path)
-        if not binary.exists():
-            return {"ok": False, "version_line": None, "error": f"Binary not found at {path}"}
+        resolved_path = self.resolve_executable(path)
+        if not resolved_path:
+            return {"ok": False, "version_line": None, "error": f"Binary not found or not in PATH: {path}"}
             
         try:
             result = subprocess.run(
-                [str(binary)] + args,
+                [str(resolved_path)] + args,
                 capture_output=True,
                 text=True,
                 timeout=5,
@@ -434,6 +434,30 @@ class Settings(BaseSettings):
             return {"ok": True, "version_line": first_line, "error": None}
         except Exception as exc:
             return {"ok": False, "version_line": None, "error": str(exc)}
+
+    def resolve_executable(self, path_or_command: str) -> Optional[str]:
+        """
+        Resolves a binary path. 
+        1. Checks if it exists as an absolute/relative path.
+        2. Checks if it is available in the system PATH via shutil.which.
+        
+        Returns the resolved absolute path as a string, or None if not found.
+        """
+        import shutil
+        if not path_or_command:
+            return None
+            
+        # 1. Direct path check
+        p = Path(path_or_command)
+        if p.exists():
+            return str(p.resolve())
+            
+        # 2. PATH resolution
+        resolved = shutil.which(path_or_command)
+        if resolved:
+            return str(Path(resolved).resolve())
+            
+        return None
 
     def validate_setup(self):
         """Validates that the current environment has all necessary configuration."""

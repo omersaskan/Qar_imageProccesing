@@ -50,15 +50,17 @@ class PackagePublisher:
         if not metadata:
             raise ValueError(f"Metadata not found in registry for {asset_id}")
 
+        if metadata.ai_generated:
+             raise ValueError(f"Publish failed: Asset {asset_id} is AI-generated. Phase B AI assets are review-only and cannot be published to production.")
+
         needs_review = (
             status == "review" or 
-            metadata.ai_generated or 
             metadata.requires_manual_review
         )
 
         if needs_review:
             if not self.registry.has_approval(asset_id):
-                reason = "is in 'review' status" if status == "review" else "is AI-generated or flagged for review"
+                reason = "is in 'review' status" if status == "review" else "is flagged for manual review"
                 raise ValueError(f"Publish failed: Asset {asset_id} {reason} and lacks manual approval.")
 
         self._validate_export_urls(export_urls)

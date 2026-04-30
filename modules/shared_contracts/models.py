@@ -106,6 +106,12 @@ class AssetMetadata(BaseModel):
     quality_grade: str = "C" # A, B, C, D
     ai_generated: bool = False
     requires_manual_review: bool = False
+    
+    # Phase B tracking
+    geometry_source: str = "photogrammetry"
+    production_status: str = "production_candidate"
+    may_override_recapture_required: bool = False
+    
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class ProductPhysicalProfile(BaseModel):

@@ -96,15 +96,16 @@ def test_publish_safety_ai_generated(registry, publisher, base_report, base_urls
     
     report = base_report.model_copy(update={"asset_id": "asset_ai", "final_decision": "pass"})
     
-    # Should fail despite "pass" decision because it's AI-generated and lacks manual approval
-    with pytest.raises(ValueError, match="is AI-generated or flagged for review"):
+    # Should fail terminaly because it's AI-generated
+    with pytest.raises(ValueError, match="AI-generated"):
         publisher.publish_package("p1", "asset_ai", report, base_urls, base_profile)
         
-    # Grant approval (Registry requires "review" as status for historic reasons/logic)
+    # Grant approval (Registry requires "review" as status)
     registry.grant_approval("asset_ai", "review")
     
-    # Should now pass
-    publisher.publish_package("p1", "asset_ai", report, base_urls, base_profile)
+    # Should STILL fail (Phase B Hardening Rule: AI is terminal reject for publish)
+    with pytest.raises(ValueError, match="AI-generated"):
+        publisher.publish_package("p1", "asset_ai", report, base_urls, base_profile)
 
 def test_publish_safety_requires_manual_review(registry, publisher, base_report, base_urls, base_profile):
     # Register an asset flagged for manual review
@@ -114,7 +115,7 @@ def test_publish_safety_requires_manual_review(registry, publisher, base_report,
     report = base_report.model_copy(update={"asset_id": "asset_rev", "final_decision": "pass"})
     
     # Should fail despite "pass" decision
-    with pytest.raises(ValueError, match="is AI-generated or flagged for review"):
+    with pytest.raises(ValueError, match="flagged for manual review"):
         publisher.publish_package("p1", "asset_rev", report, base_urls, base_profile)
         
     # Grant approval

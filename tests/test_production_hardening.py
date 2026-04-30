@@ -152,7 +152,8 @@ def test_publish_updates_active_pointer_atomically(temp_registry, publisher, sam
     assert any(h["asset_id"] == "asset_v1" and h["status"] == "published" and not h["is_active"] for h in history)
     assert any(h["asset_id"] == "asset_v2" and h["status"] == "published" and h["is_active"] for h in history)
 
-def test_publish_requires_real_urls(publisher, sample_report, sample_profile):
+def test_publish_requires_real_urls(temp_registry, publisher, sample_metadata, sample_report, sample_profile):
+    temp_registry.register_asset(sample_metadata)
     bad_urls = {
         "glb_url": "https://missing",
         "usdz_url": "https://cdn.example.com/asset.usdz",

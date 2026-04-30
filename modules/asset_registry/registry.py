@@ -173,6 +173,10 @@ class AssetRegistry:
     def publish_asset(self, product_id: str, asset_id: str) -> None:
         """
         Atomically marks an asset as published and sets it as active.
+        
+        Hardening Guards:
+        1. Rejects metadata.ai_generated=True (Phase B safety).
+        2. Rejects requires_manual_review=True unless is_approved is True.
         """
         product_file = self._get_product_file(product_id)
         ptr_file = self._get_active_file(product_id)
@@ -183,6 +187,18 @@ class AssetRegistry:
             if asset_id not in data["assets"]:
                 raise ValueError(f"Asset {asset_id} not found in product {product_id}")
             
+            asset_info = data["assets"][asset_id]
+            metadata = asset_info.get("metadata", {})
+            
+            # --- Hardening Guards ---
+            # 1. AI Generated Guard (Phase B safety)
+            if metadata.get("ai_generated"):
+                raise ValueError(f"Publishing rejected: Asset {asset_id} is AI-generated. Phase B assets are review-only and cannot be published to production.")
+            
+            # 2. Manual Review Guard
+            if metadata.get("requires_manual_review") and not asset_info.get("is_approved"):
+                raise ValueError(f"Publishing rejected: Asset {asset_id} requires manual review and has not been approved.")
+
             # 1. Update publish state
             data["assets"][asset_id]["publish_state"] = "published"
             
