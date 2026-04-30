@@ -874,7 +874,6 @@ class ARCapture {
             hud.classList.add('hidden');
         }
     }
-    }
 
     updateProgress(percent, sectors = []) {
         this.coverageEl.textContent = `${Math.floor(percent)}%`;
