@@ -261,6 +261,7 @@ class AssetRegistry:
 
     def update_publish_state(self, asset_id: str, state: str) -> None:
         """Updates the publish state (e.g., 'published', 'draft')."""
+        state = str(state).strip().lower()
         if state == "published":
              raise ValueError("Direct state update to 'published' is prohibited. Use publish_asset() to ensure safety guards are applied.")
              

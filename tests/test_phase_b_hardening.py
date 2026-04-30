@@ -157,3 +157,34 @@ async def test_api_upload_preflight_binary_resolution(monkeypatch):
     
     assert exc.value.status_code == 503
     assert "ffprobe binary missing" in exc.value.detail
+
+@pytest.mark.anyio
+async def test_api_upload_preflight_binary_resolution_positive(monkeypatch):
+    from modules.operations.api import upload_video
+    from fastapi import HTTPException
+    from unittest.mock import MagicMock
+    import shutil
+    
+    # Mock shutil.which to return a path
+    monkeypatch.setattr(shutil, "which", lambda cmd, path=None: "/path/to/resolved/bin")
+    # Mock Path.exists to return True
+    monkeypatch.setattr(Path, "exists", lambda self: True)
+    
+    # Mock validate_identifier and other things that would fail with dummy params
+    mock_file = MagicMock()
+    mock_file.filename = "test.mp4"
+    
+    try:
+        await upload_video(
+            product_id="p1", 
+            operator_id="test_op", 
+            quality_manifest="{}", 
+            file=mock_file
+        )
+    except HTTPException as exc:
+        # It might still fail later (e.g. at tempfile or normalize_video), 
+        # but it should NOT be a 503 from preflight.
+        assert exc.status_code != 503
+    except Exception:
+        # Other errors are fine, as long as it's not the 503 preflight
+        pass
