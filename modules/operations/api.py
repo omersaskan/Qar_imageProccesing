@@ -206,8 +206,11 @@ async def get_mask_preview(
         mask_data = provider.get_mask(img)
         
         return mask_data
+    except HTTPException:
+        # Re-raise HTTP exceptions (like 400 for invalid image) so they aren't caught by the fallback block
+        raise
     except Exception as e:
-        logger.error(f"Mask preview failed: {e}")
+        logger.error(f"Mask preview failed during inference: {e}")
         return {
             "provider": settings.segmentation_preview_provider,
             "mask_format": "polygon",

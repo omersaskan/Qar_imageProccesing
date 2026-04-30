@@ -70,11 +70,8 @@ def test_mask_preview_invalid_image():
         headers={"X-API-Key": settings.pilot_api_key} if not settings.is_dev else {}
     )
     
-    # Should either return 400 or fallback with error
-    assert response.status_code in [200, 400]
-    if response.status_code == 200:
-        data = response.json()
-        assert data["fallback_used"] is True
+    # Strictly require 400 for invalid image data
+    assert response.status_code == 400
 
 def test_mask_preview_scaffold_providers():
     settings.sam_mask_preview_enabled = True

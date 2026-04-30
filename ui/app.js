@@ -543,7 +543,11 @@ class ARCapture {
         this.canFinish = false;
         this.startTime = null;
         
-            selectedIndices: []
+        this.stats = { 
+            totalCount: 0, 
+            acceptedCount: 0, 
+            rejectionReasons: {}, 
+            selectedIndices: [] 
         };
         
         this.maskInFlight = false;
@@ -803,7 +807,16 @@ class ARCapture {
                     else this.showGuidanceToast("Kaliteyi artır");
                     this.lastGuidanceTime = now;
                 } else if (isRedundant) {
-            // ... (rest of existing logic)
+                    this.showGuidanceToast("Bu açı tamamlandı", "info");
+                    this.lastGuidanceTime = now;
+                } else if (summary.percent < 90 && summary.maxGap > 45) {
+                    this.showGuidanceToast("Yavaşça dönmeye devam et");
+                    this.lastGuidanceTime = now;
+                } else if (this.stats.acceptedCount < 100) {
+                    this.showGuidanceToast("Biraz daha detay yakala");
+                    this.lastGuidanceTime = now;
+                }
+            }
         }
     }
 
