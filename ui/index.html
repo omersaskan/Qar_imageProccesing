@@ -168,6 +168,7 @@
             <div class="camera-wrapper">
                 <div class="ar-hud-label">Coverage visualization, not reconstructed geometry.</div>
                 <video id="ar-video-feed" autoplay playsinline muted></video>
+                <canvas id="ar-surface-overlay" class="ar-surface-overlay"></canvas>
                 
                 <!-- SVG Overlay for Guidance -->
                 <svg class="ar-overlay" viewBox="0 0 100 100">
@@ -278,6 +279,7 @@
     </div>
 
     <canvas id="ar-sampling-canvas" class="hidden" width="160" height="160"></canvas>
+    <script src="scanned_surface_overlay.js"></script>
     <script src="app.js"></script>
     <footer class="container" style="text-align: center; margin-top: 4rem; padding-bottom: 2rem; color: #444; border-top: 1px solid rgba(255,255,255,0.05);">
         <p>&copy; 2026 Meshysiz Asset Factory | Production Node</p>

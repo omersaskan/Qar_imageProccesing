@@ -521,13 +521,14 @@ class ARCapture {
         this.angleText = document.getElementById('current-angle');
         this.timerEl = document.getElementById('ar-timer');
         this.productIdInput = document.getElementById('ar-product-id');
+        this.demoBtn = document.getElementById('ar-demo-btn');
         
-        this.metrics = new MetricsProcessor();
+        this.surfaceFilter = new ScannedSurfaceFilter('ar-surface-overlay');
         this.tracker = new CoverageTracker();
         this.boxGuide = new BoxGhostGuide();
         this.bottleGuide = new BottleGhostGuide();
         this.genericGuide = new GenericGhostGuide();
-        this.demoBtn = document.getElementById('ar-demo-btn');
+        this.metrics = new MetricsProcessor();
         this.gateValidator = new GateValidator();
         
         this.stream = null;
@@ -630,6 +631,7 @@ class ARCapture {
         this.qualityManifest = null;
         this.canFinish = false;
         this.updateGuideVisibility();
+        this.surfaceFilter.resize();
         this.productIdInput.value = "";
         
         this.captureBtn.disabled = true;
@@ -824,6 +826,7 @@ class ARCapture {
 
             this.checkGate(updatedSummary);
             this.updateDirectionalArrow(updatedSummary, curAzimuth, quality.isAccepted && !isRedundant);
+            this.surfaceFilter.update(curAzimuth, curTilt, this.profile, updatedSummary, quality.isAccepted && !isRedundant);
         }
 
         requestAnimationFrame(() => this.runMetricsLoop());
