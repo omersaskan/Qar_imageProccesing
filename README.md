@@ -40,17 +40,18 @@ Run the comprehensive suite (490+ tests) to verify stability:
 python -m pytest
 ```
 
-### Lightweight Smoke Check
-Verify core imports, settings, and API initialization:
+### Local Startup (Canonical)
+The system now uses a unified startup. The API serves the operational UI and initializes the embedded background worker automatically:
 ```bash
-./scripts/smoke_check.sh
+# Canonical module-based startup
+py -m modules.operations.api
 ```
+*Note: `dashboard.py` has been removed in favor of the integrated API-served UI.*
 
-### Regression Tests
-Run specific hardening and production logic tests:
-```bash
-python -m pytest tests/test_production_hardening.py
-```
+### Verification
+1. **Smoke Check**: Run `./scripts/smoke_check.sh` to verify imports and binary probes.
+2. **Web UI**: Once started, visit `http://localhost:8000` to access the capture dashboard.
+3. **API Docs**: Interactive Swagger documentation is available at `http://localhost:8000/docs`.
 
 ---
 

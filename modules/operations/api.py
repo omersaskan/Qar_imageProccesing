@@ -340,11 +340,15 @@ async def upload_video(
         if not ok:
             raise HTTPException(status_code=400, detail=f"Video validation failed: {error}")
 
-        # Basic resolution gate
-        if video_meta["width"] < settings.min_video_width or video_meta["height"] < settings.min_video_height:
+        # Basic resolution gate (Orientation Agnostic)
+        short_edge = min(video_meta["width"], video_meta["height"])
+        long_edge = max(video_meta["width"], video_meta["height"])
+        
+        if short_edge < settings.min_video_short_edge or long_edge < settings.min_video_long_edge:
              raise HTTPException(
                  status_code=400, 
-                 detail=f"Video resolution too low: {video_meta['width']}x{video_meta['height']} < {settings.min_video_width}x{settings.min_video_height}"
+                 detail=f"Video resolution too low: {video_meta['width']}x{video_meta['height']}. "
+                        f"Short edge must be >= {settings.min_video_short_edge}, Long edge must be >= {settings.min_video_long_edge}"
              )
 
         # ── 6. Quality Manifest Validation ────────────────────────────────────

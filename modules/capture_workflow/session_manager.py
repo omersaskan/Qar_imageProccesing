@@ -55,6 +55,7 @@ class SessionManager:
             self._save_no_lock(session)
 
     def get_session(self, session_id: str) -> Optional[CaptureSession]:
+        session_id = validate_identifier(session_id, "Session ID")
         file_path = self.sessions_dir / f"{session_id}.json"
         if not file_path.exists():
             return None
@@ -66,6 +67,7 @@ class SessionManager:
         return self.update_session(session_id, new_status=new_status)
 
     def update_session(self, session_id: str, new_status: Optional[AssetStatus] = None, **fields: Any) -> CaptureSession:
+        session_id = validate_identifier(session_id, "Session ID")
         file_path = self.sessions_dir / f"{session_id}.json"
         with FileLock(file_path):
             session = self.get_session(session_id)
@@ -96,6 +98,7 @@ class SessionManager:
             return session
     
     def get_capture_path(self, session_id: str) -> Path:
+        session_id = validate_identifier(session_id, "Session ID")
         return self.captures_dir / session_id
 
     def reset_session(self, session_id: str, to_status: AssetStatus = AssetStatus.CREATED) -> CaptureSession:
@@ -103,6 +106,7 @@ class SessionManager:
         Safely resets a session from RECAPTURE_REQUIRED or FAILED back to a processing state.
         Clears failure reasons and stale validation/export artifacts.
         """
+        session_id = validate_identifier(session_id, "Session ID")
         file_path = self.sessions_dir / f"{session_id}.json"
         with FileLock(file_path):
             session = self.get_session(session_id)

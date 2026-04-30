@@ -40,7 +40,9 @@ tmp_err.txt
 reconstruction.log
 reconstruction_finish.log
 
-# IDEs
+# --- Test Fixtures Allowlist ---
+# Keep runtime media ignored, but allow curated test fixtures
+!tests/fixtures/**
 .vscode/
 .idea/
 

@@ -45,16 +45,23 @@ class PackagePublisher:
         if status == "fail":
             raise ValueError(f"Publish failed: Asset {asset_id} failed validation. Failure is terminal.")
         
-        if status == "review":
-            if not self.registry.has_approval(asset_id):
-                raise ValueError(f"Publish failed: Asset {asset_id} is in 'review' status and lacks manual approval.")
-
-        self._validate_export_urls(export_urls)
-            
-        # 2. Get Metadata from Registry
+        # Phase B Safety: AI-generated or review-flagged assets MUST have manual approval
         metadata = self.registry.get_asset(asset_id)
         if not metadata:
             raise ValueError(f"Metadata not found in registry for {asset_id}")
+
+        needs_review = (
+            status == "review" or 
+            metadata.ai_generated or 
+            metadata.requires_manual_review
+        )
+
+        if needs_review:
+            if not self.registry.has_approval(asset_id):
+                reason = "is in 'review' status" if status == "review" else "is AI-generated or flagged for review"
+                raise ValueError(f"Publish failed: Asset {asset_id} {reason} and lacks manual approval.")
+
+        self._validate_export_urls(export_urls)
             
         # 3. Create AssetPackage
         package = AssetPackage(

@@ -18,11 +18,28 @@ jobs:
       with:
         python-version: '3.11'
         
-    - name: Install dependencies
+    - name: Install System Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ffmpeg
+        
+    - name: Install Python dependencies
       run: |
         python -m pip install --upgrade pip
         python -m pip install -e ".[dev]"
         
-    - name: Run Pytest
+    - name: UI Static Check (Node)
+      run: |
+        node --check ui/app.js
+        
+    - name: Run Smoke Check
+      run: |
+        bash scripts/smoke_check.sh
+        
+    - name: Run Production Hardening Regression Tests
+      run: |
+        python -m pytest tests/test_production_hardening.py tests/test_production_hardening_v2.py
+        
+    - name: Run Full Test Suite
       run: |
         python -m pytest

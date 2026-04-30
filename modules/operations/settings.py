@@ -112,8 +112,8 @@ class Settings(BaseSettings):
     min_video_duration_sec: float = Field(15.0, validation_alias="MIN_VIDEO_DURATION_SEC")
     max_video_duration_sec: float = Field(120.0, validation_alias="MAX_VIDEO_DURATION_SEC")
     min_video_fps: float = Field(20.0, validation_alias="MIN_VIDEO_FPS")
-    min_video_width: int = Field(1280, validation_alias="MIN_VIDEO_WIDTH")
-    min_video_height: int = Field(720, validation_alias="MIN_VIDEO_HEIGHT")
+    min_video_short_edge: int = Field(720, validation_alias="MIN_VIDEO_SHORT_EDGE")
+    min_video_long_edge: int = Field(1280, validation_alias="MIN_VIDEO_LONG_EDGE")
     
     video_probe_timeout_sec: int = Field(30, validation_alias="VIDEO_PROBE_TIMEOUT_SEC")
     video_normalize_timeout_sec: int = Field(180, validation_alias="VIDEO_NORMALIZE_TIMEOUT_SEC")

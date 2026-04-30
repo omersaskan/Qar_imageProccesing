@@ -104,6 +104,8 @@ class AssetMetadata(BaseModel):
     bbox: Dict[str, Any] = Field(default_factory=dict)
     pivot_offset: Dict[str, Any] = Field(default_factory=dict)
     quality_grade: str = "C" # A, B, C, D
+    ai_generated: bool = False
+    requires_manual_review: bool = False
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class ProductPhysicalProfile(BaseModel):
