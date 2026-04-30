@@ -267,7 +267,20 @@ async def upload_video(
     def cleanup_on_failure(reason: str):
         if not session_created:
             if capture_path.exists():
-                shutil.rmtree(capture_path)
+                try:
+                    rejected_root = Path(settings.data_root) / "rejected"
+                    rejected_root.mkdir(parents=True, exist_ok=True)
+                    target_path = rejected_root / session_id
+                    if target_path.exists():
+                        shutil.rmtree(target_path)
+                    shutil.move(str(capture_path), str(target_path))
+                    # Save the reason
+                    with open(target_path / "rejection_reason.txt", "w") as f:
+                        f.write(reason)
+                    logger.info(f"Rejected session {session_id} moved to rejected folder for diagnostics. Reason: {reason}")
+                except Exception as e:
+                    logger.error(f"Failed to move rejected session to rejected folder: {e}")
+                    shutil.rmtree(capture_path, ignore_errors=True)
         else:
             session_manager.update_session(
                 session_id, 
@@ -299,36 +312,32 @@ async def upload_video(
         if free_disk_gb < settings.min_free_disk_gb:
             raise HTTPException(status_code=507, detail="Insufficient disk space")
 
-    # ── 3. Temporary Save ─────────────────────────────────────────────────
-    import tempfile
-    fd, temp_path = tempfile.mkstemp(suffix=Path(file.filename).suffix)
-    temp_path = Path(temp_path)
+    # ── 3. Storage Setup & Direct Streaming ───────────────────────────────
+    video_dir = capture_path / "video"
+    video_dir.mkdir(parents=True, exist_ok=True)
+    (capture_path / "reports").mkdir(parents=True, exist_ok=True)
+
+    # Save original directly to captures (shows progress on disk)
+    original_ext = Path(file.filename).suffix
+    original_path = video_dir / f"original_capture{original_ext}"
     
     try:
-        with os.fdopen(fd, 'wb') as f:
+        logger.info(f"Streaming upload for {session_id} directly to {original_path}")
+        with open(original_path, "wb") as f:
             shutil.copyfileobj(file.file, f)
             
-        file_size_mb = os.path.getsize(temp_path) / (1024 * 1024)
+        file_size_mb = os.path.getsize(original_path) / (1024 * 1024)
         if file_size_mb == 0 or file_size_mb < 0.1:
             raise HTTPException(status_code=400, detail="Video file is too small or empty.")
         if file_size_mb > settings.max_upload_mb:
             raise HTTPException(status_code=400, detail="File size exceeds maximum.")
 
-        # ── 4. Storage Setup & Normalization ──────────────────────────────────
-        video_dir = capture_path / "video"
-        video_dir.mkdir(parents=True, exist_ok=True)
-        (capture_path / "reports").mkdir(parents=True, exist_ok=True)
-
+        # ── 4. Normalization ──────────────────────────────────────────────────
         video_path = video_dir / "raw_video.mp4"
-        
-        # Save original for diagnostics
-        original_ext = Path(file.filename).suffix
-        original_path = video_dir / f"original_capture{original_ext}"
-        shutil.copy2(temp_path, original_path)
         
         # FFmpeg normalization handles WebM/MOV/AVI and converts to standard H.264
         normalize_video(
-            temp_path, 
+            original_path, 
             video_path, 
             ffmpeg_path=ffmpeg_resolved, 
             ffprobe_path=ffprobe_resolved,
@@ -351,10 +360,12 @@ async def upload_video(
         long_edge = max(video_meta["width"], video_meta["height"])
         
         if short_edge < settings.min_video_short_edge or long_edge < settings.min_video_long_edge:
+             msg = (f"Video resolution too low: {video_meta['width']}x{video_meta['height']}. "
+                    f"Short edge must be >= {settings.min_video_short_edge}, Long edge must be >= {settings.min_video_long_edge}")
+             logger.warning(f"Upload rejected for {session_id}: {msg}")
              raise HTTPException(
                  status_code=400, 
-                 detail=f"Video resolution too low: {video_meta['width']}x{video_meta['height']}. "
-                        f"Short edge must be >= {settings.min_video_short_edge}, Long edge must be >= {settings.min_video_long_edge}"
+                 detail=msg
              )
 
         # ── 6. Quality Manifest Validation ────────────────────────────────────
@@ -386,9 +397,11 @@ async def upload_video(
         v_frame_count = video_meta["frame_count"]
         tolerance = settings.ar_manifest_frame_count_tolerance
         if m_total_frames > v_frame_count * (1.0 + tolerance):
+            msg = f"Manifest total_frame_count ({m_total_frames}) exceeds video frame count ({v_frame_count}) by >{tolerance*100}%"
+            logger.warning(f"Upload rejected for {session_id}: {msg}")
             raise HTTPException(
                 status_code=422, 
-                detail=f"Manifest total_frame_count ({m_total_frames}) exceeds video frame count ({v_frame_count}) by >{tolerance*100}%"
+                detail=msg
             )
         
         # ── 7. AR Quality Gate Enforcement ───────────────────────────────────
@@ -430,7 +443,10 @@ async def upload_video(
                         rejection_reasons.append("Bottle requires both cap and base coverage")
 
         if rejection_reasons:
-             raise HTTPException(
+            logger.warning(
+                f"Capture failed quality gate for {session_id}. Reasons: {rejection_reasons}"
+            )
+            raise HTTPException(
                 status_code=422, 
                 detail={"message": "Capture failed quality gate.", "reasons": rejection_reasons}
             )
@@ -465,8 +481,8 @@ async def upload_video(
         cleanup_on_failure(str(e))
         raise HTTPException(status_code=500, detail=f"Internal upload error: {str(e)}")
     finally:
-        if temp_path.exists():
-            temp_path.unlink()
+        # Direct streaming to captures; cleanup handles directory if needed
+        pass
 
 
 @app.get("/api/products", dependencies=[Depends(verify_api_key)])

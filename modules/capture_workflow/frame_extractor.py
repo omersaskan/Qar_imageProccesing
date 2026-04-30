@@ -185,10 +185,10 @@ class FrameExtractor:
             "sample_rate": self.thresholds.frame_sample_rate,
             "min_blur": self.thresholds.min_blur_score,
             "min_similarity": self.thresholds.min_similarity_score,
-            "seg_backend": self.seg_config.provider,
-            "seg_model": self.seg_config.model_path if hasattr(self.seg_config, "model_path") else "default",
-            "rembg_model": getattr(self.seg_config, "rembg_model", "u2net"),
-            "rembg_threshold": getattr(self.seg_config, "rembg_threshold", 0.5),
+            "seg_backend": self.seg_config.backend,
+            "seg_model": getattr(self.seg_config, "rembg_model_name", "default"),
+            "rembg_model": getattr(self.seg_config, "rembg_model_name", "u2net"),
+            "rembg_threshold": getattr(self.seg_config, "rembg_mask_threshold", 50),
         }
         current_hash = hashlib.md5(json.dumps(cache_data, sort_keys=True).encode()).hexdigest()
         

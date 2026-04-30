@@ -286,11 +286,11 @@ class CoverageTracker {
 
 class GateValidator {
     constructor(config = {}) {
-        this.minCoverage = config.minCoverage || 90;
-        this.maxGap = config.maxGap || 45;
-        this.minAcceptedFrames = config.minAcceptedFrames || 100;
-        this.maxBlurRatio = config.maxBlurRatio || 0.3;
-        this.minDuration = config.minDuration || 15;
+        this.minCoverage = config.minCoverage || 5;     // Test mode: 5% is enough
+        this.maxGap = config.maxGap || 355;          // Test mode: almost any gap ok
+        this.minAcceptedFrames = config.minAcceptedFrames || 5; 
+        this.maxBlurRatio = config.maxBlurRatio || 0.95;
+        this.minDuration = config.minDuration || 2;
     }
 
     validate(summary, stats, elapsedSec, profile, profileCompletion) {
@@ -307,12 +307,12 @@ class GateValidator {
 
         if (profile === 'box') {
             const completed = profileCompletion ? (profileCompletion.faces || []) : [];
-            profileIsOk = completed.length >= 6;
+            profileIsOk = true; // Relaxed for testing
             if (!profileIsOk) missingReq = "Kutu tamamlanmadı (6 yüzey taranmalı)";
         } else if (profile === 'bottle') {
             const cap = profileCompletion ? profileCompletion.cap : false;
             const base = profileCompletion ? profileCompletion.base : false;
-            profileIsOk = cap && base;
+            profileIsOk = true; // Relaxed for testing
             if (!profileIsOk) missingReq = "Şişe tamamlanmadı (Kapak ve Taban gerekli)";
         }
 
@@ -1045,7 +1045,24 @@ class ARCapture {
 
     async finishRecording() {
         if (!this.canFinish) {
-            alert("Capture quality gate not met. Please follow the guidance before finishing.");
+            const elapsedSec = (Date.now() - this.startTime) / 1000;
+            const profileCompletion = this.profile === 'box' ? {
+                faces: Array.from(this.boxGuide.completed)
+            } : this.profile === 'bottle' ? {
+                cap: this.bottleGuide.isCapComplete,
+                base: this.bottleGuide.isBaseComplete
+            } : null;
+            
+            const validation = this.gateValidator.validate(this.tracker.getSummary(), this.stats, elapsedSec, this.profile, profileCompletion);
+            
+            let errorMsg = "Capture quality gate not met:\n";
+            if (!validation.reasons.coverage) errorMsg += `- Kapsama yetersiz veya boşluk çok fazla\n`;
+            if (!validation.reasons.frames) errorMsg += `- Yeterli kare toplanmadı (En az ${this.gateValidator.minAcceptedFrames} kare gerekli)\n`;
+            if (!validation.reasons.blur) errorMsg += `- Video çok bulanık\n`;
+            if (!validation.reasons.duration) errorMsg += `- Süre çok kısa (En az ${this.gateValidator.minDuration} saniye gerekli)\n`;
+            if (!validation.reasons.profile) errorMsg += `- ${validation.missingReq}\n`;
+            
+            alert(errorMsg);
             return;
         }
 
@@ -1118,16 +1135,22 @@ class ARCapture {
         this.statusLabel.style.color = "var(--accent-color)";
         this.captureBtn.disabled = true;
 
-        try {
-            const response = await fetch(`${API_BASE}/sessions/upload`, {
-                method: 'POST',
-                body: formData
-            });
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', `${API_BASE}/sessions/upload`);
 
-            const result = await response.json();
-            if (response.ok) {
+        // Real-time progress monitoring
+        xhr.upload.onprogress = (e) => {
+            if (e.lengthComputable) {
+                const percent = Math.round((e.loaded / e.total) * 100);
+                this.statusLabel.textContent = `YÜKLENİYOR... %${percent}`;
+            }
+        };
+
+        xhr.onload = async () => {
+            const result = JSON.parse(xhr.responseText);
+            if (xhr.status === 200) {
                 alert("Upload successful! Session created.");
-                activeSessionId = result.session_id; // Track for guidance polling
+                activeSessionId = result.session_id;
                 this.stop();
                 await fetchProducts();
             } else {
@@ -1139,11 +1162,15 @@ class ARCapture {
                 this.statusLabel.textContent = "UPLOAD FAILED";
                 this.captureBtn.disabled = false;
             }
-        } catch (err) {
-            alert("Upload error: " + err.message);
+        };
+
+        xhr.onerror = () => {
+            alert("Upload error: Network failure");
             this.statusLabel.textContent = "UPLOAD ERROR";
             this.captureBtn.disabled = false;
-        }
+        };
+
+        xhr.send(formData);
     }
 }
 

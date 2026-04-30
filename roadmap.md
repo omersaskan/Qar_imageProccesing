@@ -164,6 +164,24 @@ Başarı Kriteri:
 
 ---
 
+### Faz B — Hardening (Altyapı ve Güvenlik) [DEVAM EDİYOR]
+Hedef:
+- binary resolution güvenliğini sağlamak
+- registry güvenlik guardlarını devreye almak
+- hatalı uploadları detaylı loglamak
+
+Teslim:
+- robust binary resolver
+- state transition protection
+- diagnostic logging
+
+Başarı Kriteri:
+- sistem eksik bağımlılıkla başlamıyor
+- kalite kapısı hataları loglarda görünüyor
+- yayınlanmış assetler koruma altında
+
+---
+
 ## 3. Öncelik Sırası
 
 ### Önce yapılmalı

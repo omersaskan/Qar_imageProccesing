@@ -336,5 +336,40 @@ Bu dosya, agent'ın projeyi modüler ve kontrollü şekilde inşa etmesi için g
 
 ---
 
+## Faz B — Hardening (Altyapı ve Güvenlik)
+
+### T-033 — Robust Binary Resolver ve Preflight kontrolünü yaz
+**Amaç:** Binaries (ffmpeg, colmap, openmvs) çözünürlüğünü ve startup kontrolünü garantilemek.
+
+**Bağımlılık:** T-030
+
+---
+
+### T-034 — Quality Gate Diagnostic Loglama ekle
+**Amaç:** Upload reddedildiğinde nedenini loglarda açıkça görmek.
+
+**Bağımlılık:** T-033
+
+---
+
+### T-035 — Registry Security Guardları uygula
+**Amaç:** AI-gen ve review bekleyen assetlerin üretim hattına girmesini engellemek.
+
+**Bağımlılık:** T-024
+
+---
+
+### T-036 — State Transition Protection (Published Lock) ekle
+**Amaç:** Yayınlanmış assetlerin doğrudan değiştirilmesini önlemek.
+
+**Bağımlılık:** T-035
+
+---
+
+### T-037 — Phase B Regression Testlerini yaz
+**Amaç:** Tüm hardening adımlarını otomatik testlerle doğrulamak.
+
+**Bağımlılık:** T-036
+
 ## Son Not
 Agent görevleri sırayla ele almalı; reconstruction ve export oturmadan registry/publish katmanına geçmemeli.
