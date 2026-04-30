@@ -29,6 +29,7 @@ class JobManager:
         product_id = validate_identifier(draft.product_id, "Product ID")
         
         # 1. Path Safety
+        ensure_dir(self.reconstructions_dir)
         job_dir = validate_safe_path(self.reconstructions_dir, job_id)
         
         # 2. Ensure unified storage directory exists
@@ -84,7 +85,9 @@ class JobManager:
 
     def update_job_status(self, job_id: str, status: ReconstructionStatus, failure_reason: Optional[str] = None) -> ReconstructionJob:
         job_id = validate_identifier(job_id, "Job ID")
-        file_path = os.path.join(self.reconstructions_dir, job_id, "job.json")
+        job_dir = os.path.join(self.reconstructions_dir, job_id)
+        ensure_dir(job_dir)
+        file_path = os.path.join(job_dir, "job.json")
         
         with FileLock(file_path):
             job = self.get_job(job_id)

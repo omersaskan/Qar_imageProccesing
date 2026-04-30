@@ -1,4 +1,8 @@
-const API_BASE = window.MESHYSIZ_API_BASE || (window.location.origin + "/api");
+const API_BASE = window.MESHYSIZ_API_BASE || (
+    window.location.protocol === "file:" 
+    ? "http://localhost:8001/api" 
+    : `${window.location.origin}/api`
+);
 
 function escapeHTML(str) {
     if (!str) return "";
@@ -76,19 +80,10 @@ async function pollGuidance() {
     // If we have an active session or a session needing recapture, track it
     const activeProducts = state.products.filter(p => p.has_active_session || p.status === 'processing');
     if (activeProducts.length > 0) {
-        // For simplicity, take the first one or the one the user just uploaded
-        // In a real app, this would be tied to a selection
-        const productId = activeProducts[0].id;
-        try {
-            // Get history to find the session ID
-            const resp = await fetch(`${API_BASE}/products/${productId}/history`);
-            const history = await resp.json();
-            if (history.length > 0) {
-                const latestSession = history[0].asset_id;
-                await fetchGuidance(latestSession);
-            }
-        } catch (err) {
-            console.warn("Guidance polling failed:", err);
+        // Use activeSessionId if available (just uploaded), otherwise fallback to state
+        const sessionId = activeSessionId || (activeProducts[0].history && activeProducts[0].history[0] ? activeProducts[0].history[0].asset_id : null);
+        if (sessionId) {
+            await fetchGuidance(sessionId);
         }
     } else {
         guidanceSection.classList.add('hidden');
@@ -1132,6 +1127,7 @@ class ARCapture {
             const result = await response.json();
             if (response.ok) {
                 alert("Upload successful! Session created.");
+                activeSessionId = result.session_id; // Track for guidance polling
                 this.stop();
                 await fetchProducts();
             } else {

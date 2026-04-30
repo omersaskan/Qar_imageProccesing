@@ -28,3 +28,10 @@ class OutputManifest(BaseModel):
     texturing_status: str = "absent" # "absent", "real", "degraded"
     is_stub: bool = False
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    # --- Phase B: Safety & Generative Info ---
+    ai_generated: bool = False
+    geometry_source: str = "photogrammetry"
+    production_status: str = "production_candidate"
+    requires_manual_review: bool = False
+    may_override_recapture_required: bool = False

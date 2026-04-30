@@ -516,21 +516,26 @@ class IngestionWorker:
             from modules.shared_contracts.models import ReconstructionJobDraft
 
             frames_dir = self.session_manager.captures_dir / session.session_id / "frames"
-            if not frames_dir.exists() or not list(frames_dir.glob("*.jpg")):
-                session = self._handle_frame_extraction(session)
-                if session.status == AssetStatus.RECAPTURE_REQUIRED:
-                    return session
-
-            input_frames = [str(f) for f in frames_dir.glob("*.jpg")]
+            
+            # Prioritize existing extracted frames from session manifest, check existence
+            input_frames = []
+            if session.extracted_frames:
+                for f in session.extracted_frames:
+                    if Path(f).exists():
+                        input_frames.append(f)
+            
+            # Fallback if no valid extracted frames
             if not input_frames:
-                raise IrrecoverableError(
-                    f"No frames available for reconstruction in {session.session_id} even after extraction attempt."
-                )
+                if frames_dir.exists():
+                    input_frames = [str(f) for f in frames_dir.glob("*.jpg")]
+            
+            if not input_frames:
+                raise IrrecoverableError(f"No frames found for reconstruction in {session.session_id}")
 
-            # TICKET-007: Re-use saved coverage report from frame extraction.
-            # This avoids running a second CoverageAnalyzer.analyze_coverage() call.
             reports_dir = self.session_manager.get_capture_path(session.session_id) / "reports"
+            reports_dir.mkdir(parents=True, exist_ok=True)
             cov_path = reports_dir / "coverage_report.json"
+            
             if cov_path.exists():
                 with open(cov_path, "r", encoding="utf-8") as f:
                     coverage_report = json.load(f)
@@ -540,18 +545,8 @@ class IngestionWorker:
                 atomic_write_json(cov_path, coverage_report)
 
             if coverage_report["overall_status"] != "sufficient":
-                reasons = (
-                    "; ".join(coverage_report.get("reasons", []))
-                    or "insufficient viewpoint diversity"
-                )
-                return self._mark_session_needs_recapture(
-                    session,
-                    reason=f"Capture quality insufficient before reconstruction: {reasons}",
-                    coverage_score=float(coverage_report.get("coverage_score", 0.0)),
-                    extracted_frames=input_frames,
-                )
+                return self._mark_session_needs_recapture(session, "Insufficient coverage")
 
-            # Load reports if they exist
             quality_report = {}
             qual_path = reports_dir / "quality_report.json"
             if qual_path.exists():
@@ -560,7 +555,8 @@ class IngestionWorker:
 
             manager = JobManager(data_root=str(self.data_root))
             runner = ReconstructionRunner()
-            job_id = f"job_{session.session_id}"
+            # Unique job_id using timestamp
+            job_id = f"job_{session.session_id}_{int(time.time())}"
 
             draft = ReconstructionJobDraft(
                 job_id=job_id,
@@ -574,8 +570,13 @@ class IngestionWorker:
 
             job = manager.create_job(draft)
             manager.update_job_status(job.job_id, ReconstructionStatus.RUNNING)
-            manifest = runner.run(job)
-            manager.update_job_status(job.job_id, ReconstructionStatus.COMPLETED)
+            try:
+                manifest = runner.run(job)
+            except Exception as e:
+                manager.update_job_status(job.job_id, ReconstructionStatus.FAILED, failure_reason=str(e))
+                raise
+            else:
+                manager.update_job_status(job.job_id, ReconstructionStatus.COMPLETED)
 
             return self._persist_session(
                 session,
@@ -587,28 +588,10 @@ class IngestionWorker:
                 failure_reason=None,
             )
         except (InsufficientInputError, InsufficientReconstructionError) as e:
-            # We treat both as RECAPTURE_REQUIRED
-            return self._mark_session_needs_recapture(
-                session,
-                reason=f"Reconstruction failed after multiple attempts: {str(e)}",
-            )
+            return self._mark_session_needs_recapture(session, str(e))
         except IrrecoverableError:
             raise
         except Exception as e:
-            msg = str(e)
-            irrecoverable_keywords = {
-                "not configured",
-                "prohibited",
-                "VIOLATION",
-                "unrecognised option",
-                "Failed to parse options",
-                "CUDA",
-                "GPU failure",
-            }
-            if any(k in msg for k in irrecoverable_keywords):
-                raise IrrecoverableError(
-                    f"Engine configuration or deterministic failure: {msg}"
-                )
             raise RecoverableError(f"Engine failure: {e}")
 
     def _handle_budget_exceeded_retry(self, session: CaptureSession) -> CaptureSession:
