@@ -45,7 +45,7 @@ class LegacyProvider(SegmentationPreviewProvider):
             "mask_height": h,
             "mask": polygon,
             "confidence": 0.5, # Legacy is low confidence
-            "fallback_used": False
+            "fallback_used": True
         }
 
 class SAM2Provider(SegmentationPreviewProvider):
