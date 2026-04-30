@@ -57,3 +57,10 @@ models/
 *.pth
 *.onnx
 *.safetensors
+
+# Test Artifacts
+test_video_valid.*
+smoke_test_*.webm
+smoke_test_*.mp4
+temp_*.mp4
+

@@ -308,6 +308,10 @@ async def upload_video(
         if fps <= 0 or frame_count <= 0:
             raise HTTPException(status_code=400, detail="Invalid video metadata: FPS and frame count must be positive.")
             
+        if fps < settings.min_video_fps:
+            raise HTTPException(status_code=400, detail=f"Video FPS too low: {fps:.1f}. Minimum required: {settings.min_video_fps}.")
+
+            
         duration = frame_count / fps
         duration = max(0.0, duration) # Ensure non-negative
         if duration < settings.min_video_duration_sec:
