@@ -164,6 +164,19 @@ class AssetRegistry:
         if asset_id not in data["assets"]:
             raise ValueError(f"Asset {asset_id} does not belong to product {product_id} or doesn't exist.")
         
+        asset_info = data["assets"][asset_id]
+        metadata = asset_info.get("metadata", {})
+        
+        # --- Hardening Guards (Phase B Safety) ---
+        if metadata.get("ai_generated"):
+            raise ValueError(f"Active Pointer Rejection: Asset {asset_id} is AI-generated and cannot be set as the active production pointer.")
+            
+        if metadata.get("requires_manual_review") and not asset_info.get("is_approved"):
+            raise ValueError(f"Active Pointer Rejection: Asset {asset_id} requires manual review and has not been approved.")
+            
+        if metadata.get("geometry_source", "photogrammetry") != "photogrammetry":
+            raise ValueError(f"Active Pointer Rejection: Asset {asset_id} source is '{metadata.get('geometry_source')}', not 'photogrammetry'.")
+
         ptr_file = self._get_active_file(product_id)
         # Ensure dir exists before write
         ensure_dir(ptr_file.parent)
@@ -198,6 +211,10 @@ class AssetRegistry:
             # 2. Manual Review Guard
             if metadata.get("requires_manual_review") and not asset_info.get("is_approved"):
                 raise ValueError(f"Publishing rejected: Asset {asset_id} requires manual review and has not been approved.")
+
+            # 3. Geometry Source Guard
+            if metadata.get("geometry_source", "photogrammetry") != "photogrammetry":
+                 raise ValueError(f"Publishing rejected: Asset {asset_id} source is '{metadata.get('geometry_source')}', not 'photogrammetry'.")
 
             # 1. Update publish state
             data["assets"][asset_id]["publish_state"] = "published"
@@ -244,6 +261,9 @@ class AssetRegistry:
 
     def update_publish_state(self, asset_id: str, state: str) -> None:
         """Updates the publish state (e.g., 'published', 'draft')."""
+        if state == "published":
+             raise ValueError("Direct state update to 'published' is prohibited. Use publish_asset() to ensure safety guards are applied.")
+             
         product_id = self._find_product_by_asset(asset_id)
         if not product_id:
             raise ValueError(f"Asset {asset_id} not found")

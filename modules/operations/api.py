@@ -276,10 +276,16 @@ async def upload_video(
             )
 
     # ── 2. Environment & Disk Preflight ───────────────────────────────────
-    if not settings.ffprobe_path or not settings.resolve_executable(settings.ffprobe_path):
+    ffmpeg_resolved = settings.resolve_executable(settings.ffmpeg_path)
+    ffprobe_resolved = settings.resolve_executable(settings.ffprobe_path)
+    
+    if not ffmpeg_resolved or not ffprobe_resolved:
+        missing = []
+        if not ffmpeg_resolved: missing.append("ffmpeg")
+        if not ffprobe_resolved: missing.append("ffprobe")
         raise HTTPException(
             status_code=503, 
-            detail="System Environment Incomplete: ffprobe binary missing. Contact administrator."
+            detail=f"System Environment Incomplete: {', '.join(missing)} binary missing. Contact administrator."
         )
 
     missing_ml = settings.check_ml_deps()
@@ -324,8 +330,8 @@ async def upload_video(
         normalize_video(
             temp_path, 
             video_path, 
-            ffmpeg_path=settings.ffmpeg_path, 
-            ffprobe_path=settings.ffprobe_path,
+            ffmpeg_path=ffmpeg_resolved, 
+            ffprobe_path=ffprobe_resolved,
             timeout=settings.video_normalize_timeout_sec
         )
         
