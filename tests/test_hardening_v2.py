@@ -24,6 +24,204 @@ def test_output_manifest_safety_defaults():
     assert manifest.requires_manual_review is False
     assert manifest.may_override_recapture_required is False
 
+def test_reconstruction_triggers_extraction_if_missing(tmp_path):
+    data_root = tmp_path / "data"
+    data_root.mkdir()
+    (data_root / "captures").mkdir()
+    (data_root / "reconstructions").mkdir()
+    
+    worker = IngestionWorker(data_root=str(data_root))
+    
+    session_id = "test_trigger_extraction"
+    session_dir = data_root / "captures" / session_id
+    session_dir.mkdir()
+    (session_dir / "video").mkdir()
+    video_path = session_dir / "video" / "raw_video.mp4"
+    video_path.write_text("dummy video")
+    
+    # Session starts CAPTURED but has no frames
+    session = CaptureSession(
+        session_id=session_id,
+        product_id="p1",
+        operator_id="o1",
+        status=AssetStatus.CAPTURED,
+        extracted_frames=[] # EMPTY
+    )
+    
+    with pytest.MonkeyPatch().context() as m:
+        # 1. Mock _handle_frame_extraction
+        def mock_extract(s):
+            frames_dir = data_root / "captures" / s.session_id / "frames"
+            frames_dir.mkdir(parents=True, exist_ok=True)
+            f1 = frames_dir / "f1.jpg"
+            f1.write_text("data")
+            s.extracted_frames = [str(f1)]
+            return s
+        m.setattr(worker, "_handle_frame_extraction", mock_extract)
+        
+        # 2. Mock persistence and other side effects
+        m.setattr(worker, "_persist_session", lambda s, **f: s)
+        m.setattr(worker, "_update_guidance", lambda s: None)
+        
+        # 3. Mock JobManager to just capture the draft
+        captured_draft = None
+        class MockManager:
+            def __init__(self, **kwargs): pass
+            def create_job(self, draft):
+                nonlocal captured_draft
+                captured_draft = draft
+                # Mock a job object
+                class MockJob:
+                    job_id = draft.job_id
+                    job_dir = str(data_root / "reconstructions" / draft.job_id)
+                return MockJob()
+            def update_job_status(self, *args, **kwargs): pass
+            
+        m.setattr("modules.reconstruction_engine.job_manager.JobManager", MockManager)
+        
+        # 4. Mock Runner
+        class MockRunner:
+            def run(self, job):
+                return OutputManifest(
+                    job_id=job.job_id, mesh_path="m.ply", log_path="l.txt", processing_time_seconds=1.0
+                )
+        m.setattr("modules.reconstruction_engine.runner.ReconstructionRunner", MockRunner)
+        
+        # 5. Mock coverage
+        (session_dir / "reports").mkdir()
+        with open(session_dir / "reports" / "coverage_report.json", "w") as f:
+            json.dump({"overall_status": "sufficient", "coverage_score": 0.9}, f)
+            
+        # 6. EXECUTE
+        worker._handle_reconstruction(session)
+        
+        assert captured_draft is not None
+        assert len(captured_draft.input_frames) == 1
+        assert "f1.jpg" in captured_draft.input_frames[0]
+
+def test_budget_retry_uses_reconstruction_job_id(tmp_path):
+    data_root = tmp_path / "data"
+    data_root.mkdir()
+    (data_root / "captures").mkdir()
+    (data_root / "reconstructions").mkdir()
+    
+    worker = IngestionWorker(data_root=str(data_root))
+    
+    session_id = "test_budget_job_id"
+    # Create a job with a unique ID
+    unique_job_id = f"job_{session_id}_999999"
+    manager = JobManager(data_root=str(data_root))
+    
+    # We need a draft to create a job
+    draft = ReconstructionJobDraft(
+        job_id=unique_job_id,
+        capture_session_id=session_id,
+        input_frames=["f1.jpg"],
+        product_id="p1"
+    )
+    manager.create_job(draft)
+    
+    session = CaptureSession(
+        session_id=session_id,
+        product_id="p1",
+        operator_id="o1",
+        status=AssetStatus.PROCESSING_BUDGET_EXCEEDED,
+        reconstruction_job_id=unique_job_id
+    )
+    
+    with pytest.MonkeyPatch().context() as m:
+        # Mock remesh_retry
+        m.setattr("modules.reconstruction_engine.runner.ReconstructionRunner.remesh_retry", 
+                  lambda self, job, depth, trim: OutputManifest(job_id=job.job_id, mesh_path="m.ply", log_path="l.txt", processing_time_seconds=1.0))
+        
+        worker._handle_budget_exceeded_retry(session)
+        # If it didn't raise IrrecoverableError, it found the job.
+
+def test_unique_job_ids_no_collision(tmp_path):
+    data_root = tmp_path / "data"
+    data_root.mkdir()
+    (data_root / "captures").mkdir()
+    (data_root / "reconstructions").mkdir()
+    
+    worker = IngestionWorker(data_root=str(data_root))
+    session_id = "test_collision"
+    
+    # Setup session and frames
+    session_dir = data_root / "captures" / session_id
+    session_dir.mkdir()
+    frames_dir = session_dir / "frames"
+    frames_dir.mkdir()
+    (frames_dir / "f1.jpg").write_text("d")
+    
+    session = CaptureSession(
+        session_id=session_id,
+        product_id="p1",
+        operator_id="o1",
+        status=AssetStatus.CAPTURED,
+        extracted_frames=[str(frames_dir / "f1.jpg")]
+    )
+    
+    (session_dir / "reports").mkdir()
+    with open(session_dir / "reports" / "coverage_report.json", "w") as f:
+        json.dump({"overall_status": "sufficient", "coverage_score": 0.9}, f)
+        
+    job_ids = []
+    with pytest.MonkeyPatch().context() as m:
+        original_create = JobManager.create_job
+        def wrapped_create(self, draft):
+            job_ids.append(draft.job_id)
+            return original_create(self, draft)
+        m.setattr(JobManager, "create_job", wrapped_create)
+        m.setattr("modules.reconstruction_engine.runner.ReconstructionRunner.run", lambda self, job: OutputManifest(
+            job_id=job.job_id, mesh_path="m.ply", log_path="l.txt", processing_time_seconds=1.0
+        ))
+        
+        # Trigger two attempts immediately
+        worker._handle_reconstruction(session)
+        worker._handle_reconstruction(session)
+        
+        assert len(job_ids) == 2
+        assert job_ids[0] != job_ids[1]
+        assert "job_" in job_ids[0]
+
+def test_coverage_recapture_reasons(tmp_path):
+    data_root = tmp_path / "data"
+    data_root.mkdir()
+    (data_root / "captures").mkdir()
+    
+    worker = IngestionWorker(data_root=str(data_root))
+    session_id = "test_coverage_reasons"
+    session_dir = data_root / "captures" / session_id
+    session_dir.mkdir()
+    frames_dir = session_dir / "frames"
+    frames_dir.mkdir()
+    f1 = frames_dir / "f1.jpg"
+    f1.write_text("d")
+    
+    session = CaptureSession(
+        session_id=session_id,
+        product_id="p1",
+        operator_id="o1",
+        status=AssetStatus.CAPTURED,
+        extracted_frames=[str(f1)]
+    )
+    
+    # Provide coverage report with hard_reasons
+    (session_dir / "reports").mkdir()
+    with open(session_dir / "reports" / "coverage_report.json", "w") as f:
+        json.dump({
+            "overall_status": "insufficient", 
+            "hard_reasons": ["Missing top view", "Too much blur"],
+            "coverage_score": 0.4
+        }, f)
+        
+    updated = worker._handle_reconstruction(session)
+    
+    assert updated.status == AssetStatus.RECAPTURE_REQUIRED
+    assert "Missing top view" in updated.failure_reason
+    assert "Too much blur" in updated.failure_reason
+    assert updated.coverage_score == 0.4
+
 def test_handle_reconstruction_prioritizes_extracted_frames(tmp_path):
     # Setup data root
     data_root = tmp_path / "data"

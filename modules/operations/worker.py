@@ -517,20 +517,33 @@ class IngestionWorker:
 
             frames_dir = self.session_manager.captures_dir / session.session_id / "frames"
             
-            # Prioritize existing extracted frames from session manifest, check existence
+            # ── 1. Resolve Input Frames ───────────────────────────────────────
             input_frames = []
             if session.extracted_frames:
-                for f in session.extracted_frames:
-                    if Path(f).exists():
-                        input_frames.append(f)
+                input_frames = [f for f in session.extracted_frames if Path(f).exists()]
             
-            # Fallback if no valid extracted frames
+            # b) if empty, call _handle_frame_extraction(session)
+            if not input_frames:
+                logger.info(f"No valid frames in manifest for {session.session_id}, triggering extraction...")
+                session = self._handle_frame_extraction(session)
+                if session.status == AssetStatus.RECAPTURE_REQUIRED:
+                    return session
+                
+                # c) after extraction, rebuild input_frames from session.extracted_frames
+                if session.extracted_frames:
+                    input_frames = [f for f in session.extracted_frames if Path(f).exists()]
+
+            # d) if still empty, fallback to frames_dir.glob("*.jpg") with a warning log
             if not input_frames:
                 if frames_dir.exists():
-                    input_frames = [str(f) for f in frames_dir.glob("*.jpg")]
+                    globbed = [str(f) for f in frames_dir.glob("*.jpg")]
+                    if globbed:
+                        logger.warning(f"Session {session.session_id} has no manifest frames but found {len(globbed)} files via glob fallback.")
+                        input_frames = globbed
             
+            # e) if still empty, fail
             if not input_frames:
-                raise IrrecoverableError(f"No frames found for reconstruction in {session.session_id}")
+                raise IrrecoverableError(f"No frames found for reconstruction in {session.session_id} after all resolution attempts.")
 
             reports_dir = self.session_manager.get_capture_path(session.session_id) / "reports"
             reports_dir.mkdir(parents=True, exist_ok=True)
@@ -545,7 +558,14 @@ class IngestionWorker:
                 atomic_write_json(cov_path, coverage_report)
 
             if coverage_report["overall_status"] != "sufficient":
-                return self._mark_session_needs_recapture(session, "Insufficient coverage")
+                reasons = coverage_report.get("hard_reasons") or coverage_report.get("reasons") or ["insufficient viewpoint diversity"]
+                reason_msg = "Capture quality insufficient before reconstruction: " + "; ".join(reasons)
+                return self._mark_session_needs_recapture(
+                    session, 
+                    reason=reason_msg,
+                    coverage_score=float(coverage_report.get("coverage_score", 0.0)),
+                    extracted_frames=input_frames
+                )
 
             quality_report = {}
             qual_path = reports_dir / "quality_report.json"
@@ -555,8 +575,8 @@ class IngestionWorker:
 
             manager = JobManager(data_root=str(self.data_root))
             runner = ReconstructionRunner()
-            # Unique job_id using timestamp
-            job_id = f"job_{session.session_id}_{int(time.time())}"
+            # Unique job_id using nanoseconds to prevent collisions
+            job_id = f"job_{session.session_id}_{time.time_ns()}"
 
             draft = ReconstructionJobDraft(
                 job_id=job_id,
@@ -607,11 +627,15 @@ class IngestionWorker:
             
             manager = JobManager(data_root=str(self.data_root))
             runner = ReconstructionRunner()
-            job_id = f"job_{session.session_id}"
+            
+            job_id = session.reconstruction_job_id
+            if not job_id:
+                raise IrrecoverableError(f"reconstruction_job_id missing for session {session.session_id}. Cannot retry budget exceeded.")
+                
             job = manager.get_job(job_id)
             
             if not job:
-                raise IrrecoverableError(f"Job {job_id} not found for retry.")
+                raise IrrecoverableError(f"Job {job_id} not found in storage for retry.")
 
             # Logic to lower settings:
             retry_count = session.retry_count or 0
