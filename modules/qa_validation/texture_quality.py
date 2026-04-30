@@ -146,7 +146,7 @@ class TextureQualityAnalyzer:
 
         # 3. Decision Logic (Hard Gates)
         reasons = []
-        status = "success"
+        status = "pass"
         
         # Thresholds (using safe defaults if settings missing)
         thr_black = getattr(self.thresholds, "max_black_pixel_ratio", 0.40)
@@ -261,7 +261,7 @@ class TextureQualityAnalyzer:
 
     def _error_result(self, message: str) -> Dict[str, Any]:
         return {
-            "texture_quality_status": "fail",
+        "texture_quality_status": "fail",
             "texture_quality_grade": "F",
             "texture_quality_reasons": [f"ERROR: {message}"],
             "black_pixel_ratio": 0.0,

@@ -159,13 +159,46 @@ class AssetRegistry:
         return ptr_file.read_text(encoding="utf-8").strip()
 
     def set_active_version(self, product_id: str, asset_id: str) -> None:
-        """Sets the active version for a product."""
+        """Sets the active version for a product. Atomic operation."""
         data = self._load_product_data(product_id)
         if asset_id not in data["assets"]:
             raise ValueError(f"Asset {asset_id} does not belong to product {product_id} or doesn't exist.")
         
         ptr_file = self._get_active_file(product_id)
+        # Ensure dir exists before write
+        ensure_dir(ptr_file.parent)
         with FileLock(ptr_file):
+            ptr_file.write_text(asset_id, encoding="utf-8")
+
+    def publish_asset(self, product_id: str, asset_id: str) -> None:
+        """
+        Atomically marks an asset as published and sets it as active.
+        """
+        product_file = self._get_product_file(product_id)
+        ptr_file = self._get_active_file(product_id)
+        
+        # We lock the product metadata file as the primary source of truth
+        with FileLock(product_file):
+            data = self._load_product_data(product_id)
+            if asset_id not in data["assets"]:
+                raise ValueError(f"Asset {asset_id} not found in product {product_id}")
+            
+            # 1. Update publish state
+            data["assets"][asset_id]["publish_state"] = "published"
+            
+            # 2. Add audit entry
+            data["audit_logs"].append({
+                "asset_id": asset_id,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "action": "published",
+                "details": {"set_active": True}
+            })
+            
+            # 3. Save metadata
+            self._save_no_lock(product_id, data)
+            
+            # 4. Update active pointer (separate file, but done while holding metadata lock)
+            ensure_dir(ptr_file.parent)
             ptr_file.write_text(asset_id, encoding="utf-8")
 
     def rollback_version(self, product_id: str) -> Optional[str]:

@@ -12,26 +12,33 @@ dist/
 *.egg-info
 
 # Runtime/generated data
-data/captures/
-data/sessions/*.json
-!data/sessions/.gitkeep
-data/reconstructions/
-data/cleaned/
-data/training_manifests/
-data/training_registry/
-data/registry/blobs/
-data/registry/meta/
-data/registry/active/
-data/logs/
-data/worker.process
-data/worker.process.lock
-
-# Scratch/generated artifacts
-fused.ply
-fused.ply.vis
-out.txt
-*.log
+data/
+datasets/
+results/
+scratch/
 tmp/
+temp*/
+workspace*/
+quarantine/
+gpu_test_workspace/
+evidence*/
+data_test_retry/
+test_root/
+scratch_texture_quality_probe/
+certs/
+
+# Reconstruction logs and specific outputs
+*.log
+out.txt
+pytest_out.txt
+test_results.txt
+test_errors.txt
+registry_test_out.txt
+final_test_report.txt
+debug_cap_61ca2229.txt
+tmp_err.txt
+reconstruction.log
+reconstruction_finish.log
 
 # IDEs
 .vscode/
@@ -41,15 +48,20 @@ tmp/
 .DS_Store
 Thumbs.db
 
-# Media
+# Media & Binaries
 *.jpg
 *.png
 *.photometric.bin
-
-# Test Workspaces
-workspace_fast_smoke/
-workspace_quality_test/
-gpu_test_workspace/
+*.webm
+*.mp4
+*.mov
+*.mtl
+*.obj
+*.glb
+*.usdz
+*.ply
+*.ply.vis
+*.bin
 
 # Model weights (SAM2, etc.) — never commit these
 models/
@@ -58,9 +70,26 @@ models/
 *.onnx
 *.safetensors
 
-# Test Artifacts
+# Specific test artifacts
 test_video_valid.*
-smoke_test_*.webm
-smoke_test_*.mp4
-temp_*.mp4
-
+smoke_test_*
+temp_*
+baseline_*.json
+sam2_experiment_results.json
+material_0.png
+material.mtl
+viewer.html
+dashboard.py
+analyze_current_atlas.py
+analyze_existing_atlas.py
+finish_recon.py
+final_quality_test.py
+probe_mesh.py
+run_ablation_test.py
+run_real_recon.py
+run_worker_e2e.py
+show_payloads.py
+test_fix.py
+test_smoke_flow.py
+reconstruction.log
+reconstruction_finish.log

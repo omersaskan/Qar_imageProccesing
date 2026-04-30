@@ -215,16 +215,30 @@ def validate_accessors(asset_data: Dict[str, Any]) -> Dict[str, str]:
     return results
 
 
+def normalize_status(status: str) -> str:
+    """
+    Normalizes various status strings into a standard triad: pass, review, fail.
+    Mapping:
+    - pass, success, clean -> pass
+    - review, warning, degraded -> review
+    - fail, failed, contaminated, invalid -> fail
+    """
+    s = str(status).lower().strip()
+    if s in {"pass", "success", "clean"}:
+        return "pass"
+    if s in {"review", "warning", "degraded"}:
+        return "review"
+    if s in {"fail", "failed", "contaminated", "invalid"}:
+        return "fail"
+    return "fail" # Secure default
+
+
 def validate_texture_quality(quality_data: Dict[str, Any]) -> str:
     """
     Hard gate for texture atlas quality.
     """
     status = str(quality_data.get("texture_quality_status", "fail")).lower()
-    if status == "success":
-        return "pass"
-    if status == "review":
-        return "review"
-    return "fail"
+    return normalize_status(status)
 
 
 def validate_decimation(stats: Dict[str, Any], texturing_status: str = "absent") -> str:

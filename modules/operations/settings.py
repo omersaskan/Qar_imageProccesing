@@ -24,16 +24,19 @@ class Settings(BaseSettings):
     pilot_api_key: Optional[str] = Field(None, validation_alias="PILOT_API_KEY")
 
     # Binaries
-    colmap_path: str = Field(r"C:\colmap\colmap.exe", validation_alias="RECON_ENGINE_PATH")
+    colmap_path: str = Field(default_factory=lambda: __import__("shutil").which("colmap") or "colmap", validation_alias="RECON_ENGINE_PATH")
     openmvs_path: str = Field(
-        r"C:\openmvs\bin", 
+        default_factory=lambda: __import__("os").environ.get("OPENMVS_BIN_PATH") or __import__("os").environ.get("OPENMVS_BIN") or "/usr/local/bin", 
         validation_alias="OPENMVS_BIN_PATH"
     )
     ffmpeg_path: str = Field(
-        r"C:\Users\Lenovo\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-8.1-full_build\bin\ffmpeg.exe", 
+        default_factory=lambda: __import__("shutil").which("ffmpeg") or "ffmpeg", 
         validation_alias="FFMPEG_PATH"
     )
-    ffprobe_path: Optional[str] = Field(None, validation_alias="FFPROBE_PATH")
+    ffprobe_path: Optional[str] = Field(
+        default_factory=lambda: __import__("shutil").which("ffprobe") or "ffprobe",
+        validation_alias="FFPROBE_PATH"
+    )
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -116,8 +119,17 @@ class Settings(BaseSettings):
     video_normalize_timeout_sec: int = Field(180, validation_alias="VIDEO_NORMALIZE_TIMEOUT_SEC")
     
     # --- SECURITY: CORS Allowlist ---
-    # List of origins allowed to access the API. Defaults to ["*"] if empty.
-    cors_allow_origins: List[str] = Field(default_factory=lambda: ["*"], validation_alias="CORS_ALLOW_ORIGINS")
+    # List of origins allowed to access the API. 
+    # In LOCAL_DEV, it defaults to ["*"] if not set.
+    # In Pilot/Production, it MUST be explicitly configured.
+    cors_allow_origins: List[str] = Field(default_factory=list, validation_alias="CORS_ALLOW_ORIGINS")
+
+    def get_cors_origins(self) -> List[str]:
+        if self.cors_allow_origins:
+            return self.cors_allow_origins
+        if self.env == AppEnvironment.LOCAL_DEV:
+            return ["*"]
+        return [] # Secure default for production
 
     # --- AR CAPTURE QUALITY GATING ---
     ar_min_coverage: float = Field(90.0, validation_alias="AR_MIN_COVERAGE")

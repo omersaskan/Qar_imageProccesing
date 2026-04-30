@@ -1,75 +1,97 @@
 # Meshysiz Product Asset Factory
 
-**Meshysiz Product Asset Factory**, restoran ürünleri için yüksek kaliteli, AR-uyumlu 3D modeller üreten modüler bir boru hattıdır (pipeline). Bu sistem, kısa videolardan (guided short video) başlayarak temizlenmiş, optimize edilmiş ve doğrulanmış dijital varlıklar üretir.
+**Meshysiz Product Asset Factory** is a production-grade, modular pipeline for generating high-quality, AR-ready 3D models for e-commerce and product visualization. It transforms guided short videos into cleaned, optimized, and validated digital assets.
 
 ---
 
-## 1. Temel Özellikler
-- **Guided Capture**: Keyframe çıkarımı ve coverage analizi ile rehberli çekim.
-- **Automated Reconstruction**: Ham 3D verinin (mesh & texture) otomatik üretimi.
-- **Cleanup Pipeline**: Mesh temizleme, remesh, pivot düzeltme ve BBox çıkarımı.
-- **Multi-Format Export**: GLB, USDZ, Poster (PNG) ve Thumbnail üretim.
-- **Quality Gates**: Polycount, alignment ve texture kontrolü ile otomatik/manuel onay mekanizması.
-- **Asset Registry**: Versiyonlama, rollback ve "Source of Truth" metadata yönetimi.
+## 🚀 Key Features
+- **Guided Capture & Gating**: Real-time coverage analysis and blur detection to ensure input quality.
+- **Automated Reconstruction**: Orchestrated COLMAP and OpenMVS workflows for high-fidelity geometry.
+- **Hardened Cleanup Pipeline**: Modular mesh cleaning, decimation, and PBR-ready material normalization.
+- **Production-Ready Validation**: Automated quality gates (polycount, texture integrity, alignment) with mandatory approval for edge cases.
+- **Atomic Asset Registry**: Secure versioning, audit logging, and atomic "active" pointer management.
 
 ---
 
-## 2. Hızlı Başlangıç
+## 🛠️ Getting Started
 
-### Gereksinimler
-- Python 3.11+
-- Pip
+### Prerequisites
+- **Python 3.11+**
+- **FFmpeg** (in PATH)
+- **COLMAP & OpenMVS** (Optional for logic tests, required for full reconstruction)
 
-### Kurulum
+### Installation
 ```bash
-# Bağımlılıkları yükle
-pip install -r requirements.txt
-# Geliştirme/Test bağımlılıkları için
-pip install -e .[dev]
+# Clone the repository
+git clone https://github.com/omersaskan/Qar_imageProccesing
+cd Qar_imageProccesing
+
+# Install core and development dependencies in editable mode
+python -m pip install -e ".[dev]"
 ```
 
 ---
 
-## 3. Kullanım (Canonical Commands)
+## 🧪 Testing & Verification
 
-### Test Suite Çalıştırma
-Projenin stabilitesini doğrulamak için tüm testleri çalıştırın:
+### Full Test Suite
+Run the comprehensive suite (490+ tests) to verify stability:
 ```bash
-python -m pytest modules/shared_contracts/tests modules/capture_workflow/tests modules/reconstruction_engine/tests modules/asset_cleanup_pipeline/tests modules/export_pipeline/tests modules/qa_validation/tests modules/asset_registry/tests modules/tests/test_phase6_integration.py modules/tests/test_smoke_flow.py modules/tests/test_phase7_edge_cases.py
+python -m pytest
 ```
 
-### Smoke Test (E2E Flow)
-Uçtan uca capture -> publish akışını doğrulamak için:
+### Lightweight Smoke Check
+Verify core imports, settings, and API initialization:
 ```bash
-python -m pytest modules/tests/test_smoke_flow.py
+./scripts/smoke_check.sh
+```
+
+### Regression Tests
+Run specific hardening and production logic tests:
+```bash
+python -m pytest tests/test_production_hardening.py
 ```
 
 ---
 
-## 4. Proje Yapısı
+## 📂 Project Structure
 ```text
-project/
-├── modules/                # Ana Modüller
-│   ├── shared_contracts/   # Veri modelleri ve hata tipleri
-│   ├── capture_workflow/   # Video işleme ve keyframe setleri
-│   ├── reconstruction/     # 3D üretimi orkestrasyonu
-│   ├── asset_cleanup/      # Mesh temizleme ve normalizasyon
-│   ├── export_pipeline/    # Dosya formatları ve statik medya
-│   ├── qa_validation/      # Kalite kontrol ve validation rules
-│   └── asset_registry/     # Varlık kütüphanesi ve yayıncılık
-├── tools/                  # Yardımcı debug ve analiz araçları
-├── tests/                  # Entegrasyon ve duman testleri
-└── data/                   # Yerel işleme dizini (ignore edilmiş)
+.
+├── .github/workflows/      # CI/CD pipelines
+├── modules/                # Core Business Logic
+│   ├── shared_contracts/   # Models, schemas, and errors
+│   ├── operations/         # API, Settings, and Worker orchestration
+│   ├── capture_workflow/   # Ingestion and quality gating
+│   ├── reconstruction/     # 3D reconstruction engine
+│   ├── asset_cleanup/      # Mesh & Texture refinement
+│   ├── export_pipeline/    # Format conversion (GLB, USDZ)
+│   ├── qa_validation/      # Automated quality gates
+│   └── asset_registry/     # Versioning and publishing
+├── scripts/                # Operational scripts (smoke check, deployment)
+├── tests/                  # Integration and regression tests
+├── tools/                  # Diagnostic and audit tools
+└── ui/                     # Operational dashboard
 ```
 
 ---
 
-## 5. Dokümantasyon
-- [ARCHITECTURE.md](ARCHITECTURE.MD): Sistemin modüler mimarisi ve veri akışı.
-- [HANDOFF.md](HANDOFF.md): Teknik devir notları ve bağımlılık detayları.
-- [RUNBOOK.md](RUNBOOK.md): Operasyonel rehber ve hata giderme.
+## 🛡️ Production Hardening
+This repository has been hardened for production readiness:
+- **Environment Isolation**: No more machine-specific hardcoded paths; dynamic binary discovery via `shutil.which`.
+- **Atomic Registry**: Asset publishing and active pointer updates are now atomic with full audit logs.
+- **CORS Security**: Wildcard origins are disabled in Pilot/Production; explicit allowlists are required.
+- **Normalized Validation**: Unified status reporting (`pass`/`review`/`fail`) across all validation layers.
+- **Clean Hygiene**: Zero tracked logs or scratch data; robust `.gitignore` and CI/CD validation.
 
 ---
 
-## 6. Lisans ve Katkıda Bulunma
-Bu proje **Meshysiz Team** tarafından geliştirilmiştir. Harici paylaşımlar ve katkılar için teknik lider ile iletişime geçiniz.
+## 📖 Documentation
+- [ARCHITECTURE.md](ARCHITECTURE.MD) - System architecture and data flow.
+- [DEPLOYMENT_RUNPOD.md](DEPLOYMENT_RUNPOD.md) - Cloud deployment guide.
+- [RUNBOOK.md](RUNBOOK.md) - Operational troubleshooting.
+
+---
+
+## ⚖️ License
+Internal proprietary tool for **Meshysiz Team**. 
+Contact technical leadership for contribution guidelines.

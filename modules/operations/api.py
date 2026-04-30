@@ -69,7 +69,7 @@ app = FastAPI(title="Meshysiz Asset Factory API", lifespan=lifespan)
 # Enable CORS with settings-controlled allowlist
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_allow_origins,
+    allow_origins=settings.get_cors_origins(),
     allow_methods=["*"],
     allow_headers=["*"],
 )

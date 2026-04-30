@@ -1,17 +1,24 @@
 import pytest
 from modules.qa_validation.rules import (
-    validate_texture,
+    normalize_status,
     validate_texture_integrity,
     ValidationThresholds,
 )
 from modules.qa_validation.validator import AssetValidator
 
 
-def test_validate_texture_honesty():
-    assert validate_texture("complete") == "pass"
-    assert validate_texture("degraded") == "review"
-    assert validate_texture("minor_missing") == "review"
-    assert validate_texture("missing") == "fail"
+def test_normalize_status_honesty():
+    assert normalize_status("pass") == "pass"
+    assert normalize_status("success") == "pass"
+    assert normalize_status("clean") == "pass"
+    assert normalize_status("review") == "review"
+    assert normalize_status("warning") == "review"
+    assert normalize_status("degraded") == "review"
+    assert normalize_status("fail") == "fail"
+    assert normalize_status("failed") == "fail"
+    assert normalize_status("contaminated") == "fail"
+    assert normalize_status("invalid") == "fail"
+    assert normalize_status("garbage") == "fail"
 
 
 def test_validate_texture_integrity_missing():
@@ -23,8 +30,8 @@ def test_validate_texture_integrity_missing():
         "texture_count": 0
     }
     res = validate_texture_integrity(data, thresholds)
-    assert res["texture_uv_integrity"] == "fail"
-    assert res["texture_application"] == "fail"
+    assert res["uv_integrity"] == "fail"
+    assert res["application"] == "fail"
     assert res["material_integrity"] == "fail"
 
 
@@ -37,8 +44,8 @@ def test_validate_texture_integrity_degraded_uv_only():
         "texture_count": 0
     }
     res = validate_texture_integrity(data, thresholds)
-    assert res["texture_uv_integrity"] == "pass"
-    assert res["texture_application"] == "review"
+    assert res["uv_integrity"] == "pass"
+    assert res["application"] == "review"
     assert res["material_integrity"] == "review"
 
 
@@ -51,8 +58,8 @@ def test_validate_texture_integrity_complete():
         "texture_count": 1
     }
     res = validate_texture_integrity(data, thresholds)
-    assert res["texture_uv_integrity"] == "pass"
-    assert res["texture_application"] == "pass"
+    assert res["uv_integrity"] == "pass"
+    assert res["application"] == "pass"
     assert res["material_integrity"] == "pass"
 
 

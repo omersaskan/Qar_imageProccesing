@@ -111,7 +111,7 @@ RUN pip3 install --no-cache-dir --upgrade pip \
 COPY . .
 
 # Finalize permissions
-RUN chmod +x smoke_check.sh
+RUN chmod +x scripts/smoke_check.sh
 
 # Entry point is usually overridden by RunPod, but we default to smoke check
-CMD ["./smoke_check.sh"]
+CMD ["./scripts/smoke_check.sh"]

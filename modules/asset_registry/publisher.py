@@ -71,8 +71,7 @@ class PackagePublisher:
             package_status="ready_for_ar"
         )
         
-        # 4. Update Registry State
-        self.registry.update_publish_state(asset_id, "published")
-        self.registry.set_active_version(product_id, asset_id)
+        # 4. Update Registry State (Atomic)
+        self.registry.publish_asset(product_id, asset_id)
         
         return package
