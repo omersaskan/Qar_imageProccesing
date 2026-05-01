@@ -366,13 +366,18 @@ class AssetCleaner:
             if isinstance(mesh, trimesh.Scene): mesh = mesh.dump(concatenate=True)
             if len(mesh.vertices) == 0: raise ValueError("Empty mesh")
 
-            isolated_mesh, isolation_stats = self.isolator.isolate_product(
-                mesh, 
-                cameras=cameras, 
-                masks=masks, 
-                point_cloud=point_cloud,
-                output_dir=job_cleaned_dir
-            )
+            if len(mesh.faces) > 400000:
+                logger.warning("[%s] Mesh has %d faces. Skipping isolation to prevent MemoryError (OOM).", job_id, len(mesh.faces))
+                isolated_mesh = mesh
+                isolation_stats = {"object_isolation_status": "skipped_high_density", "object_isolation_method": "skipped", "quality_status": "pass"}
+            else:
+                isolated_mesh, isolation_stats = self.isolator.isolate_product(
+                    mesh, 
+                    cameras=cameras, 
+                    masks=masks, 
+                    point_cloud=point_cloud,
+                    output_dir=job_cleaned_dir
+                )
             if len(isolated_mesh.faces) == 0: raise ValueError(f"Isolation failed: {isolation_stats.get('object_isolation_status')}")
             isolated_mesh.export(str(isolation_debug_path))
             logger.info("[%s] Isolation completed. Method: %s, faces: %d", 

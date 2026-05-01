@@ -6,12 +6,12 @@ from modules.capture_workflow.session_manager import SessionManager
 from modules.operations.worker import worker_instance
 
 def run():
-    source_video = Path(r"C:\Users\Lenovo\.gemini\antigravity\scratch\Qar_imageProccesing\data\captures\cap_48333fc5\video\raw_video.mp4")
+    source_video = Path(r"C:\Users\Lenovo\.gemini\antigravity\scratch\Qar_imageProccesing\data\captures\cap_1777596992\video\raw_video.mp4")
     if not source_video.exists():
         print(f"Source video not found: {source_video}")
         return
 
-    session_id = f"cap_{int(time.time())}"
+    session_id = "cap_1777600324_v4"
     print(f"Creating new session: {session_id}")
     
     manager = SessionManager(Path("data"))

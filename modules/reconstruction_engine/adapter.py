@@ -1364,8 +1364,8 @@ class COLMAPAdapter(ReconstructionAdapter):
                     cmd_mesh = self.builder.poisson_mesher(
                         dense_dir / "fused.ply",
                         dense_dir / "meshed-poisson.ply",
-                        depth=settings.recon_poisson_depth,
-                        trim=settings.recon_poisson_trim,
+                        depth=11,
+                        trim=7,
                     )
                     log_file.write(f"Starting Poisson mesher (timeout={mesher_timeout}s)...\n")
                     self._run_command(cmd_mesh, output_dir, log_file, timeout=mesher_timeout)

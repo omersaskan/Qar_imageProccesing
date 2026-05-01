@@ -132,20 +132,69 @@
                 <h2 id="viewer-title">3D Preview</h2>
                 <button id="close-viewer" class="close-btn">&times;</button>
             </header>
-            <div class="viewer-container" style="background: #000; border-radius: 12px; overflow: hidden; margin-bottom: 15px;">
-                <model-viewer id="main-viewer" 
-                    camera-controls 
-                    auto-rotate 
-                    auto-rotate-delay="0"
-                    shadow-intensity="1" 
-                    environment-image="neutral"
-                    exposure="1"
-                    interaction-prompt="auto"
-                    style="width: 100%; height: 500px; display: block; background: #111;">
-                </model-viewer>
+            <div class="viewer-layout" style="display: grid; grid-template-columns: 1fr 280px; gap: 20px;">
+                <div class="viewer-container" style="background: #000; border-radius: 12px; overflow: hidden; position: relative;">
+                    <model-viewer id="main-viewer" 
+                        camera-controls 
+                        auto-rotate 
+                        auto-rotate-delay="0"
+                        shadow-intensity="1" 
+                        environment-image="neutral"
+                        exposure="1"
+                        interaction-prompt="auto"
+                        style="width: 100%; height: 550px; display: block; background: #111;">
+                        
+                        <div id="viewer-loading-overlay" class="viewer-overlay hidden">
+                            <div class="loader"></div>
+                        </div>
+                    </model-viewer>
+                </div>
+                
+                <div class="viewer-controls glass" style="padding: 20px; border-radius: 12px; display: flex; flex-direction: column; gap: 20px;">
+                    <h3 style="margin: 0 0 10px 0; font-size: 1rem; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 10px;">Visual Adjustments</h3>
+                    
+                    <div class="control-group">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                            <label style="font-size: 0.85rem; color: #aaa;">Exposure (Brightness)</label>
+                            <span id="exposure-value" style="font-size: 0.85rem; color: var(--accent-color);">1.0</span>
+                        </div>
+                        <input type="range" id="ctrl-exposure" min="0" max="4" step="0.1" value="1" style="width: 100%;">
+                    </div>
+                    
+                    <div class="control-group">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                            <label style="font-size: 0.85rem; color: #aaa;">Contrast</label>
+                            <span id="contrast-value" style="font-size: 0.85rem; color: var(--accent-color);">100%</span>
+                        </div>
+                        <input type="range" id="ctrl-contrast" min="50" max="200" step="5" value="100" style="width: 100%;">
+                    </div>
+
+                    <div class="control-group">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                            <label style="font-size: 0.85rem; color: #aaa;">Shadow Intensity</label>
+                            <span id="shadow-value" style="font-size: 0.85rem; color: var(--accent-color);">1.0</span>
+                        </div>
+                        <input type="range" id="ctrl-shadow" min="0" max="2" step="0.1" value="1" style="width: 100%;">
+                    </div>
+                    
+                    <div class="control-group">
+                        <label style="font-size: 0.85rem; color: #aaa; display: block; margin-bottom: 8px;">Environment Map</label>
+                        <select id="ctrl-env" class="glass-input-sm" style="width: 100%; height: 32px;">
+                            <option value="neutral">Neutral</option>
+                            <option value="legacy">Legacy (Studio)</option>
+                            <option value="https://modelviewer.dev/shared-assets/environments/spruit_sunrise_1k_hdr.hdr">Sunrise</option>
+                            <option value="https://modelviewer.dev/shared-assets/environments/aircraft_workshop_01_1k.hdr">Workshop</option>
+                        </select>
+                    </div>
+
+                    <div style="margin-top: auto; display: flex; flex-direction: column; gap: 10px;">
+                        <button id="reset-viewer-btn" class="btn-secondary w-full" style="font-size: 0.8rem;">Reset Settings</button>
+                        <button id="download-asset-btn" class="btn-primary w-full" style="font-size: 0.8rem;">Download GLB</button>
+                    </div>
+                </div>
             </div>
-            <div class="viewer-footer">
-                <p id="viewer-status" style="color: #888; font-size: 0.9rem;">Interact with the model to inspect details</p>
+            <div class="viewer-footer" style="margin-top: 15px;">
+                <p id="viewer-status" style="color: #666; font-size: 0.8rem;">Object ID: <span id="viewer-asset-id">---</span> | Polygon count: <span id="viewer-poly-count">---</span></p>
             </div>
         </div>
     </div>

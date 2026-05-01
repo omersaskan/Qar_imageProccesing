@@ -600,6 +600,91 @@ body {
     z-index: 10;
 }
 
+/* 3D Viewer UI Enhancements */
+.viewer-modal {
+    max-width: 1000px !important;
+}
+
+.viewer-layout {
+    display: grid;
+    grid-template-columns: 1fr 280px;
+    gap: 20px;
+}
+
+@media (max-width: 900px) {
+    .viewer-layout {
+        grid-template-columns: 1fr;
+    }
+}
+
+.viewer-controls {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.control-group label {
+    display: block;
+    font-weight: 400;
+    margin-bottom: 5px;
+}
+
+/* Range Input Styling */
+input[type=range] {
+    -webkit-appearance: none;
+    background: transparent;
+    cursor: pointer;
+}
+
+input[type=range]:focus {
+    outline: none;
+}
+
+input[type=range]::-webkit-slider-runnable-track {
+    width: 100%;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+}
+
+input[type=range]::-webkit-slider-thumb {
+    height: 16px;
+    width: 16px;
+    border-radius: 50%;
+    background: var(--accent-color);
+    box-shadow: 0 0 10px var(--accent-glow);
+    -webkit-appearance: none;
+    margin-top: -6px;
+}
+
+.viewer-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0,0,0,0.7);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 10;
+    backdrop-filter: blur(5px);
+}
+
+.glass-input-sm {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    color: #fff;
+    padding: 0 10px;
+    font-family: inherit;
+    outline: none;
+}
+
+.glass-input-sm option {
+    background: #111;
+    color: #fff;
+}
+
 .ar-surface-overlay {
     position: absolute;
     top: 0;

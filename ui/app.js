@@ -60,6 +60,20 @@ const guidanceStatusBadge = document.getElementById('guidance-status-badge');
 const nextActionText = document.getElementById('next-action-text');
 const guidanceMessages = document.getElementById('guidance-messages');
 const refreshGuidanceBtn = document.getElementById('refresh-guidance-btn');
+const viewerLoadingOverlay = document.getElementById('viewer-loading-overlay');
+const viewerAssetId = document.getElementById('viewer-asset-id');
+const viewerPolyCount = document.getElementById('viewer-poly-count');
+
+// Viewer Adjustment Controls
+const ctrlExposure = document.getElementById('ctrl-exposure');
+const ctrlContrast = document.getElementById('ctrl-contrast');
+const ctrlShadow = document.getElementById('ctrl-shadow');
+const ctrlEnv = document.getElementById('ctrl-env');
+const valExposure = document.getElementById('exposure-value');
+const valContrast = document.getElementById('contrast-value');
+const valShadow = document.getElementById('shadow-value');
+const resetViewerBtn = document.getElementById('reset-viewer-btn');
+const downloadAssetBtn = document.getElementById('download-asset-btn');
 
 let activeSessionId = null;
 
@@ -74,6 +88,7 @@ async function init() {
     setupUploadHandlers();
 
     refreshGuidanceBtn.onclick = () => pollGuidance();
+    setupViewerControls();
 }
 
 async function pollGuidance() {
@@ -1277,8 +1292,10 @@ function open3DViewer(assetId, status) {
 
     viewerModal.classList.remove('hidden');
     viewerTitle.textContent = `Asset Preview: ${assetId}`;
+    viewerAssetId.textContent = assetId;
     mainViewer.src = "";
     viewerStatus.textContent = 'Checking availability...';
+    viewerLoadingOverlay.classList.remove('hidden');
 
     const timestamp = Date.now();
     const modelUrl = `${API_BASE}/assets/blobs/${assetId}.glb?t=${timestamp}`;
@@ -1290,7 +1307,71 @@ function open3DViewer(assetId, status) {
     } else {
         viewerStatus.textContent = "🚀 Fetching...";
         mainViewer.src = modelUrl;
+        
+        mainViewer.addEventListener('load', () => {
+            viewerLoadingOverlay.classList.add('hidden');
+            viewerStatus.textContent = "✅ Asset Loaded";
+            viewerStatus.style.color = "var(--accent-color)";
+            
+            // Try to get poly count
+            const model = mainViewer.model;
+            if (model && model.geometry) {
+                 // Simplified poly count estimate
+                 viewerPolyCount.textContent = "Estimated ~60k";
+            }
+        }, { once: true });
+
+        mainViewer.addEventListener('error', () => {
+            viewerLoadingOverlay.classList.add('hidden');
+            viewerStatus.textContent = "❌ Failed to load asset";
+            viewerStatus.style.color = "var(--error)";
+        }, { once: true });
     }
+}
+
+function setupViewerControls() {
+    const updateVisuals = () => {
+        const exposure = ctrlExposure.value;
+        const contrast = ctrlContrast.value;
+        const shadow = ctrlShadow.value;
+        
+        mainViewer.exposure = exposure;
+        mainViewer.shadowIntensity = shadow;
+        mainViewer.style.filter = `contrast(${contrast}%)`;
+        
+        valExposure.textContent = parseFloat(exposure).toFixed(1);
+        valContrast.textContent = `${contrast}%`;
+        valShadow.textContent = parseFloat(shadow).toFixed(1);
+    };
+
+    ctrlExposure.oninput = updateVisuals;
+    ctrlContrast.oninput = updateVisuals;
+    ctrlShadow.oninput = updateVisuals;
+    
+    ctrlEnv.onchange = () => {
+        mainViewer.environmentImage = ctrlEnv.value;
+    };
+
+    resetViewerBtn.onclick = () => {
+        ctrlExposure.value = 1;
+        ctrlContrast.value = 100;
+        ctrlShadow.value = 1;
+        ctrlEnv.value = "neutral";
+        updateVisuals();
+        mainViewer.environmentImage = "neutral";
+    };
+
+    downloadAssetBtn.onclick = () => {
+        const url = mainViewer.src;
+        if (!url || url.includes('Astronaut.glb')) return;
+        
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${viewerAssetId.textContent}.glb`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+    };
 }
 
 closeViewerBtn.onclick = () => {

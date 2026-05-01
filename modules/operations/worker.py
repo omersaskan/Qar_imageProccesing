@@ -881,6 +881,7 @@ class IngestionWorker:
                 profile_name=cleanup_stats.get("delivery_profile", "mobile_high"), # Use actual profile
                 texture_path=texture_path if texture_path_exists else None,
                 metadata=metadata,
+                unlit=settings.texture_unlit,
             )
         except Exception as e:
             import traceback

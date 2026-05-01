@@ -39,7 +39,7 @@ setup_logging()
 
 logger = get_component_logger("api")
 
-embedded_worker_enabled = os.getenv("MESHYSIZ_EMBEDDED_WORKER", "true").lower() == "true"
+embedded_worker_enabled = settings.embedded_worker_enabled
 
 
 # SPRINT 3 TICKET-012: Replaced deprecated @app.on_event with lifespan handler.

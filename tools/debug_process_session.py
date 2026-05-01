@@ -42,8 +42,9 @@ def debug_session(session_id: str):
     print(f"Current Status: {session.status}")
     print(f"Product ID: {session.product_id}")
     
-    # 4. Initialize Worker
+    # 4. Initialize Worker (stop background loop immediately for manual debug)
     worker = IngestionWorker()
+    worker.stop()
     
     # 5. Process Step by Step
     try:
@@ -60,6 +61,12 @@ def debug_session(session_id: str):
             with open(session_file, "r") as f: session = CaptureSession.model_validate(json.load(f))
 
         if session.status == AssetStatus.RECONSTRUCTED:
+            print("\n>>> Stepping from RECONSTRUCTED to CLEANED (Texturing)...")
+            worker._advance_session(session, AssetStatus.CLEANED, "Cleaning and texturing...")
+            # Reload session
+            with open(session_file, "r") as f: session = CaptureSession.model_validate(json.load(f))
+
+        if session.status == AssetStatus.CLEANED:
             print("\n>>> Finalizing Ingestion...")
             worker._finalize_ingestion(session)
             print("\n✅ Session finalized and registered successfully!")

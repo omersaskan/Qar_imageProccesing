@@ -121,6 +121,7 @@ class GLBExporter:
         texture_path: Optional[str] = None,
         smoothing_mode: str = "none",
         metadata: Optional[NormalizedMetadata] = None,
+        unlit: bool = True,
     ) -> Dict[str, Any]:
         """
         Final GLB Export with Delivery Gates.
@@ -155,13 +156,17 @@ class GLBExporter:
                 with Image.open(texture_path) as img:
                     tex_image = img.convert("RGBA").copy()
                 
+                # SPRINT 6: Texture Enhancement (Fix "burnt" look)
+                tex_image = self._normalize_texture(tex_image)
+
                 material = trimesh.visual.material.PBRMaterial(
                     baseColorTexture=tex_image,
                     baseColorFactor=[1.0, 1.0, 1.0, 1.0],
-                    metallicFactor=0.0,
-                    roughnessFactor=1.0,
+                    metallicFactor=settings.texture_metallic,
+                    roughnessFactor=settings.texture_roughness,
                     doubleSided=True,
                 )
+                # SPRINT 6: Unlit support is handled in _fix_glb_compliance via JSON injection
                 
                 for m in meshes:
                     if hasattr(m.visual, "uv") and m.visual.uv is not None and len(m.visual.uv) > 0:
@@ -178,7 +183,7 @@ class GLBExporter:
             glb_bytes = meshes[0].export(file_type="glb")
 
         # SPRINT 5: Fix 7 — GLB Compliance (bufferView targets)
-        glb_bytes = self._fix_glb_compliance(glb_bytes)
+        glb_bytes = self._fix_glb_compliance(glb_bytes, unlit=unlit)
 
         with open(output_path, "wb") as f:
             f.write(glb_bytes)
@@ -241,11 +246,9 @@ class GLBExporter:
 
         return result
 
-    def _fix_glb_compliance(self, glb_bytes: bytes) -> bytes:
+    def _fix_glb_compliance(self, glb_bytes: bytes, unlit: bool = False) -> bytes:
         """
-        Manually injects bufferView.target into the GLB JSON chunk.
-        - POSITION/NORMAL/TEXCOORD_0 => 34962 (ARRAY_BUFFER)
-        - indices => 34963 (ELEMENT_ARRAY_BUFFER)
+        Manually injects bufferView.target and KHR_materials_unlit into the GLB JSON chunk.
         """
         if len(glb_bytes) < 20: return glb_bytes
         
@@ -260,7 +263,19 @@ class GLBExporter:
         
         json_data = json.loads(glb_bytes[20:20+json_len].decode("utf-8"))
         
-        # Map accessors to bufferViews
+        # 1. Unlit Extension Injection
+        if unlit:
+            if "extensionsUsed" not in json_data:
+                json_data["extensionsUsed"] = []
+            if "KHR_materials_unlit" not in json_data["extensionsUsed"]:
+                json_data["extensionsUsed"].append("KHR_materials_unlit")
+            
+            for mat in json_data.get("materials", []):
+                if "extensions" not in mat:
+                    mat["extensions"] = {}
+                mat["extensions"]["KHR_materials_unlit"] = {}
+
+        # 2. Map accessors to bufferViews
         bv_targets = {}
         
         # Attributes targets
@@ -316,6 +331,63 @@ class GLBExporter:
         new_glb[8:12] = struct.pack("<I", total_len)
         
         return bytes(new_glb)
+
+    def _normalize_texture(self, image: 'Image.Image') -> 'Image.Image':
+        """
+        Enhances texture brightness and contrast to correct underexposure.
+        Uses histogram stretching and gamma correction.
+        """
+        import numpy as np
+        from PIL import Image, ImageEnhance
+
+        # 1. Convert to numpy for analysis
+        data = np.array(image.convert("RGB"))
+        
+        # 2. Find meaningful content (ignore pure black/background)
+        # We assume background is very dark (OpenMVS default)
+        mask = np.max(data, axis=2) > 10
+        if not np.any(mask):
+            return image
+        
+        content = data[mask]
+        
+        # 3. Calculate current brightness stats
+        p98 = np.percentile(content, 98)
+        avg = np.mean(content)
+        
+        logger.info(f"Texture normalization pre-check: p98={p98:.1f}, avg={avg:.1f}")
+
+        # 4. Apply Histogram Stretching (Normalization)
+        # Target: Move p98 towards target if it's too dark
+        target_v = settings.texture_brightness_target
+        if p98 < (target_v - 10):
+            scale = target_v / max(p98, 1.0)
+            # Limit scale to avoid extreme noise (max 2.5x)
+            scale = min(scale, 2.5)
+            
+            # Apply scaling with clipping
+            data = np.clip(data.astype(np.float32) * scale, 0, 255).astype(np.uint8)
+            logger.info(f"Applied brightness scale: {scale:.2f}x")
+
+        # 5. Convert back to PIL for Gamma/Shadow lifting
+        enhanced_img = Image.fromarray(data, "RGB")
+        
+        # 6. Apply Gamma Correction (Lifts shadows without washing out highlights)
+        gamma = settings.texture_gamma
+        lut = [pow(i / 255.0, gamma) * 255 for i in range(256)]
+        lut = lut * 3 # RGB channels
+        enhanced_img = enhanced_img.point(lut)
+        
+        # 7. Add a touch of saturation if it was too gray
+        converter = ImageEnhance.Color(enhanced_img)
+        enhanced_img = converter.enhance(settings.texture_saturation)
+
+        # 8. Restore Alpha if present
+        if image.mode == "RGBA":
+            _, _, _, a = image.split()
+            enhanced_img.putalpha(a)
+        
+        return enhanced_img
 
     def _apply_optional_optimizations(self, glb_path: str) -> Dict[str, str]:
         """

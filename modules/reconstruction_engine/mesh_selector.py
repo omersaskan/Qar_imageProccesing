@@ -104,7 +104,11 @@ class MeshSelector:
 
         # Fragmentation
         try:
-            comp_count = len(mesh.split(only_watertight=False))
+            if face_count > 1000000:
+                logger.info(f"Large mesh detected ({face_count} faces), skipping expensive split analysis.")
+                comp_count = 1
+            else:
+                comp_count = len(mesh.split(only_watertight=False))
         except Exception:
             comp_count = 1
         fragment_penalty = float(np.exp(-(comp_count - 1) / 4.0))

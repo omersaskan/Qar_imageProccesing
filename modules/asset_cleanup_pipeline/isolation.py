@@ -350,6 +350,9 @@ class MeshIsolator:
         # We need to track face indices. Let's update _remove_horizontal_planes to use submesh.
         current_mesh, plane_stats = self._remove_horizontal_planes_tracked(working_geom)
         current_mesh, support_stats = self._remove_bottom_support_bands_tracked(current_mesh)
+        
+        # 1.5) Chromatic Leakage Removal (Fix "turuncu sızıntı")
+        current_mesh, chromatic_stats = self._remove_chromatic_leakage_tracked(current_mesh, mesh)
 
         # 2) split components
         # Optimization: trimesh.split() doesn't preserve metadata, so we do it manually
@@ -541,6 +544,7 @@ class MeshIsolator:
             "initial_vertices": initial_vertices,
             **plane_stats,
             **support_stats,
+            **chromatic_stats,
             "kept_component_count": len(kept_components),
             "raw_component_count": len(components),
             "rejected_component_count": len(components) - len(kept_components),
@@ -571,4 +575,74 @@ class MeshIsolator:
                 final_mesh.export(str(output_dir / "debug_isolated_mesh.obj"))
             except Exception: pass
 
+        return final_mesh, stats
+
+    def _remove_chromatic_leakage_tracked(self, working_geom: trimesh.Trimesh, original_mesh: trimesh.Trimesh) -> Tuple[trimesh.Trimesh, Dict[str, Any]]:
+        """
+        Identifies and removes components that are dominated by "orange/background" vertex colors.
+        """
+        stats = {
+            "chromatic_removed_faces": 0,
+            "chromatic_leakage_detected": False,
+        }
+        
+        if not hasattr(original_mesh.visual, 'vertex_colors') or original_mesh.visual.vertex_colors is None:
+            return working_geom, stats
+
+        # Map current face indices back to original colors
+        if 'face_indices' not in working_geom.metadata:
+            return working_geom, stats
+            
+        face_indices = working_geom.metadata['face_indices']
+        vertex_colors = original_mesh.visual.vertex_colors
+        
+        # Split into components to evaluate them individually
+        components = working_geom.split(only_watertight=False)
+        if not components:
+            return working_geom, stats
+            
+        kept_components = []
+        for comp in components:
+            if 'face_indices' not in comp.metadata:
+                kept_components.append(comp)
+                continue
+            
+            # Get original vertices for these faces
+            comp_face_indices = comp.metadata['face_indices']
+            original_faces = original_mesh.faces[comp_face_indices]
+            original_verts_indices = np.unique(original_faces)
+            comp_colors = vertex_colors[original_verts_indices][:, :3]
+            
+            # Detect Orange/Turuncu (Background)
+            # R > 150, G > 80, B < 120, R > G+30
+            R, G, B = comp_colors[:, 0], comp_colors[:, 1], comp_colors[:, 2]
+            is_orange = (R > 140) & (G > 70) & (B < 110) & (R > G + 25)
+            
+            orange_ratio = np.count_nonzero(is_orange) / len(comp_colors)
+            
+            # If component is tiny and mostly orange, or medium and very orange, prune it
+            should_prune = False
+            if len(comp.faces) < 500 and orange_ratio > 0.4:
+                should_prune = True
+            elif orange_ratio > 0.75:
+                should_prune = True
+                
+            if should_prune:
+                stats["chromatic_removed_faces"] += len(comp.faces)
+                stats["chromatic_leakage_detected"] = True
+                logger.info(f"Pruning chromatic leakage component: faces={len(comp.faces)}, orange_ratio={orange_ratio:.2%}")
+            else:
+                kept_components.append(comp)
+        
+        if not kept_components:
+            return working_geom, stats # Safety: don't return empty
+            
+        final_mesh = trimesh.util.concatenate(kept_components) if len(kept_components) > 1 else kept_components[0]
+        # Re-apply metadata
+        all_indices = []
+        for c in kept_components:
+             if 'face_indices' in c.metadata:
+                 all_indices.extend(c.metadata['face_indices'])
+        final_mesh.metadata['face_indices'] = np.array(all_indices)
+        
         return final_mesh, stats

@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     data_root: str = Field("data", validation_alias="DATA_ROOT")
     worker_interval_sec: int = Field(5, validation_alias="WORKER_INTERVAL_SEC")
     pilot_api_key: Optional[str] = Field(None, validation_alias="PILOT_API_KEY")
+    embedded_worker_enabled: bool = Field(True, validation_alias="MESHYSIZ_EMBEDDED_WORKER")
 
     # Binaries
     colmap_path: str = Field(default_factory=lambda: __import__("shutil").which("colmap") or "colmap", validation_alias="RECON_ENGINE_PATH")
@@ -207,6 +208,14 @@ class Settings(BaseSettings):
     white_cream_max_background_ratio: Optional[float] = Field(None, validation_alias="WHITE_CREAM_MAX_BACKGROUND_RATIO")
     expected_product_color: str = Field("unknown", validation_alias="EXPECTED_PRODUCT_COLOR")
     
+    # --- TEXTURE NORMALIZATION (SPRINT 6) ---
+    texture_brightness_target: float = Field(240.0, validation_alias="TEXTURE_BRIGHTNESS_TARGET")
+    texture_gamma: float = Field(0.85, validation_alias="TEXTURE_GAMMA")
+    texture_saturation: float = Field(1.1, validation_alias="TEXTURE_SATURATION")
+    texture_roughness: float = Field(0.8, validation_alias="TEXTURE_ROUGHNESS")
+    texture_metallic: float = Field(0.0, validation_alias="TEXTURE_METALLIC")
+    texture_unlit: bool = Field(True, validation_alias="TEXTURE_UNLIT")
+
     # --- PHASE 6.1: SAM2 SEGMENTATION ---
     segmentation_method: str = Field("legacy", validation_alias="SEGMENTATION_METHOD")
     sam2_enabled: bool = Field(False, validation_alias="SAM2_ENABLED")

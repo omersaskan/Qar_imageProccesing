@@ -33,6 +33,39 @@ class OpenMVSTexturer:
     def is_available(self) -> bool:
         return self._interface_colmap.exists() and self._texture_mesh.exists()
 
+    def _sanitize_mesh(self, mesh: trimesh.Trimesh, log_file) -> trimesh.Trimesh:
+        """
+        Aggressively cleans the mesh to prevent OpenMVS native crashes.
+        """
+        initial_faces = len(mesh.faces)
+        try:
+            # SPRINT 5C: Use trimesh.process() for standard cleanup
+            # It handles duplicate faces, unreferenced vertices, etc.
+            mesh.process(validate=True)
+            
+            # Explicitly remove degenerate faces if process didn't catch them all
+            mesh.update_faces(mesh.nondegenerate_faces())
+            
+            # Remove infinite values if any
+            mesh.remove_infinite_values()
+        except Exception as e:
+            log_file.write(f"WARNING: Mesh sanitization (process) failed: {e}\n")
+        
+        # Remove zero-area triangles if any left
+        try:
+            if len(mesh.faces) > 0:
+                face_areas = mesh.area_faces
+                non_zero = face_areas > 1e-12
+                if not np.all(non_zero):
+                    mesh.update_faces(non_zero)
+        except Exception as e:
+            log_file.write(f"WARNING: Mesh area-based sanitization failed: {e}\n")
+
+        final_faces = len(mesh.faces)
+        if final_faces < initial_faces:
+            log_file.write(f"Mesh sanitized: removed {initial_faces - final_faces} problematic faces.\n")
+        return mesh
+
     def _simplify_mesh(self, input_mesh: Path, output_mesh: Path, target_faces: int, log_file) -> Path:
         """
         Simplifies mesh to target face count using trimesh/fast_simplification if available.
@@ -42,6 +75,9 @@ class OpenMVSTexturer:
             mesh = trimesh.load(str(input_mesh))
             if isinstance(mesh, trimesh.Scene):
                 mesh = mesh.dump(concatenate=True)
+            
+            # SPRINT: Sanitize mesh before simplification to prevent native crashes
+            mesh = self._sanitize_mesh(mesh, log_file)
             
             current_faces = len(mesh.faces)
             if current_faces <= target_faces:
@@ -66,58 +102,73 @@ class OpenMVSTexturer:
             return output_mesh
         except Exception as e:
             log_file.write(f"WARNING: Mesh simplification failed: {e}. Using original mesh.\n")
-            return input_mesh
+            import shutil
+            shutil.copy2(str(input_mesh), str(output_mesh))
+            return output_mesh
 
-    def _run_command(self, cmd: List[str], cwd: Path, log_file, timeout: Optional[int] = None) -> None:
+    def _run_command(self, cmd: List[str], cwd: Path, log_file, timeout: Optional[int] = None, max_threads: Optional[int] = None) -> None:
         import time
+        
+        # Inject max-threads if requested and not already in cmd
+        if max_threads is not None and "--max-threads" not in cmd:
+            # Check if cmd already has it
+            has_threads = False
+            for i, part in enumerate(cmd):
+                if part == "--max-threads":
+                    cmd[i+1] = str(max_threads)
+                    has_threads = True
+                    break
+            if not has_threads:
+                cmd.extend(["--max-threads", str(max_threads)])
+
         log_file.write(f"\n--- Running: {' '.join(cmd)} (timeout={timeout}s) ---\n")
         log_file.flush()
 
-        start_time = time.time()
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-            cwd=str(cwd),
-        )
-
+        # Create a temporary file for stdout/stderr to ensure we capture EVERYTHING
+        # even if the process crashes natively. 
+        temp_log_path = cwd / f"process_{int(time.time()*1000)}.tmp.log"
+        
         try:
-            while True:
-                # Use a non-blocking way to read if possible, but readline() is usually fine 
-                # if we check timeout frequently. 
-                # However, readline() blocks. Let's use communicate or a better loop.
-                if process.stdout:
-                    line = process.stdout.readline()
-                    if line:
-                        log_file.write(line)
-                        log_file.flush()
-                    elif process.poll() is not None:
-                        break
-                
-                if timeout and (time.time() - start_time) > timeout:
-                    process.kill()
-                    log_file.write("\n\n!!! ERROR: TIMEOUT EXCEEDED !!!\n")
-                    log_file.write(f"Process was killed after {timeout} seconds to prevent hang.\n")
-                    # Drain any remaining buffer
-                    remaining_out, _ = process.communicate()
-                    if remaining_out:
-                        log_file.write(remaining_out)
-                    log_file.flush()
-                    raise RuntimeError(f"OpenMVS command timed out after {timeout}s: {' '.join(cmd)}")
-                
-                if not line and process.poll() is not None:
-                    break
-                    
-            process.wait()
-            if process.returncode != 0:
-                log_file.write(f"\nERROR: Command failed with exit code {process.returncode}\n")
-                log_file.write(f"Check output above for errors.\n")
-                raise RuntimeError(
-                    f"OpenMVS command failed with exit code {process.returncode}: {' '.join(cmd)}"
+            with open(temp_log_path, "w", encoding="utf-8") as tmp_f:
+                start_time = time.time()
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=tmp_f,
+                    stderr=subprocess.STDOUT,
+                    cwd=str(cwd),
                 )
+
+                # Monitor loop
+                while process.poll() is None:
+                    if timeout and (time.time() - start_time) > timeout:
+                        process.kill()
+                        log_file.write("\n\n!!! ERROR: TIMEOUT EXCEEDED !!!\n")
+                        raise RuntimeError(f"OpenMVS command timed out after {timeout}s: {' '.join(cmd)}")
+                    time.sleep(0.5)
+
+            # Append the temp log content to the main log file
+            if temp_log_path.exists():
+                with open(temp_log_path, "r", encoding="utf-8", errors="ignore") as tmp_f:
+                    content = tmp_f.read()
+                    if content:
+                        log_file.write(content)
+                temp_log_path.unlink()
+            
+            if process.returncode != 0:
+                # SPRINT: Check for specific native crash code 3221226505
+                raise RuntimeError(f"Command failed with exit code {process.returncode}")
+                
         except Exception as e:
+            # Cleanup if needed
+            if temp_log_path.exists():
+                try:
+                    with open(temp_log_path, "r", encoding="utf-8", errors="ignore") as tmp_f:
+                        content = tmp_f.read()
+                        if content:
+                            log_file.write(content)
+                    temp_log_path.unlink()
+                except: pass
+            raise e
             if "timed out" in str(e):
                 raise
             # If any other error occurs, make sure to kill the process
@@ -379,7 +430,7 @@ class OpenMVSTexturer:
                 str(self._interface_colmap),
                 "-i", str(dense_workspace),
                 "-o", str(scene_mvs),
-                "--working-folder", str(dense_workspace),
+                "--working-folder", str(output_dir),
                 "--image-folder", str(compatible_image_folder),
             ]
             self._run_command(cmd_interface, output_dir, log_file, timeout=settings.texture_timeout_sec)
@@ -394,10 +445,10 @@ class OpenMVSTexturer:
             # Attempt D: raw_all_images + 40k mesh + resolution-level 2
             
             attempts = [
-                {"name": "Attempt A", "mesh_faces": target_60k, "res_level": 0, "use_raw_all": False},
-                {"name": "Attempt B", "mesh_faces": target_60k, "res_level": 2, "use_raw_all": False},
-                {"name": "Attempt C", "mesh_faces": target_40k, "res_level": 2, "use_raw_all": False},
-                {"name": "Attempt D", "mesh_faces": target_40k, "res_level": 2, "use_raw_all": True},
+                {"name": "Attempt A", "mesh_faces": target_60k, "res_level": 1, "use_raw_all": False, "threads": None},
+                {"name": "Attempt B", "mesh_faces": target_60k, "res_level": 2, "use_raw_all": False, "threads": None},
+                {"name": "Attempt C", "mesh_faces": target_40k, "res_level": 2, "use_raw_all": False, "threads": None},
+                {"name": "Attempt D", "mesh_faces": target_40k, "res_level": 2, "use_raw_all": True, "threads": None},
             ]
             
             success = False
@@ -407,7 +458,7 @@ class OpenMVSTexturer:
                 log_file.write(f"\n>>> Starting {att['name']} <<<\n")
                 
                 # 1. Prepare Mesh
-                mesh_path = output_dir / f"texturing_mesh_{att['mesh_faces']//1000}k.obj"
+                mesh_path = output_dir / f"texturing_mesh_{att['mesh_faces']//1000}k.ply"
                 if not mesh_path.exists():
                     self._simplify_mesh(Path(selected_mesh), mesh_path, att['mesh_faces'], log_file)
                 
@@ -425,7 +476,7 @@ class OpenMVSTexturer:
                             str(self._interface_colmap),
                             "-i", str(dense_workspace),
                             "-o", str(raw_scene),
-                            "--working-folder", str(dense_workspace),
+                            "--working-folder", str(output_dir),
                             "--image-folder", str(image_folder),
                         ]
                         try:
@@ -438,28 +489,43 @@ class OpenMVSTexturer:
 
                 # 3. Run TextureMesh
                 out_stem = f"textured_model_{att['name'].replace(' ', '_').lower()}"
-                out_obj = output_dir / f"{out_stem}.obj"
+                out_glb = output_dir / f"{out_stem}.glb"
                 
                 cmd_texture = [
                     str(self._texture_mesh),
                     "-i", str(current_scene),
                     "--mesh-file", str(mesh_path),
-                    "-o", str(out_obj),
+                    "-o", str(out_glb),
                     "--working-folder", str(output_dir),
                     "--resolution-level", str(att['res_level']),
+                    "--export-type", "glb"
                 ]
                 
+                # Add threads if specified in attempt
+                max_threads = att.get("threads")
+                
                 try:
-                    self._run_command(cmd_texture, output_dir, log_file, timeout=settings.texture_timeout_sec)
-                    # Verify output
-                    if out_obj.exists():
-                        # Quick check for texture atlas
-                        if any(output_dir.glob(f"{out_stem}*map_Kd*")):
-                            log_file.write(f"{att['name']} SUCCESSFUL.\n")
-                            success = True
-                            final_textured_obj = out_obj
-                            used_output_stem = out_stem
-                            break
+                    self._run_command(cmd_texture, output_dir, log_file, timeout=settings.texture_timeout_sec, max_threads=max_threads)
+                    
+                    # Verify output (handle case where OpenMVS still outputs .ply or PNG with a different name)
+                    out_ply = output_dir / f"{out_stem}.ply"
+                    
+                    # If it outputted PLY instead of OBJ, we convert it or use it. We'll convert it to OBJ since the pipeline expects it.
+                    if out_ply.exists() and not out_obj.exists():
+                        log_file.write(f"WARNING: OpenMVS outputted .ply instead of .obj. Converting {out_ply.name} to .obj...\n")
+                        import trimesh
+                        try:
+                            m = trimesh.load(str(out_ply))
+                            m.export(str(out_obj))
+                        except Exception as conv_err:
+                            log_file.write(f"Failed to convert PLY to OBJ: {conv_err}\n")
+
+                    if out_glb.exists():
+                        log_file.write(f"{att['name']} SUCCESSFUL.\n")
+                        success = True
+                        final_textured_obj = out_glb
+                        used_output_stem = out_stem
+                        break
                     log_file.write(f"{att['name']} finished but output missing.\n")
                 except Exception as e:
                     exit_code = None
@@ -480,7 +546,23 @@ class OpenMVSTexturer:
                                     "name": "Attempt E",
                                     "mesh_faces": target_crash_retry,
                                     "res_level": 2,
-                                    "use_raw_all": att['use_raw_all']
+                                    "use_raw_all": att['use_raw_all'],
+                                    "threads": None
+                                })
+                                # SPRINT: Add even deeper fallbacks for native crashes
+                                attempts.append({
+                                    "name": "Attempt F",
+                                    "mesh_faces": target_crash_retry,
+                                    "res_level": 2,
+                                    "use_raw_all": att['use_raw_all'],
+                                    "threads": 8 # Limit threads to 8
+                                })
+                                attempts.append({
+                                    "name": "Attempt G",
+                                    "mesh_faces": target_crash_retry,
+                                    "res_level": 3, # Lower resolution (1/8th)
+                                    "use_raw_all": att['use_raw_all'],
+                                    "threads": 4 # Limit threads to 4
                                 })
                 
             if not success:
