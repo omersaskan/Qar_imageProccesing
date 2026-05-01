@@ -551,6 +551,19 @@ class ReconstructionRunner:
             pass
         return False
 
+    def _check_glb_uvs(self, glb_path: Path) -> bool:
+        if not glb_path.exists() or glb_path.suffix.lower() != ".glb":
+            return False
+        try:
+            from modules.export_pipeline.glb_exporter import inspect_glb_primitive_attributes
+            rep = inspect_glb_primitive_attributes(str(glb_path))
+            return bool(
+                rep.get("all_textured_primitives_have_texcoord_0", False)
+                and rep.get("texture_count", 0) > 0
+            )
+        except Exception:
+            return False
+
     def _finalize_best_attempt(
         self,
         results: dict,
@@ -567,8 +580,12 @@ class ReconstructionRunner:
         checksum = calculate_checksum(mesh_path)
 
         uv_present = bool(results.get("mesh_probe_has_uv", False))
-        if not uv_present and mesh_path.suffix.lower() == ".obj":
-            uv_present = self._check_obj_uvs(mesh_path)
+        if not uv_present:
+            suffix = mesh_path.suffix.lower()
+            if suffix == ".obj":
+                uv_present = self._check_obj_uvs(mesh_path)
+            elif suffix == ".glb":
+                uv_present = self._check_glb_uvs(mesh_path)
 
         has_texture = texture_path.exists() and "_no_texture.png" not in str(texture_path)
 

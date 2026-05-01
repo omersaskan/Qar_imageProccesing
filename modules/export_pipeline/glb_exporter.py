@@ -122,6 +122,7 @@ class GLBExporter:
         smoothing_mode: str = "none",
         metadata: Optional[NormalizedMetadata] = None,
         unlit: bool = True,
+        color_profile: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Final GLB Export with Delivery Gates.
@@ -157,7 +158,7 @@ class GLBExporter:
                     tex_image = img.convert("RGBA").copy()
                 
                 # SPRINT 6: Texture Enhancement (Fix "burnt" look)
-                tex_image = self._normalize_texture(tex_image)
+                tex_image = self._normalize_texture(tex_image, color_profile=color_profile)
 
                 material = trimesh.visual.material.PBRMaterial(
                     baseColorTexture=tex_image,
@@ -332,61 +333,76 @@ class GLBExporter:
         
         return bytes(new_glb)
 
-    def _normalize_texture(self, image: 'Image.Image') -> 'Image.Image':
+    def _normalize_texture(
+        self,
+        image: 'Image.Image',
+        color_profile: Optional[Dict[str, Any]] = None,
+    ) -> 'Image.Image':
         """
         Enhances texture brightness and contrast to correct underexposure.
         Uses histogram stretching and gamma correction.
+
+        If a `color_profile` (from ColorProfiler) is supplied, the per-category
+        brightness_target / gamma / saturation override the global settings.
+        Otherwise, falls back to settings.* (legacy behavior).
         """
         import numpy as np
         from PIL import Image, ImageEnhance
 
+        if color_profile:
+            target_v = float(color_profile.get("brightness_target", settings.texture_brightness_target))
+            gamma = float(color_profile.get("gamma", settings.texture_gamma))
+            sat_factor = float(color_profile.get("saturation", settings.texture_saturation))
+            profile_label = color_profile.get("category", "unknown")
+        else:
+            target_v = settings.texture_brightness_target
+            gamma = settings.texture_gamma
+            sat_factor = settings.texture_saturation
+            profile_label = f"settings:{settings.expected_product_color}"
+
         # 1. Convert to numpy for analysis
         data = np.array(image.convert("RGB"))
-        
+
         # 2. Find meaningful content (ignore pure black/background)
-        # We assume background is very dark (OpenMVS default)
         mask = np.max(data, axis=2) > 10
         if not np.any(mask):
             return image
-        
+
         content = data[mask]
-        
+
         # 3. Calculate current brightness stats
         p98 = np.percentile(content, 98)
         avg = np.mean(content)
-        
-        logger.info(f"Texture normalization pre-check: p98={p98:.1f}, avg={avg:.1f}")
 
-        # 4. Apply Histogram Stretching (Normalization)
-        # Target: Move p98 towards target if it's too dark
-        target_v = settings.texture_brightness_target
+        logger.info(
+            f"Texture normalization [profile={profile_label}] pre-check: "
+            f"p98={p98:.1f}, avg={avg:.1f}, target={target_v:.1f}, gamma={gamma:.2f}, sat={sat_factor:.2f}"
+        )
+
+        # 4. Apply Histogram Stretching (Normalization) — only if underexposed
         if p98 < (target_v - 10):
             scale = target_v / max(p98, 1.0)
-            # Limit scale to avoid extreme noise (max 2.5x)
             scale = min(scale, 2.5)
-            
-            # Apply scaling with clipping
             data = np.clip(data.astype(np.float32) * scale, 0, 255).astype(np.uint8)
             logger.info(f"Applied brightness scale: {scale:.2f}x")
 
         # 5. Convert back to PIL for Gamma/Shadow lifting
         enhanced_img = Image.fromarray(data, "RGB")
-        
-        # 6. Apply Gamma Correction (Lifts shadows without washing out highlights)
-        gamma = settings.texture_gamma
-        lut = [pow(i / 255.0, gamma) * 255 for i in range(256)]
-        lut = lut * 3 # RGB channels
-        enhanced_img = enhanced_img.point(lut)
-        
-        # 7. Add a touch of saturation if it was too gray
-        converter = ImageEnhance.Color(enhanced_img)
-        enhanced_img = converter.enhance(settings.texture_saturation)
 
-        # 8. Restore Alpha if present
+        # 6. Gamma Correction
+        lut = [pow(i / 255.0, gamma) * 255 for i in range(256)]
+        lut = lut * 3
+        enhanced_img = enhanced_img.point(lut)
+
+        # 7. Saturation
+        converter = ImageEnhance.Color(enhanced_img)
+        enhanced_img = converter.enhance(sat_factor)
+
+        # 8. Restore Alpha
         if image.mode == "RGBA":
             _, _, _, a = image.split()
             enhanced_img.putalpha(a)
-        
+
         return enhanced_img
 
     def _apply_optional_optimizations(self, glb_path: str) -> Dict[str, str]:

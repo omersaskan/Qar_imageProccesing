@@ -24,6 +24,48 @@ class MeshIsolator:
     def __init__(self):
         pass
 
+    def _try_load_background_rgb(self, output_dir: Path) -> Optional[Tuple[int, int, int]]:
+        """
+        Walk up from `output_dir` looking for `extraction_manifest.json` (max 4 levels)
+        and pull `color_profile.background_rgb` if present.
+        Returns None when no manifest / no profile / malformed.
+        """
+        try:
+            search_roots = [output_dir]
+            search_roots.extend(list(output_dir.parents)[:4])
+            for root in search_roots:
+                if not root.exists():
+                    continue
+                # Direct hit
+                direct = root / "extraction_manifest.json"
+                if direct.exists():
+                    candidates = [direct]
+                else:
+                    # Shallow rglob (max 3 deep)
+                    candidates = []
+                    for c in root.rglob("extraction_manifest.json"):
+                        try:
+                            depth = len(c.relative_to(root).parts)
+                        except ValueError:
+                            continue
+                        if depth <= 3:
+                            candidates.append(c)
+                        if len(candidates) >= 3:
+                            break
+                for cand in candidates:
+                    try:
+                        with open(cand, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                        cp = data.get("color_profile") or {}
+                        bg = cp.get("background_rgb")
+                        if isinstance(bg, (list, tuple)) and len(bg) >= 3:
+                            return (int(bg[0]), int(bg[1]), int(bg[2]))
+                    except Exception:
+                        continue
+        except Exception:
+            pass
+        return None
+
     def _ensure_mesh(self, mesh: trimesh.Trimesh) -> trimesh.Trimesh:
         if isinstance(mesh, trimesh.Scene):
             mesh = mesh.dump(concatenate=True)
@@ -307,12 +349,14 @@ class MeshIsolator:
         return results
 
     def isolate_product(
-        self, 
-        mesh: trimesh.Trimesh, 
-        cameras: Optional[List[Dict]] = None, 
+        self,
+        mesh: trimesh.Trimesh,
+        cameras: Optional[List[Dict]] = None,
         masks: Optional[Dict[str, np.ndarray]] = None,
         point_cloud: Optional[trimesh.points.PointCloud] = None,
-        output_dir: Optional[Path] = None
+        output_dir: Optional[Path] = None,
+        background_rgb: Optional[Tuple[int, int, int]] = None,
+        background_tolerance: int = 35,
     ) -> Tuple[trimesh.Trimesh, dict]:
         # SPRINT 5 Fix: Preserve original visuals to re-apply after isolation.
         # Isolation processing (splitting, plane removal) will use a geom-only copy 
@@ -346,13 +390,21 @@ class MeshIsolator:
         elif not masks:
             reason_if_geometric_fallback = "Masks missing"
 
+        # Auto-resolve background_rgb from extraction manifest if caller didn't pass one.
+        if background_rgb is None and output_dir is not None:
+            background_rgb = self._try_load_background_rgb(output_dir)
+
         # 1) remove dominant planes (Geometric pre-pass)
         # We need to track face indices. Let's update _remove_horizontal_planes to use submesh.
         current_mesh, plane_stats = self._remove_horizontal_planes_tracked(working_geom)
         current_mesh, support_stats = self._remove_bottom_support_bands_tracked(current_mesh)
         
-        # 1.5) Chromatic Leakage Removal (Fix "turuncu sızıntı")
-        current_mesh, chromatic_stats = self._remove_chromatic_leakage_tracked(current_mesh, mesh)
+        # 1.5) Chromatic Leakage Removal (generic background filter; legacy orange fallback if no bg_rgb)
+        current_mesh, chromatic_stats = self._remove_chromatic_leakage_tracked(
+            current_mesh, mesh,
+            background_rgb=background_rgb,
+            background_tolerance=background_tolerance,
+        )
 
         # 2) split components
         # Optimization: trimesh.split() doesn't preserve metadata, so we do it manually
@@ -577,72 +629,89 @@ class MeshIsolator:
 
         return final_mesh, stats
 
-    def _remove_chromatic_leakage_tracked(self, working_geom: trimesh.Trimesh, original_mesh: trimesh.Trimesh) -> Tuple[trimesh.Trimesh, Dict[str, Any]]:
+    def _remove_chromatic_leakage_tracked(
+        self,
+        working_geom: trimesh.Trimesh,
+        original_mesh: trimesh.Trimesh,
+        background_rgb: Optional[Tuple[int, int, int]] = None,
+        background_tolerance: int = 35,
+    ) -> Tuple[trimesh.Trimesh, Dict[str, Any]]:
         """
-        Identifies and removes components that are dominated by "orange/background" vertex colors.
+        Removes components dominated by background-colored vertex colors.
+
+        - If `background_rgb` is provided (from ColorProfiler), filter by L∞ distance
+          to that color (generic, product-agnostic).
+        - Otherwise, fall back to the legacy hardcoded orange filter for backwards-compat
+          with existing restaurant-tray captures.
         """
         stats = {
             "chromatic_removed_faces": 0,
             "chromatic_leakage_detected": False,
+            "chromatic_filter_mode": "background_rgb" if background_rgb is not None else "legacy_orange",
+            "background_rgb": list(background_rgb) if background_rgb is not None else None,
         }
-        
+
         if not hasattr(original_mesh.visual, 'vertex_colors') or original_mesh.visual.vertex_colors is None:
             return working_geom, stats
 
-        # Map current face indices back to original colors
         if 'face_indices' not in working_geom.metadata:
             return working_geom, stats
-            
-        face_indices = working_geom.metadata['face_indices']
+
         vertex_colors = original_mesh.visual.vertex_colors
-        
-        # Split into components to evaluate them individually
+
         components = working_geom.split(only_watertight=False)
         if not components:
             return working_geom, stats
-            
+
         kept_components = []
         for comp in components:
             if 'face_indices' not in comp.metadata:
                 kept_components.append(comp)
                 continue
-            
-            # Get original vertices for these faces
+
             comp_face_indices = comp.metadata['face_indices']
             original_faces = original_mesh.faces[comp_face_indices]
             original_verts_indices = np.unique(original_faces)
             comp_colors = vertex_colors[original_verts_indices][:, :3]
-            
-            # Detect Orange/Turuncu (Background)
-            # R > 150, G > 80, B < 120, R > G+30
-            R, G, B = comp_colors[:, 0], comp_colors[:, 1], comp_colors[:, 2]
-            is_orange = (R > 140) & (G > 70) & (B < 110) & (R > G + 25)
-            
-            orange_ratio = np.count_nonzero(is_orange) / len(comp_colors)
-            
-            # If component is tiny and mostly orange, or medium and very orange, prune it
+
+            if background_rgb is not None:
+                # Generic background-distance filter
+                bg = np.asarray(background_rgb, dtype=np.int16).reshape(1, 3)
+                diff = np.abs(comp_colors.astype(np.int16) - bg)
+                is_bg = np.max(diff, axis=1) <= background_tolerance
+                bg_ratio = float(np.count_nonzero(is_bg) / max(len(comp_colors), 1))
+                ratio_label = f"bg_ratio={bg_ratio:.2%}"
+            else:
+                # Legacy orange filter (backwards-compat for restaurant-tray captures)
+                R, G, B = comp_colors[:, 0], comp_colors[:, 1], comp_colors[:, 2]
+                is_bg = (R > 140) & (G > 70) & (B < 110) & (R > G + 25)
+                bg_ratio = float(np.count_nonzero(is_bg) / max(len(comp_colors), 1))
+                ratio_label = f"orange_ratio={bg_ratio:.2%}"
+
             should_prune = False
-            if len(comp.faces) < 500 and orange_ratio > 0.4:
+            if len(comp.faces) < 500 and bg_ratio > 0.40:
                 should_prune = True
-            elif orange_ratio > 0.75:
+            elif bg_ratio > 0.75:
                 should_prune = True
-                
+
             if should_prune:
                 stats["chromatic_removed_faces"] += len(comp.faces)
                 stats["chromatic_leakage_detected"] = True
-                logger.info(f"Pruning chromatic leakage component: faces={len(comp.faces)}, orange_ratio={orange_ratio:.2%}")
+                logger.info(
+                    f"Pruning chromatic leakage component [{stats['chromatic_filter_mode']}]: "
+                    f"faces={len(comp.faces)}, {ratio_label}"
+                )
             else:
                 kept_components.append(comp)
-        
+
         if not kept_components:
-            return working_geom, stats # Safety: don't return empty
-            
+            return working_geom, stats  # Safety: don't return empty
+
         final_mesh = trimesh.util.concatenate(kept_components) if len(kept_components) > 1 else kept_components[0]
-        # Re-apply metadata
         all_indices = []
         for c in kept_components:
-             if 'face_indices' in c.metadata:
-                 all_indices.extend(c.metadata['face_indices'])
+            if 'face_indices' in c.metadata:
+                all_indices.extend(c.metadata['face_indices'])
         final_mesh.metadata['face_indices'] = np.array(all_indices)
-        
+
         return final_mesh, stats

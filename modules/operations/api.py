@@ -13,8 +13,9 @@ Changes:
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, File, UploadFile, Form, Header, Depends
+from fastapi import FastAPI, HTTPException, File, UploadFile, Form, Header, Depends, Body
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from typing import List, Dict, Any, Optional
@@ -693,6 +694,121 @@ async def list_training_manifests():
     except Exception as e:
         logger.error(f"Failed to fetch training manifests: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch training manifests")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SAM2 Manual Track (UI-driven) — operatör bbox/point çizer, video propagation
+# tüm frame'lerin masks'ini üretir. SAM2_ENABLED=true ve checkpoint gerekli.
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.get("/api/sessions/{session_id}/first-frame", dependencies=[Depends(verify_api_key)])
+async def get_session_first_frame(session_id: str):
+    """
+    Returns the first extracted frame for UI bbox/point prompting.
+    """
+    frames_dir = Path(settings.data_root) / "captures" / session_id / "frames"
+    if not frames_dir.exists():
+        raise HTTPException(status_code=404, detail=f"Session frames dir not found: {frames_dir}")
+
+    frame_files = sorted(frames_dir.glob("*.jpg")) + sorted(frames_dir.glob("*.png"))
+    frame_files = [f for f in frame_files if f.is_file()]
+    if not frame_files:
+        raise HTTPException(status_code=404, detail="No frames in session")
+
+    return FileResponse(str(frame_files[0]), media_type="image/jpeg")
+
+
+@app.post("/api/sessions/{session_id}/sam2_track", dependencies=[Depends(verify_api_key)])
+async def sam2_video_track(
+    session_id: str,
+    payload: Dict[str, Any] = Body(...),
+):
+    """
+    Run SAM2 video propagation across all session frames, seeded by a manual
+    prompt (bbox or points) on a chosen frame. Writes masks to
+    `data/captures/{session_id}/frames/masks/<frame>.png`.
+
+    Body schema:
+        {
+          "seed_frame_idx": 0,
+          "seed_box": [x1, y1, x2, y2]              # OR
+          "seed_points": [[x, y], ...],
+          "seed_labels": [1, 1, ...]                # 1=foreground, 0=background
+        }
+    """
+    if not settings.sam2_enabled:
+        raise HTTPException(status_code=400, detail="SAM2 disabled (SAM2_ENABLED=false)")
+
+    seed_frame_idx = int(payload.get("seed_frame_idx", 0))
+    seed_box = payload.get("seed_box")
+    seed_points = payload.get("seed_points")
+    seed_labels = payload.get("seed_labels")
+
+    if not seed_box and not seed_points:
+        raise HTTPException(status_code=400, detail="Provide seed_box or seed_points")
+
+    if seed_box is not None and (not isinstance(seed_box, (list, tuple)) or len(seed_box) != 4):
+        raise HTTPException(status_code=400, detail="seed_box must be [x1, y1, x2, y2]")
+
+    frames_dir = Path(settings.data_root) / "captures" / session_id / "frames"
+    if not frames_dir.exists():
+        raise HTTPException(status_code=404, detail=f"Session frames dir not found: {frames_dir}")
+
+    masks_dir = frames_dir / "masks"
+    masks_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        from modules.ai_segmentation.sam2_video_backend import SAM2VideoBackend
+        backend = SAM2VideoBackend(
+            model_cfg=settings.sam2_model_cfg,
+            checkpoint=settings.sam2_checkpoint,
+            device=settings.sam2_device,
+        )
+    except Exception as e:
+        logger.error(f"SAM2 video backend init failed: {e}")
+        raise HTTPException(status_code=500, detail=f"SAM2 backend init failed: {e}")
+
+    if not backend.is_available():
+        raise HTTPException(
+            status_code=503,
+            detail=f"SAM2 video predictor not loaded; check checkpoint at {settings.sam2_checkpoint}",
+        )
+
+    np_points = None
+    np_labels = None
+    if seed_points is not None:
+        try:
+            np_points = np.array(seed_points, dtype=np.float32)
+            if np_points.ndim != 2 or np_points.shape[1] != 2:
+                raise ValueError("seed_points must be a list of [x, y] pairs")
+            label_list = seed_labels if seed_labels else [1] * len(seed_points)
+            np_labels = np.array(label_list, dtype=np.int32)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Invalid seed_points/seed_labels: {e}")
+
+    logger.info(
+        f"[SAM2 track] session={session_id} seed_frame={seed_frame_idx} "
+        f"seed_box={seed_box} seed_points={seed_points}"
+    )
+
+    masks_dict = backend.segment_video(
+        frames_dir=frames_dir,
+        seed_frame_idx=seed_frame_idx,
+        seed_box=seed_box,
+        seed_points=np_points,
+        seed_labels=np_labels,
+        seed_prompt_source="ui_manual",
+        output_dir=masks_dir,
+    )
+
+    return {
+        "session_id": session_id,
+        "masks_generated": backend.masks_generated,
+        "expected_frame_count": backend.expected_frame_count,
+        "video_propagation_failed": backend.video_propagation_failed,
+        "masks_dir": str(masks_dir),
+        "status": backend.get_status(),
+    }
 
 
 # Asset Blobs (GLB Files)

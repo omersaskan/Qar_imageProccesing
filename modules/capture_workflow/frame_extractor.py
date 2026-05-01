@@ -189,6 +189,9 @@ class FrameExtractor:
             "seg_model": getattr(self.seg_config, "rembg_model_name", "default"),
             "rembg_model": getattr(self.seg_config, "rembg_model_name", "u2net"),
             "rembg_threshold": getattr(self.seg_config, "rembg_mask_threshold", 50),
+            "expected_product_color": getattr(settings, "expected_product_color", "unknown"),
+            "segmentation_method": getattr(settings, "segmentation_method", "legacy"),
+            "sam2_enabled": getattr(settings, "sam2_enabled", False),
         }
         current_hash = hashlib.md5(json.dumps(cache_data, sort_keys=True).encode()).hexdigest()
         
@@ -358,6 +361,25 @@ class FrameExtractor:
         finally:
             cap.release()
 
+        # Dynamic color profile (replaces hardcoded EXPECTED_PRODUCT_COLOR=black)
+        color_profile_dict: Dict[str, Any] = {}
+        try:
+            from modules.utils.color_profiler import resolve_color_profile
+
+            profile = resolve_color_profile(
+                expected_color_setting=getattr(settings, "expected_product_color", "auto"),
+                frame_paths=[Path(p) for p in extracted_paths],
+                masks_dir=masks_dir,
+            )
+            color_profile_dict = profile.to_dict()
+            logger.info(
+                f"[Extraction] color_profile: category={profile.category.value} "
+                f"product_rgb={profile.product_rgb} bg_rgb={profile.background_rgb} "
+                f"source={profile.source} confidence={profile.confidence:.2f}"
+            )
+        except Exception as e:
+            logger.warning(f"Color profile detection failed, using fallback: {e}")
+
         extraction_report = {
             "total_frames_read": frame_count,
             "rejection_counts": rejection_counts,
@@ -367,6 +389,7 @@ class FrameExtractor:
             "masks_dir": str(masks_dir),
             "video_filename": Path(video_path).name,
             "timestamp": datetime.now().isoformat(),
+            "color_profile": color_profile_dict,
         }
 
         logger.info(f"[Extraction] Product-aware summary for {extraction_report['video_filename']}:")
@@ -384,7 +407,8 @@ class FrameExtractor:
                 "manifest_hash": current_hash,
                 "video_path": video_path,
                 "timestamp": str(datetime.now()),
-                "frame_count": len(extracted_paths)
+                "frame_count": len(extracted_paths),
+                "color_profile": color_profile_dict,
             }, f, indent=2)
 
         return extracted_paths, extraction_report
