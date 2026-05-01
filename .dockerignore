@@ -50,5 +50,13 @@ ARCHITECTURE.MD
 RUNBOOK.md
 DEPLOYMENT_RUNPOD.md
 
-# UI (optional: mount separately in RunPod)
+# Local env file — production pods get .env via env vars or .env.runpod template
+.env
+# but ship the production template:
+!.env.runpod
+
+# UI is shipped — FastAPI mounts ui/ as static at "/"
 # ui/
+
+# Models live on the persistent volume, not baked into image
+models/

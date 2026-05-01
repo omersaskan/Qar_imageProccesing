@@ -575,8 +575,14 @@ class IngestionWorker:
 
             manager = JobManager(data_root=str(self.data_root))
             runner = ReconstructionRunner()
-            # Unique job_id using nanoseconds to prevent collisions
-            job_id = f"job_{session.session_id}_{time.time_ns()}"
+            
+            # Use existing job ID if present (resumption), otherwise create new one
+            if session.reconstruction_job_id:
+                job_id = session.reconstruction_job_id
+                logger.info(f"Resuming existing reconstruction job: {job_id}")
+            else:
+                job_id = f"job_{session.session_id}_{time.time_ns()}"
+                logger.info(f"Starting new reconstruction job: {job_id}")
 
             draft = ReconstructionJobDraft(
                 job_id=job_id,

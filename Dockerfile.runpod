@@ -63,10 +63,31 @@ ENV PYTHONUNBUFFERED=1
 # Production mode activates validate_setup() guards, API key enforcement,
 # and blocks SimulatedAdapter usage.
 ENV ENV=production
+# FFmpeg/FFprobe shipped via apt are on PATH
+ENV FFMPEG_PATH=ffmpeg
+ENV FFPROBE_PATH=ffprobe
+# Capture profile defaults — operators override via .env or per-upload UI selection
+ENV CAPTURE_PROFILE=small_on_surface
+ENV MATERIAL_HINT=opaque
+ENV EXPECTED_PRODUCT_COLOR=auto
+# AI completion off by default — set provider + token at pod runtime
+ENV AI_3D_PROVIDER=none
+ENV AI_COMPLETION_ENABLED=false
+# SAM2 — wrapper hazır ama default legacy; pod boot'ta SEGMENTATION_METHOD=sam2 yapılırsa açılır
+ENV SAM2_ENABLED=false
+ENV SEGMENTATION_METHOD=legacy
+ENV SAM2_CHECKPOINT=/app/models/sam2/sam2.1_hiera_large.pt
+ENV SAM2_MODEL_CFG=sam2.1_hiera_l.yaml
+# data dir mount point — RunPod attach a Network Volume here for persistence
+ENV DATA_ROOT=/app/data
 
 # Install Runtime Dependencies
+# ffmpeg / ffprobe required by /api/sessions/upload video normalization.
+# curl used by HEALTHCHECK and SAM2 model download script.
 RUN apt-get update && apt-get install -y \
     python3 python3-pip \
+    ffmpeg \
+    curl ca-certificates \
     libgoogle-glog0v5 libgflags2.2 \
     libboost-filesystem1.74.0 \
     libboost-program-options1.74.0 \
@@ -110,8 +131,19 @@ RUN pip3 install --no-cache-dir --upgrade pip \
 # Copy application source
 COPY . .
 
-# Finalize permissions
-RUN chmod +x scripts/smoke_check.sh
+# Finalize permissions on entrypoint scripts
+RUN chmod +x scripts/smoke_check.sh scripts/start_api.sh scripts/download_sam2.sh
 
-# Entry point is usually overridden by RunPod, but we default to smoke check
-CMD ["./scripts/smoke_check.sh"]
+# Pre-create persistent dirs (RunPod Network Volume mounts here)
+RUN mkdir -p /app/data /app/models/sam2
+
+# API port — uvicorn binds 0.0.0.0:8001
+EXPOSE 8001
+
+# HEALTHCHECK probes /api/health every 30s; pod marked unhealthy after 3 fails.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl --fail --silent http://localhost:8001/api/health || exit 1
+
+# Default to API server. For diagnostic boots:
+#   docker run --rm <image> ./scripts/smoke_check.sh
+CMD ["./scripts/start_api.sh"]

@@ -17,7 +17,18 @@ python-multipart>=0.0.6
 # === Mesh Processing ===
 xatlas
 fast-simplification
+scipy>=1.11,<2.0   # cKDTree for AI completion coverage / mesh isolation
 
 # === ML / Segmentation ===
 rembg
 onnxruntime
+
+# === HTTP clients (AI completion providers, generic API calls) ===
+requests>=2.31,<3.0
+replicate>=0.25,<1.0   # Hunyuan3D-2 via Replicate (only used if AI_3D_PROVIDER=hunyuan3d_replicate)
+
+# === Optional: SAM2 (install on GPU pod when SAM2_ENABLED=true) ===
+# Uncomment for production pods that need SAM2 (heavy: ~3GB + CUDA torch).
+# torch==2.4.0
+# torchvision==0.19.0
+# git+https://github.com/facebookresearch/segment-anything-2.git
