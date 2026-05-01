@@ -92,7 +92,7 @@ def decide_completion_path(
     if observed_ratio >= min_production:
         return CompletionDecision(
             should_run=False,
-            reason=f"observed={observed_ratio:.2f} ≥ production_threshold={min_production:.2f}",
+            reason=f"observed={observed_ratio:.2f} >= production_threshold={min_production:.2f}",
             target_status=CompletionStatus.SKIPPED_SUFFICIENT,
             **base_kwargs,
         )

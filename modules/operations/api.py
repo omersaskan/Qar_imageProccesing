@@ -859,6 +859,151 @@ async def sam2_video_track(
     }
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# AI Completion (generative 3D for unobserved surfaces)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.get("/api/sessions/{session_id}/ai-complete/assess", dependencies=[Depends(verify_api_key)])
+async def assess_ai_completion(session_id: str):
+    """
+    Cheap analysis: load reconstruction mesh, compute observed surface ratio,
+    show what would happen with the configured provider — without invoking it.
+    """
+    capture_path = Path(settings.data_root) / "captures" / session_id
+    job_dir = capture_path / "reconstruction"
+    if not job_dir.exists():
+        raise HTTPException(status_code=404, detail=f"Reconstruction dir not found: {job_dir}")
+
+    manifest_path = job_dir / "manifest.json"
+    if not manifest_path.exists():
+        raise HTTPException(status_code=404, detail="manifest.json missing — reconstruction incomplete?")
+
+    with open(manifest_path, "r", encoding="utf-8") as f:
+        manifest = json.load(f)
+
+    mesh_path = manifest.get("mesh_path")
+    if not mesh_path or not Path(mesh_path).exists():
+        raise HTTPException(status_code=404, detail=f"Mesh not found: {mesh_path}")
+
+    try:
+        import trimesh
+        mesh = trimesh.load(mesh_path, force="mesh")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Mesh load failed: {e}")
+
+    # Resolve capture profile (UI-supplied or env)
+    from modules.operations.capture_profile import CaptureProfile, resolve_from_setting
+    profile = None
+    spp = capture_path / "session_capture_profile.json"
+    if spp.exists():
+        try:
+            profile = CaptureProfile.from_dict(json.loads(spp.read_text(encoding="utf-8")))
+        except Exception:
+            pass
+    if profile is None:
+        profile = resolve_from_setting(settings.capture_profile, settings.material_hint)
+
+    from modules.ai_completion import build_default_service
+    svc = build_default_service(settings, capture_profile=profile)
+    result = svc.assess(mesh)
+    result["mesh_path"] = mesh_path
+    result["capture_profile"] = profile.preset_key
+    return result
+
+
+@app.post("/api/sessions/{session_id}/ai-complete", dependencies=[Depends(verify_api_key)])
+async def run_ai_completion(
+    session_id: str,
+    payload: Optional[Dict[str, Any]] = Body(default=None),
+):
+    """
+    Trigger AI completion for a session.  Body fields (all optional):
+        provider:  override AI_3D_PROVIDER (e.g. 'hunyuan3d_replicate', 'meshy')
+        notes:     free text passed to provider metadata
+        force:     bool — bypass observed/production gate (review-only output)
+    """
+    body = payload or {}
+
+    capture_path = Path(settings.data_root) / "captures" / session_id
+    job_dir = capture_path / "reconstruction"
+    if not job_dir.exists():
+        raise HTTPException(status_code=404, detail=f"Reconstruction dir not found: {job_dir}")
+
+    manifest_path = job_dir / "manifest.json"
+    if not manifest_path.exists():
+        raise HTTPException(status_code=404, detail="manifest.json missing — reconstruction incomplete?")
+
+    with open(manifest_path, "r", encoding="utf-8") as f:
+        manifest = json.load(f)
+
+    mesh_path = manifest.get("mesh_path")
+    if not mesh_path or not Path(mesh_path).exists():
+        raise HTTPException(status_code=404, detail=f"Mesh not found: {mesh_path}")
+
+    try:
+        import trimesh
+        mesh = trimesh.load(mesh_path, force="mesh")
+        original_face_count = int(len(mesh.faces))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Mesh load failed: {e}")
+
+    # Reference image: first extracted frame
+    frames_dir = capture_path / "frames"
+    ref_images: List[str] = []
+    if frames_dir.exists():
+        candidates = sorted(frames_dir.glob("*.jpg")) + sorted(frames_dir.glob("*.png"))
+        ref_images = [str(c) for c in candidates[:1]]
+
+    # Capture profile
+    from modules.operations.capture_profile import CaptureProfile, resolve_from_setting
+    profile = None
+    spp = capture_path / "session_capture_profile.json"
+    if spp.exists():
+        try:
+            profile = CaptureProfile.from_dict(json.loads(spp.read_text(encoding="utf-8")))
+        except Exception:
+            pass
+    if profile is None:
+        profile = resolve_from_setting(settings.capture_profile, settings.material_hint)
+
+    from modules.ai_completion import (
+        build_default_service, CompletionRequest, CompletionStatus,
+    )
+    provider_override = body.get("provider")
+    svc = build_default_service(
+        settings, capture_profile=profile, provider_override=provider_override,
+    )
+
+    request = CompletionRequest(
+        session_id=session_id,
+        mesh_path=mesh_path,
+        reference_image_paths=ref_images,
+        observed_surface_ratio=0.0,  # service computes
+        capture_profile_key=profile.preset_key,
+        material_hint=profile.material_hint.value,
+        notes=str(body.get("notes", "")),
+    )
+
+    output_dir = capture_path / "ai_completion"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    result = svc.run(
+        mesh=mesh,
+        original_face_count=original_face_count,
+        request=request,
+        output_dir=output_dir,
+    )
+
+    # Persist result for traceability
+    try:
+        with open(output_dir / "completion_result.json", "w", encoding="utf-8") as f:
+            json.dump(result.to_dict(), f, indent=2)
+    except Exception:
+        pass
+
+    return result.to_dict()
+
+
 # Asset Blobs (GLB Files)
 blobs_dir = Path(settings.data_root) / "registry" / "blobs"
 blobs_dir.mkdir(parents=True, exist_ok=True)

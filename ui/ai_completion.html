@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<title>AI Completion — Meshysiz</title>
+<style>
+  body { font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 24px; background: #0e0f12; color: #e9e9ec; }
+  .container { max-width: 980px; margin: 0 auto; }
+  h1 { margin: 0 0 6px; font-size: 1.4rem; }
+  p.muted { color: #888; margin: 0 0 18px; font-size: 0.92rem; }
+  .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+  input, select {
+    padding: 9px 12px; background: #1a1c20; color: #e9e9ec;
+    border: 1px solid #2a2d33; border-radius: 6px; font: inherit;
+  }
+  input[type="text"] { width: 320px; }
+  button {
+    padding: 9px 16px; background: #2563eb; color: white;
+    border: none; border-radius: 6px; font: inherit; cursor: pointer;
+  }
+  button.secondary { background: #2a2d33; }
+  button.run { background: #16a34a; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button:hover:not(:disabled) { filter: brightness(1.1); }
+  .status {
+    margin-top: 14px; padding: 12px 14px; background: #14161a;
+    border-left: 3px solid #2563eb; border-radius: 4px;
+    font-family: ui-monospace, "Cascadia Code", monospace;
+    font-size: 0.85rem; white-space: pre-wrap; max-height: 480px; overflow: auto;
+  }
+  .status.error { border-left-color: #ef4444; }
+  .status.ok { border-left-color: #22c55e; }
+  .status.warn { border-left-color: #eab308; }
+  .gauge {
+    display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px;
+    margin: 12px 0;
+  }
+  .gauge-cell {
+    background: #14161a; padding: 10px 14px; border-radius: 6px;
+    border-left: 3px solid #2a2d33;
+  }
+  .gauge-cell .label { font-size: 0.75rem; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
+  .gauge-cell .value { font-size: 1.1rem; margin-top: 4px; font-weight: 600; }
+  .gauge-cell.observed { border-left-color: #3b82f6; }
+  .gauge-cell.target { border-left-color: #22c55e; }
+  .gauge-cell.synth { border-left-color: #eab308; }
+  .badge {
+    display: inline-block; padding: 3px 9px; border-radius: 4px;
+    font-size: 0.78rem; font-weight: 600; text-transform: uppercase;
+  }
+  .badge.production_candidate { background: #16a34a; color: white; }
+  .badge.review_ready { background: #eab308; color: #111; }
+  .badge.preview_only { background: #f97316; color: white; }
+  .badge.failed, .badge.skipped_disabled, .badge.skipped_provider_none { background: #ef4444; color: white; }
+  .badge.skipped_sufficient { background: #3b82f6; color: white; }
+  details { margin-top: 10px; }
+  summary { cursor: pointer; font-size: 0.9rem; opacity: 0.8; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>AI Completion</h1>
+  <p class="muted">
+    Düşük surface coverage'lı asset'ler için generative completion (Hunyuan3D-2 / Meshy).
+    Photogrammetry primary kalır; observed &lt; production threshold ise AI provider çağrılır,
+    synthesized ratio'ya göre <code>production_candidate</code> / <code>review_ready</code> /
+    <code>preview_only</code> grade'i atanır.
+  </p>
+
+  <div class="row">
+    <input type="text" id="session-id" placeholder="Session ID (örn: cap_abc12345)">
+    <select id="provider-override">
+      <option value="">Provider: env default (.env AI_3D_PROVIDER)</option>
+      <option value="none">none (passthrough)</option>
+      <option value="hunyuan3d_replicate">Hunyuan3D-2 (Replicate)</option>
+      <option value="meshy">Meshy AI</option>
+    </select>
+  </div>
+
+  <div class="row">
+    <button id="assess">Assess</button>
+    <button id="run" class="run" disabled>Run AI Completion</button>
+    <button id="clear" class="secondary">Clear</button>
+  </div>
+
+  <div id="gauge-area" style="display:none">
+    <div class="gauge">
+      <div class="gauge-cell observed">
+        <div class="label">Observed Surface</div>
+        <div class="value" id="g-observed">—</div>
+      </div>
+      <div class="gauge-cell target">
+        <div class="label">Target Status</div>
+        <div class="value"><span id="g-target" class="badge"></span></div>
+      </div>
+      <div class="gauge-cell synth">
+        <div class="label">Synthesized Ratio</div>
+        <div class="value" id="g-synth">—</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="status" id="status">Hazır.</div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const status = $('status');
+
+function setStatus(msg, kind = '') {
+  status.textContent = msg;
+  status.className = 'status' + (kind ? ' ' + kind : '');
+}
+
+function fmtPct(x) {
+  if (x === null || x === undefined || isNaN(x)) return '—';
+  return (x * 100).toFixed(1) + '%';
+}
+
+function setGauge(observed, target, synth) {
+  $('gauge-area').style.display = 'block';
+  $('g-observed').textContent = fmtPct(observed);
+  $('g-synth').textContent = synth === undefined ? '—' : fmtPct(synth);
+  const tgt = $('g-target');
+  tgt.textContent = (target || '—').replace(/_/g, ' ');
+  tgt.className = 'badge ' + (target || '');
+}
+
+$('clear').onclick = () => {
+  $('session-id').value = '';
+  $('gauge-area').style.display = 'none';
+  $('run').disabled = true;
+  setStatus('Hazır.');
+};
+
+$('assess').onclick = async () => {
+  const sid = $('session-id').value.trim();
+  if (!sid) { setStatus('Session ID gerekli.', 'error'); return; }
+  setStatus('Assess çalışıyor...');
+  $('run').disabled = true;
+
+  try {
+    const res = await fetch(`/api/sessions/${encodeURIComponent(sid)}/ai-complete/assess`);
+    const data = await res.json();
+    if (!res.ok) {
+      setStatus('HATA: ' + (data.detail || res.statusText), 'error');
+      return;
+    }
+    const cov = data.coverage || {};
+    const dec = data.decision || {};
+    setGauge(cov.observed_surface_ratio, dec.target_status);
+
+    const lines = [
+      `Capture Profile: ${data.capture_profile}`,
+      `Provider:        ${data.provider} (available=${data.provider_available})`,
+      `Coverage Method: ${cov.method}  (${cov.supported_face_count}/${cov.total_face_count} faces)`,
+      `Observed Ratio:  ${fmtPct(cov.observed_surface_ratio)}`,
+      ``,
+      `Decision:        should_run=${dec.should_run}  target=${dec.target_status}`,
+      `Reason:          ${dec.reason}`,
+      ``,
+      `Thresholds:`,
+      `  min_observed_for_completion = ${fmtPct(dec.min_observed_for_completion)}`,
+      `  min_observed_for_production = ${fmtPct(dec.min_observed_for_production)}`,
+      `  max_synth_for_review        = ${fmtPct(dec.max_synth_for_review)}`,
+      `  max_synth_for_production    = ${fmtPct(dec.max_synth_for_production)}`,
+    ].join('\n');
+    const kind = dec.should_run ? 'warn' : (dec.target_status === 'skipped_sufficient' ? 'ok' : '');
+    setStatus(lines, kind);
+    $('run').disabled = !dec.should_run || !data.provider_available;
+  } catch (e) {
+    setStatus('HATA: ' + e.message, 'error');
+  }
+};
+
+$('run').onclick = async () => {
+  const sid = $('session-id').value.trim();
+  if (!sid) return;
+  $('run').disabled = true;
+  setStatus('AI completion çalışıyor (generative inference uzun sürebilir)...');
+
+  const body = {};
+  const ov = $('provider-override').value;
+  if (ov) body.provider = ov;
+
+  try {
+    const res = await fetch(`/api/sessions/${encodeURIComponent(sid)}/ai-complete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setStatus('HATA: ' + (data.detail || res.statusText), 'error');
+      $('run').disabled = false;
+      return;
+    }
+    setGauge(data.observed_surface_ratio, data.status, data.synthesized_surface_ratio);
+    const summary = [
+      `Status:             ${data.status}`,
+      `Provider:           ${data.provider_name}`,
+      `Observed Surface:   ${fmtPct(data.observed_surface_ratio)}`,
+      `Synthesized Ratio:  ${fmtPct(data.synthesized_surface_ratio)}`,
+      `Elapsed:            ${data.elapsed_sec}s`,
+      `Mesh:               ${data.completed_mesh_path || '(none)'}`,
+      `Error:              ${data.error || '-'}`,
+      ``,
+      `Log:`,
+      ...(data.log || []).map(l => `  ${l}`),
+      ``,
+      `Metadata:`,
+      JSON.stringify(data.metadata, null, 2),
+    ].join('\n');
+    const okStatuses = ['production_candidate', 'review_ready', 'preview_only'];
+    setStatus(summary, okStatuses.includes(data.status) ? 'ok' : 'error');
+    $('run').disabled = false;
+  } catch (e) {
+    setStatus('HATA: ' + e.message, 'error');
+    $('run').disabled = false;
+  }
+};
+</script>
+</body>
+</html>
