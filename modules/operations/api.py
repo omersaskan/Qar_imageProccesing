@@ -239,14 +239,46 @@ async def upload_video(
     product_id: str = Form(...),
     operator_id: str = Form("dashboard_user"),
     quality_manifest: Optional[str] = Form(None),
+    capture_profile_size: str = Form("small"),
+    capture_profile_scene: str = Form("on_surface"),
+    material_hint: str = Form("opaque"),
     file: UploadFile = File(...),
 ):
     """
     Handles video upload, creates a new CaptureSession, and saves the file.
     Includes strict FFmpeg normalization and quality manifest validation.
+
+    Capture profile (size_class × scene_type) controls reconstruction tuning,
+    upload size/duration limits, and isolation behavior end-to-end.
     """
     from modules.utils.path_safety import validate_identifier
     from modules.utils.video_utils import normalize_video, validate_video_file
+    from modules.operations.capture_profile import (
+        SizeClass, SceneType, MaterialHint,
+        resolve_capture_profile, apply_profile_to_settings,
+    )
+
+    # Resolve capture profile (UI-supplied; falls back to default on garbage input)
+    try:
+        sz = SizeClass(capture_profile_size.lower())
+    except ValueError:
+        sz = SizeClass.SMALL
+    try:
+        sc = SceneType(capture_profile_scene.lower())
+    except ValueError:
+        sc = SceneType.ON_SURFACE
+    try:
+        mh = MaterialHint(material_hint.lower())
+    except ValueError:
+        mh = MaterialHint.OPAQUE
+    profile = resolve_capture_profile(sz, sc, mh)
+    eff_settings = apply_profile_to_settings(profile, settings)
+    logger.info(
+        f"Upload received with capture_profile={profile.preset_key} "
+        f"material={mh.value} → max_upload_mb={eff_settings.max_upload_mb}, "
+        f"max_dur={eff_settings.max_video_duration_sec}s, "
+        f"long_edge_min={eff_settings.min_video_long_edge}"
+    )
 
     # ── 1. Identifier Validation ──────────────────────────────────────────
     try:
@@ -330,8 +362,24 @@ async def upload_video(
         file_size_mb = os.path.getsize(original_path) / (1024 * 1024)
         if file_size_mb == 0 or file_size_mb < 0.1:
             raise HTTPException(status_code=400, detail="Video file is too small or empty.")
-        if file_size_mb > settings.max_upload_mb:
-            raise HTTPException(status_code=400, detail="File size exceeds maximum.")
+        if file_size_mb > eff_settings.max_upload_mb:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"File size {file_size_mb:.1f}MB exceeds {eff_settings.max_upload_mb}MB "
+                    f"for capture_profile={profile.preset_key}. "
+                    f"Use a larger profile (e.g. large_freestanding) for big objects."
+                ),
+            )
+
+        # Persist capture profile next to session metadata so downstream
+        # (frame_extractor, runner, isolation) can pick it up.
+        try:
+            profile_manifest = capture_path / "session_capture_profile.json"
+            with open(profile_manifest, "w", encoding="utf-8") as pf:
+                json.dump(profile.to_dict(), pf, indent=2)
+        except Exception as e:
+            logger.warning(f"Could not persist session_capture_profile.json: {e}")
 
         # ── 4. Normalization ──────────────────────────────────────────────────
         video_path = video_dir / "raw_video.mp4"

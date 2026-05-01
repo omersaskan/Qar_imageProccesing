@@ -16,10 +16,12 @@ class OpenMVSTexturer:
     Coordinates OpenMVS to process a selected COLMAP mesh and output a textured artifact.
     """
 
-    def __init__(self, bin_dir: str = None):
+    def __init__(self, bin_dir: str = None, settings_override=None):
+        from modules.operations.settings import settings as _global_settings
+        self._settings = settings_override or _global_settings
+
         if not bin_dir:
-            from modules.operations.settings import settings
-            self.bin_dir = Path(settings.openmvs_path)
+            self.bin_dir = Path(self._settings.openmvs_path)
         else:
             self.bin_dir = Path(bin_dir)
 
@@ -299,16 +301,17 @@ class OpenMVSTexturer:
         """
         Runs InterfaceCOLMAP and then TextureMesh with a retry ladder.
         """
-        from modules.operations.settings import settings
-        
+        # Use profile-overridden settings (falls back to global if no override)
+        active = self._settings
+
         log_path = output_dir / "texturing.log"
         scene_mvs = output_dir / "scene.mvs"
-        
-        # SPRINT 5C: Load targets from settings
-        target_60k = settings.texture_texturing_target_faces
-        target_40k = settings.texture_safe_texturing_target_faces
-        target_crash_retry = settings.texture_native_crash_retry_faces
-        max_selected_frames = settings.texture_max_selected_frames
+
+        # SPRINT 5C: Load targets from active (profile-aware) settings
+        target_60k = active.texture_texturing_target_faces
+        target_40k = active.texture_safe_texturing_target_faces
+        target_crash_retry = active.texture_native_crash_retry_faces
+        max_selected_frames = active.texture_max_selected_frames
         
         used_output_stem = "textured_model"
         

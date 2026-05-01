@@ -216,6 +216,13 @@ class Settings(BaseSettings):
     texture_metallic: float = Field(0.0, validation_alias="TEXTURE_METALLIC")
     texture_unlit: bool = Field(True, validation_alias="TEXTURE_UNLIT")
 
+    # --- CAPTURE PROFILE (size_class × scene_type aware pipeline tuning) ---
+    # Options: small_on_surface, small_freestanding, small_mounted,
+    #          medium_on_surface, medium_freestanding, medium_mounted,
+    #          large_on_surface, large_freestanding, large_mounted
+    capture_profile: str = Field("small_on_surface", validation_alias="CAPTURE_PROFILE")
+    material_hint: str = Field("opaque", validation_alias="MATERIAL_HINT")
+
     # --- PHASE 6.1: SAM2 SEGMENTATION ---
     segmentation_method: str = Field("legacy", validation_alias="SEGMENTATION_METHOD")
     sam2_enabled: bool = Field(False, validation_alias="SAM2_ENABLED")

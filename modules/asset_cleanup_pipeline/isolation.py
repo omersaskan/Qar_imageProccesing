@@ -24,6 +24,41 @@ class MeshIsolator:
     def __init__(self):
         pass
 
+    def _try_load_capture_profile(self, output_dir: Path) -> Optional[Dict[str, Any]]:
+        """
+        Walk up from `output_dir` looking for `extraction_manifest.json`
+        (max 4 levels) and return its `capture_profile` dict if present.
+        """
+        try:
+            search_roots = [output_dir]
+            search_roots.extend(list(output_dir.parents)[:4])
+            for root in search_roots:
+                if not root.exists():
+                    continue
+                direct = root / "extraction_manifest.json"
+                candidates = [direct] if direct.exists() else []
+                if not candidates:
+                    for c in root.rglob("extraction_manifest.json"):
+                        try:
+                            if len(c.relative_to(root).parts) <= 3:
+                                candidates.append(c)
+                        except ValueError:
+                            continue
+                        if len(candidates) >= 3:
+                            break
+                for cand in candidates:
+                    try:
+                        with open(cand, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                        cp = data.get("capture_profile")
+                        if isinstance(cp, dict) and cp:
+                            return cp
+                    except Exception:
+                        continue
+        except Exception:
+            pass
+        return None
+
     def _try_load_background_rgb(self, output_dir: Path) -> Optional[Tuple[int, int, int]]:
         """
         Walk up from `output_dir` looking for `extraction_manifest.json` (max 4 levels)
@@ -357,6 +392,9 @@ class MeshIsolator:
         output_dir: Optional[Path] = None,
         background_rgb: Optional[Tuple[int, int, int]] = None,
         background_tolerance: int = 35,
+        scene_type: Optional[str] = None,
+        remove_horizontal_planes: Optional[bool] = None,
+        remove_bottom_support_band: Optional[bool] = None,
     ) -> Tuple[trimesh.Trimesh, dict]:
         # SPRINT 5 Fix: Preserve original visuals to re-apply after isolation.
         # Isolation processing (splitting, plane removal) will use a geom-only copy 
@@ -394,11 +432,49 @@ class MeshIsolator:
         if background_rgb is None and output_dir is not None:
             background_rgb = self._try_load_background_rgb(output_dir)
 
-        # 1) remove dominant planes (Geometric pre-pass)
-        # We need to track face indices. Let's update _remove_horizontal_planes to use submesh.
-        current_mesh, plane_stats = self._remove_horizontal_planes_tracked(working_geom)
-        current_mesh, support_stats = self._remove_bottom_support_bands_tracked(current_mesh)
-        
+        # Auto-resolve capture_profile (scene_type + isolation flags) from manifest
+        # if explicit args were not supplied. Caller wins; manifest fills gaps;
+        # final fallback is the legacy "ON_SURFACE" behaviour (strip planes + bands).
+        if (scene_type is None or remove_horizontal_planes is None or
+                remove_bottom_support_band is None) and output_dir is not None:
+            mf_profile = self._try_load_capture_profile(output_dir)
+            if mf_profile:
+                if scene_type is None:
+                    scene_type = mf_profile.get("scene_type")
+                if remove_horizontal_planes is None:
+                    remove_horizontal_planes = mf_profile.get("remove_horizontal_planes")
+                if remove_bottom_support_band is None:
+                    remove_bottom_support_band = mf_profile.get("remove_bottom_support_band")
+
+        if remove_horizontal_planes is None:
+            remove_horizontal_planes = True   # legacy default
+        if remove_bottom_support_band is None:
+            remove_bottom_support_band = True
+        scene_type = scene_type or "on_surface"
+
+        # 1) Remove dominant planes & bottom support bands.
+        #    Gated by scene_type so freestanding/mounted objects (forklift,
+        #    chair, mounted panel) keep their own base/wheels/feet.
+        if remove_horizontal_planes:
+            current_mesh, plane_stats = self._remove_horizontal_planes_tracked(working_geom)
+        else:
+            current_mesh, plane_stats = working_geom, {
+                "removed_planes": 0,
+                "removed_plane_faces": 0,
+                "removed_plane_vertices": 0,
+                "plane_candidate_count": 0,
+                "skipped_reason": f"scene_type={scene_type}",
+            }
+        if remove_bottom_support_band:
+            current_mesh, support_stats = self._remove_bottom_support_bands_tracked(current_mesh)
+        else:
+            support_stats = {
+                "removed_support_bands": 0,
+                "removed_support_faces": 0,
+                "removed_support_vertices": 0,
+                "skipped_reason": f"scene_type={scene_type}",
+            }
+
         # 1.5) Chromatic Leakage Removal (generic background filter; legacy orange fallback if no bg_rgb)
         current_mesh, chromatic_stats = self._remove_chromatic_leakage_tracked(
             current_mesh, mesh,
@@ -453,6 +529,7 @@ class MeshIsolator:
         # 4) Score and Rank
         ranked = []
         all_scores = {}
+        primary_assignment_result = "normal"
         for i, comp in enumerate(components):
             if len(comp.faces) < 50:
                 continue
@@ -610,6 +687,9 @@ class MeshIsolator:
             "largest_kept_component_share": float(largest_kept_component_share),
             "object_isolation_status": "success" if final_faces > 0 else "failed",
             "object_isolation_method": isolation_method,
+            "scene_type": scene_type,
+            "remove_horizontal_planes": bool(remove_horizontal_planes),
+            "remove_bottom_support_band": bool(remove_bottom_support_band),
             "isolation_confidence": float(best_scores["total_score"]),
             "selected_component_score": float(best_scores["total_score"]),
             "compactness_score": float(best_scores.get("compactness_score", 0.0)),

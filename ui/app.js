@@ -1145,6 +1145,7 @@ class ARCapture {
         formData.append('product_id', productId);
         formData.append('file', videoBlob, `capture_${productId}.webm`);
         formData.append('quality_manifest', JSON.stringify(this.qualityManifest));
+        appendCaptureProfile(formData);
 
         this.statusLabel.textContent = "UPLOADING...";
         this.statusLabel.style.color = "var(--accent-color)";
@@ -1193,15 +1194,60 @@ const arCapture = new ARCapture();
 
 // --- Upload Handlers ---
 
+// ─── Capture Profile (size × scene × material) helpers ─────────────────────
+const PROFILE_HINTS = {
+    'small_on_surface':       'Pasta / kitap. Düzlem ve tabak kesimi açık. Poisson 11, max 500 MB upload.',
+    'small_freestanding':     'Küçük heykel. Yer düzlemi korunur. Poisson 11.',
+    'small_mounted':          'Küçük asılı obje (lamba). Mask sınırı belirleyici, düzlem kesilmez.',
+    'medium_on_surface':      'Sandalye masada. Poisson 10, 900 MB / 2 dk video.',
+    'medium_freestanding':    'Yerde duran sandalye/valiz. Tabanı korunur. Poisson 10, 3 dk video.',
+    'medium_mounted':         'Lavabo / panel. Düzlem kesilmez, mask sınırı esas.',
+    'large_on_surface':       'Büyük tezgah ürünü. Poisson 9, 4K görüntü, 4 dk video.',
+    'large_freestanding':     'FORKLIFT / OTOMOBİL. Tabanı/tekerlekleri korunur. 1080p min, 5 dk, 2.5 GB upload.',
+    'large_mounted':          'Asansör paneli / büyük asılı. Backside ≥%55 yeterli (görülmez yüzler).',
+};
+
+function getCaptureProfileSelections() {
+    const sizeEl = document.getElementById('capture-size');
+    const sceneEl = document.getElementById('capture-scene');
+    const matEl = document.getElementById('capture-material');
+    return {
+        size: sizeEl ? sizeEl.value : 'small',
+        scene: sceneEl ? sceneEl.value : 'on_surface',
+        material: matEl ? matEl.value : 'opaque',
+    };
+}
+
+function appendCaptureProfile(formData) {
+    const p = getCaptureProfileSelections();
+    formData.append('capture_profile_size', p.size);
+    formData.append('capture_profile_scene', p.scene);
+    formData.append('material_hint', p.material);
+}
+
+function updateProfileHint() {
+    const { size, scene } = getCaptureProfileSelections();
+    const key = `${size}_${scene}`;
+    const hintEl = document.getElementById('profile-hint');
+    if (hintEl) hintEl.textContent = PROFILE_HINTS[key] || '';
+}
+
 function setupUploadHandlers() {
     openUploadBtn.onclick = () => arCapture.start();
-    
+
     const manualUploadBtn = document.getElementById('open-manual-upload');
     if (manualUploadBtn) {
         manualUploadBtn.onclick = () => uploadModal.classList.remove('hidden');
     }
 
     closeUploadBtn.onclick = () => uploadModal.classList.add('hidden');
+
+    // Live profile hint
+    ['capture-size', 'capture-scene', 'capture-material'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('change', updateProfileHint);
+    });
+    updateProfileHint();
 
     uploadForm.onsubmit = async (e) => {
         e.preventDefault();
@@ -1216,7 +1262,8 @@ function setupUploadHandlers() {
         const formData = new FormData();
         formData.append('product_id', productId);
         formData.append('file', file);
-        
+        appendCaptureProfile(formData);
+
         if (arCapture.qualityManifest) {
             formData.append('quality_manifest', JSON.stringify(arCapture.qualityManifest));
         }

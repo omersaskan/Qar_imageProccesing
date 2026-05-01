@@ -32,6 +32,62 @@ from modules.utils.mesh_inspection import get_mesh_stats_cheaply
 class ReconstructionRunner:
     def __init__(self, adapter: Optional[ReconstructionAdapter] = None):
         self._explicit_adapter = adapter
+        self._effective_settings = None  # set per-job in run() when a profile manifest exists
+
+    def _resolve_effective_settings(self, job: "ReconstructionJob"):
+        """
+        Walk up from job_dir / capture session to find session_capture_profile.json
+        or extraction_manifest.json, build a Settings clone with profile overrides.
+        Returns the global settings unchanged when no profile is found.
+        """
+        try:
+            from modules.operations.capture_profile import (
+                CaptureProfile, apply_profile_to_settings,
+            )
+            search_roots = []
+            try:
+                search_roots.append(Path(job.job_dir))
+                search_roots.extend(list(Path(job.job_dir).parents)[:4])
+            except Exception:
+                pass
+            try:
+                search_roots.append(Path(settings.data_root) / "captures" / job.capture_session_id)
+            except Exception:
+                pass
+
+            cp = None
+            for root in search_roots:
+                if not root or not root.exists():
+                    continue
+                # Direct hits
+                for fname in ("session_capture_profile.json", "extraction_manifest.json"):
+                    cand = root / fname
+                    if cand.exists():
+                        try:
+                            with open(cand, "r", encoding="utf-8") as f:
+                                data = json.load(f)
+                            payload = data if fname == "session_capture_profile.json" else data.get("capture_profile")
+                            if isinstance(payload, dict) and payload:
+                                cp = CaptureProfile.from_dict(payload)
+                                break
+                        except Exception:
+                            continue
+                if cp:
+                    break
+
+            if cp:
+                eff = apply_profile_to_settings(cp, settings)
+                logging.info(
+                    f"Reconstruction effective settings from profile {cp.preset_key}: "
+                    f"max_image_size={eff.recon_max_image_size}, "
+                    f"poisson_depth={eff.recon_poisson_depth}, "
+                    f"mesh_budget={eff.recon_mesh_budget_faces}, "
+                    f"texture_target={eff.texture_texturing_target_faces}"
+                )
+                return eff
+        except Exception as e:
+            logging.warning(f"Profile resolve failed for reconstruction; using env settings: {e}")
+        return settings
 
     @property
     def colmap_adapter(self) -> "COLMAPAdapter":
@@ -43,7 +99,7 @@ class ReconstructionRunner:
                     raise RuntimeError(f"Production environment must be configured: {e}")
                 logging.warning(f"Configuration warning: {e}")
 
-            self._colmap_cached = COLMAPAdapter()
+            self._colmap_cached = COLMAPAdapter(settings_override=self._effective_settings)
         return self._colmap_cached
 
     @property
@@ -57,7 +113,7 @@ class ReconstructionRunner:
                 logging.warning(f"Configuration warning: {e}")
 
             from .adapter import OpenMVSAdapter
-            self._openmvs_cached = OpenMVSAdapter()
+            self._openmvs_cached = OpenMVSAdapter(settings_override=self._effective_settings)
         return self._openmvs_cached
 
     @property
@@ -280,6 +336,13 @@ class ReconstructionRunner:
     def run(self, job: ReconstructionJob) -> OutputManifest:
         if not job.input_frames or len(job.input_frames) < 3:
             raise InsufficientInputError("At least 3 high-quality frames are required for reconstruction.")
+
+        # Resolve per-job effective settings from capture profile (if any).
+        # Drop any cached adapter so the next .adapter access rebuilds with the override.
+        self._effective_settings = self._resolve_effective_settings(job)
+        for attr in ("_colmap_cached", "_openmvs_cached"):
+            if hasattr(self, attr):
+                delattr(self, attr)
 
         validated_frames = self._validate_input_frames(job.input_frames)
 

@@ -110,6 +110,37 @@
                     <label>Product ID</label>
                     <input type="text" id="upload-product-id" placeholder="e.g. stool_wooden" class="glass-input" required>
                 </div>
+
+                <!-- Capture Profile (size × scene × material) -->
+                <div class="profile-grid">
+                    <div class="input-group">
+                        <label>Object Size</label>
+                        <select id="capture-size" class="glass-input">
+                            <option value="small">Small (≤30 cm) — pasta, kitap, küçük heykel</option>
+                            <option value="medium">Medium (30 cm – 2 m) — sandalye, valiz, lavabo</option>
+                            <option value="large">Large (&gt; 2 m) — forklift, otomobil, asansör</option>
+                        </select>
+                    </div>
+                    <div class="input-group">
+                        <label>Scene Type</label>
+                        <select id="capture-scene" class="glass-input">
+                            <option value="on_surface">On Surface — masa/tepsi üstü</option>
+                            <option value="freestanding">Freestanding — yerde duran obje</option>
+                            <option value="mounted">Mounted — duvara/tavana sabit</option>
+                        </select>
+                    </div>
+                    <div class="input-group">
+                        <label>Material Hint</label>
+                        <select id="capture-material" class="glass-input">
+                            <option value="opaque">Opaque (default)</option>
+                            <option value="glossy">Glossy</option>
+                            <option value="metallic">Metallic</option>
+                            <option value="transparent">Transparent / Reflective</option>
+                        </select>
+                    </div>
+                </div>
+                <div id="profile-hint" class="profile-hint"></div>
+
                 <div id="drop-zone" class="drop-zone">
                     <span class="drop-text">Drag & drop video or click to select</span>
                     <input type="file" id="video-input" accept="video/mp4,video/mov,video/quicktime" hidden>

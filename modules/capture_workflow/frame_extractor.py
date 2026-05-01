@@ -380,6 +380,43 @@ class FrameExtractor:
         except Exception as e:
             logger.warning(f"Color profile detection failed, using fallback: {e}")
 
+        # Capture profile (object size + scene type → pipeline thresholds)
+        # Priority: session_capture_profile.json (UI-supplied) > env settings
+        capture_profile_dict: Dict[str, Any] = {}
+        try:
+            from modules.operations.capture_profile import (
+                resolve_from_setting, CaptureProfile,
+            )
+
+            session_profile_path = output_path.parent / "session_capture_profile.json"
+            cp = None
+            profile_source = "env"
+            if session_profile_path.exists():
+                try:
+                    with open(session_profile_path, "r", encoding="utf-8") as pf:
+                        cp = CaptureProfile.from_dict(json.load(pf))
+                        profile_source = "session_manifest"
+                except Exception as e:
+                    logger.warning(f"session_capture_profile.json okunamadı, env fallback: {e}")
+
+            if cp is None:
+                cp = resolve_from_setting(
+                    capture_profile_setting=getattr(settings, "capture_profile", "small_on_surface"),
+                    material_hint=getattr(settings, "material_hint", "opaque"),
+                )
+
+            capture_profile_dict = cp.to_dict()
+            capture_profile_dict["__source"] = profile_source
+            logger.info(
+                f"[Extraction] capture_profile: {cp.preset_key} "
+                f"(source={profile_source}, material={cp.material_hint.value}, "
+                f"poisson_depth={cp.recon_poisson_depth}, "
+                f"mesh_budget={cp.recon_mesh_budget_faces}, "
+                f"strip_planes={cp.remove_horizontal_planes})"
+            )
+        except Exception as e:
+            logger.warning(f"Capture profile resolve failed, downstream uses defaults: {e}")
+
         extraction_report = {
             "total_frames_read": frame_count,
             "rejection_counts": rejection_counts,
@@ -390,6 +427,7 @@ class FrameExtractor:
             "video_filename": Path(video_path).name,
             "timestamp": datetime.now().isoformat(),
             "color_profile": color_profile_dict,
+            "capture_profile": capture_profile_dict,
         }
 
         logger.info(f"[Extraction] Product-aware summary for {extraction_report['video_filename']}:")
@@ -409,6 +447,7 @@ class FrameExtractor:
                 "timestamp": str(datetime.now()),
                 "frame_count": len(extracted_paths),
                 "color_profile": color_profile_dict,
+                "capture_profile": capture_profile_dict,
             }, f, indent=2)
 
         return extracted_paths, extraction_report

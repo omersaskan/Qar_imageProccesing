@@ -558,9 +558,10 @@ class COLMAPAdapter(ReconstructionAdapter):
         self._gpu_index = active_settings.gpu_index
         self._max_image_size = active_settings.recon_max_image_size
         self._matcher = active_settings.recon_matcher.lower()
+        self._active_settings = active_settings
         self.mesh_selector = MeshSelector()
         self.builder = ColmapCommandBuilder(self._engine_path, self._use_gpu, self._gpu_index)
-        self.texturer = OpenMVSTexturer(settings.openmvs_path)
+        self.texturer = OpenMVSTexturer(active_settings.openmvs_path, settings_override=active_settings)
 
     @property
     def engine_type(self) -> str:
@@ -1243,10 +1244,10 @@ class COLMAPAdapter(ReconstructionAdapter):
                 dense_dir = output_dir / "dense"
                 dense_dir.mkdir(exist_ok=True)
                 cmd_undistort = self.builder.image_undistorter(
-                    images_dir, 
-                    model_path, 
-                    dense_dir, 
-                    max_size=settings.recon_max_image_size
+                    images_dir,
+                    model_path,
+                    dense_dir,
+                    max_size=self._max_image_size,
                 )
                 self._run_command(cmd_undistort, output_dir, log_file)
 
@@ -1524,9 +1525,15 @@ class OpenMVSAdapter(COLMAPAdapter):
     Advanced adapter that uses COLMAP for SfM and OpenMVS for MVS/Texturing.
     """
 
-    def __init__(self, colmap_path: Optional[str] = None, openmvs_path: Optional[str] = None):
-        super().__init__(colmap_path)
-        self._openmvs_path = openmvs_path or settings.openmvs_path
+    def __init__(
+        self,
+        colmap_path: Optional[str] = None,
+        openmvs_path: Optional[str] = None,
+        settings_override: Optional[Settings] = None,
+    ):
+        super().__init__(colmap_path, settings_override=settings_override)
+        active = settings_override or settings
+        self._openmvs_path = openmvs_path or active.openmvs_path
         self.mvs_builder = OpenMVSCommandBuilder(self._openmvs_path)
 
     @property
