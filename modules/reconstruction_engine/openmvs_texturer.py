@@ -407,7 +407,7 @@ class OpenMVSTexturer:
                 log_file.write(f"\n>>> Starting {att['name']} <<<\n")
                 
                 # 1. Prepare Mesh
-                mesh_path = output_dir / f"texturing_mesh_{att['mesh_faces']//1000}k.ply"
+                mesh_path = output_dir / f"texturing_mesh_{att['mesh_faces']//1000}k.obj"
                 if not mesh_path.exists():
                     self._simplify_mesh(Path(selected_mesh), mesh_path, att['mesh_faces'], log_file)
                 

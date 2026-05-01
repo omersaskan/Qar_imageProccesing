@@ -27,7 +27,7 @@ def run():
     print("Starting worker process...")
     
     try:
-        worker_instance.process_session(session_id)
+        os.system(f"py tools/debug_process_session.py {session_id}")
         print("Worker finished processing.")
     except Exception as e:
         print(f"Worker encountered an error: {e}")
