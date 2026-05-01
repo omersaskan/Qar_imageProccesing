@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<title>Capture Quality Gate — Meshysiz</title>
+<style>
+  body { font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 24px; background: #0e0f12; color: #e9e9ec; }
+  .container { max-width: 1100px; margin: 0 auto; }
+  h1 { margin: 0 0 4px; font-size: 1.4rem; }
+  p.muted { color: #888; margin: 0 0 18px; font-size: 0.9rem; }
+  .row { display: flex; gap: 12px; align-items: center; margin-bottom: 14px; }
+  input[type="text"] {
+    padding: 9px 12px; background: #1a1c20; color: #e9e9ec;
+    border: 1px solid #2a2d33; border-radius: 6px; font: inherit; width: 320px;
+  }
+  button {
+    padding: 9px 16px; background: #2563eb; color: white;
+    border: none; border-radius: 6px; font: inherit; cursor: pointer;
+  }
+  button.secondary { background: #2a2d33; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button:hover:not(:disabled) { filter: brightness(1.1); }
+
+  .decision-card {
+    margin: 16px 0; padding: 18px 22px; background: #14161a;
+    border-radius: 8px; border-left: 5px solid #2a2d33;
+  }
+  .decision-card.pass { border-left-color: #22c55e; }
+  .decision-card.review { border-left-color: #eab308; }
+  .decision-card.reshoot { border-left-color: #ef4444; }
+  .decision-badge {
+    display: inline-block; padding: 4px 12px; border-radius: 4px;
+    font-weight: 700; font-size: 0.95rem; text-transform: uppercase;
+    letter-spacing: 1px; margin-right: 12px;
+  }
+  .decision-badge.pass { background: #22c55e; color: #0e0f12; }
+  .decision-badge.review { background: #eab308; color: #0e0f12; }
+  .decision-badge.reshoot { background: #ef4444; color: white; }
+
+  .matrix-wrapper { margin-top: 18px; }
+  .matrix-wrapper h3 { font-size: 0.95rem; margin: 0 0 8px; color: #aaa; font-weight: 600; }
+  .matrix {
+    display: grid; grid-template-columns: 70px repeat(8, 1fr);
+    gap: 4px; max-width: 720px;
+    font-family: ui-monospace, "Cascadia Code", monospace; font-size: 0.78rem;
+  }
+  .matrix .cell {
+    padding: 12px 0; text-align: center; background: #14161a;
+    border-radius: 4px; min-height: 36px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .matrix .cell.label { background: transparent; color: #888; font-weight: 600; }
+  .matrix .cell.col-label { padding: 4px 0; min-height: 20px; color: #666; }
+  .matrix .cell.has-frames { background: #1f3a5f; color: #e9e9ec; font-weight: 600; }
+  .matrix .cell.empty { background: #1a1c20; color: #444; }
+
+  .panels { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; margin-top: 18px; }
+  .panel {
+    background: #14161a; padding: 12px 14px; border-radius: 6px;
+    font-family: ui-monospace, monospace; font-size: 0.82rem;
+  }
+  .panel h4 { margin: 0 0 8px; color: #aaa; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
+  .panel .metric { display: flex; justify-content: space-between; margin: 3px 0; }
+  .panel .metric .v { color: #e9e9ec; }
+
+  ul.reasons { margin: 8px 0 0; padding-left: 20px; }
+  ul.reasons li { margin: 4px 0; }
+  ul.reasons.suggestions li { color: #93c5fd; }
+  ul.reasons.fail li { color: #fca5a5; }
+
+  details { margin-top: 14px; }
+  summary { cursor: pointer; padding: 6px 0; color: #888; font-size: 0.85rem; }
+  pre.raw {
+    background: #14161a; padding: 12px; border-radius: 4px;
+    font-size: 0.78rem; overflow: auto; max-height: 360px;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Capture Quality Gate</h1>
+  <p class="muted">
+    Frame extraction sonrası blur burst, elevation diversity ve azimuth coverage'ı
+    ölçer. <code>pass</code> / <code>review</code> / <code>reshoot</code> kararı
+    + 3×8 capture matrix + actionable suggestions.
+  </p>
+
+  <div class="row">
+    <input type="text" id="session-id" placeholder="Session ID (örn: cap_abc12345)">
+    <button id="load">Load Gate Report</button>
+    <button id="refresh" class="secondary">Refresh</button>
+  </div>
+
+  <div id="output" style="display:none">
+    <div class="decision-card" id="decision-card">
+      <span class="decision-badge" id="decision-badge">—</span>
+      <span id="decision-summary"></span>
+
+      <ul class="reasons fail" id="reasons-list" style="display:none"></ul>
+      <ul class="reasons suggestions" id="suggestions-list" style="display:none"></ul>
+    </div>
+
+    <div class="matrix-wrapper">
+      <h3>3×8 Capture Matrix (rows: elevation, cols: azimuth bucket)</h3>
+      <div class="matrix" id="matrix"></div>
+    </div>
+
+    <div class="panels">
+      <div class="panel" id="panel-blur">
+        <h4>Blur Bursts</h4>
+        <div class="metric"><span>frames</span><span class="v" id="blur-frames">—</span></div>
+        <div class="metric"><span>median score</span><span class="v" id="blur-median">—</span></div>
+        <div class="metric"><span>burst frames</span><span class="v" id="blur-burst">—</span></div>
+        <div class="metric"><span>burst ratio</span><span class="v" id="blur-ratio">—</span></div>
+      </div>
+      <div class="panel" id="panel-elev">
+        <h4>Elevation</h4>
+        <div class="metric"><span>frames</span><span class="v" id="elev-frames">—</span></div>
+        <div class="metric"><span>multi-height</span><span class="v" id="elev-mh">—</span></div>
+        <div class="metric"><span>low / mid / top</span><span class="v" id="elev-buckets">—</span></div>
+      </div>
+      <div class="panel" id="panel-az">
+        <h4>Azimuth</h4>
+        <div class="metric"><span>orbit progress</span><span class="v" id="az-orbit">—</span></div>
+        <div class="metric"><span>buckets filled</span><span class="v" id="az-buckets">—</span></div>
+        <div class="metric"><span>static run</span><span class="v" id="az-static">—</span></div>
+      </div>
+    </div>
+
+    <details>
+      <summary>Raw response JSON</summary>
+      <pre class="raw" id="raw"></pre>
+    </details>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+function fmtPct(x) {
+  if (x === null || x === undefined || isNaN(x)) return '—';
+  return (x * 100).toFixed(1) + '%';
+}
+
+function fmtNum(x, d = 2) {
+  if (x === null || x === undefined || isNaN(x)) return '—';
+  return Number(x).toFixed(d);
+}
+
+async function loadGate() {
+  const sid = $('session-id').value.trim();
+  if (!sid) { alert('Session ID gerekli'); return; }
+  const res = await fetch(`/api/sessions/${encodeURIComponent(sid)}/capture-gate`);
+  const data = await res.json();
+  if (!res.ok) {
+    alert('Hata: ' + (data.detail || res.statusText));
+    return;
+  }
+  render(data);
+}
+
+function render(data) {
+  $('output').style.display = 'block';
+  $('raw').textContent = JSON.stringify(data, null, 2);
+
+  const decision = data.decision || data.status || 'unknown';
+  const card = $('decision-card');
+  const badge = $('decision-badge');
+  card.className = 'decision-card ' + decision;
+  badge.className = 'decision-badge ' + decision;
+  badge.textContent = decision.toUpperCase();
+
+  const blur = data.blur || {};
+  const elev = data.elevation || {};
+  const az = data.azimuth || {};
+
+  $('decision-summary').textContent = (
+    decision === 'pass' ? 'Capture solid; reconstruction can proceed.' :
+    decision === 'review' ? 'Capture usable but flagged for QA review.' :
+    decision === 'reshoot' ? 'Strongly recommend re-capture before paying compute.' :
+    ''
+  );
+
+  // Reasons / suggestions
+  const reasonsEl = $('reasons-list');
+  reasonsEl.innerHTML = '';
+  (data.reasons || []).forEach(r => {
+    const li = document.createElement('li'); li.textContent = r; reasonsEl.appendChild(li);
+  });
+  reasonsEl.style.display = (data.reasons || []).length > 0 ? 'block' : 'none';
+
+  const sugEl = $('suggestions-list');
+  sugEl.innerHTML = '';
+  (data.suggestions || []).forEach(s => {
+    const li = document.createElement('li'); li.textContent = '→ ' + s; sugEl.appendChild(li);
+  });
+  sugEl.style.display = (data.suggestions || []).length > 0 ? 'block' : 'none';
+
+  // 3×8 matrix
+  const matrix = data.matrix_3x8 || [[],[],[]];
+  const labels = ['top', 'mid', 'low']; // visual order: top row at top
+  const matrixEl = $('matrix');
+  matrixEl.innerHTML = '';
+  // Column header row
+  matrixEl.appendChild(makeCell('', 'cell label col-label'));
+  for (let c = 0; c < 8; c++) {
+    matrixEl.appendChild(makeCell(`az${c}`, 'cell label col-label'));
+  }
+  // Three rows: top → mid → low (reverse for visual)
+  for (let r = 2; r >= 0; r--) {
+    matrixEl.appendChild(makeCell(labels[2 - r], 'cell label'));
+    for (let c = 0; c < 8; c++) {
+      const v = (matrix[r] && matrix[r][c]) || 0;
+      matrixEl.appendChild(makeCell(v ? String(v) : '', 'cell ' + (v > 0 ? 'has-frames' : 'empty')));
+    }
+  }
+
+  // Panels
+  $('blur-frames').textContent = blur.frame_count ?? '—';
+  $('blur-median').textContent = fmtNum(blur.median_score);
+  $('blur-burst').textContent = blur.total_burst_frames ?? '—';
+  $('blur-ratio').textContent = fmtPct(blur.burst_ratio);
+
+  $('elev-frames').textContent = elev.frame_count ?? '—';
+  $('elev-mh').textContent = fmtPct(elev.multi_height_score);
+  const bc = elev.bucket_counts || {};
+  $('elev-buckets').textContent = `${bc.low ?? 0} / ${bc.mid ?? 0} / ${bc.top ?? 0}`;
+
+  $('az-orbit').textContent = fmtPct(az.cumulative_orbit_progress);
+  $('az-buckets').textContent = `${az.estimated_buckets_filled ?? 0} / 8`;
+  $('az-static').textContent = az.max_consecutive_static_frames ?? '—';
+}
+
+function makeCell(text, cls) {
+  const d = document.createElement('div');
+  d.className = cls;
+  d.textContent = text;
+  return d;
+}
+
+$('load').onclick = loadGate;
+$('refresh').onclick = loadGate;
+$('session-id').addEventListener('keydown', (e) => { if (e.key === 'Enter') loadGate(); });
+</script>
+</body>
+</html>

@@ -675,6 +675,36 @@ class ReconstructionRunner:
 
         manifest_path = job_dir / "manifest.json"
         atomic_write_json(manifest_path, manifest.model_dump(mode="json"))
+
+        # Sprint 1: write quality_report.json (scorecard) next to manifest.
+        # All inputs optional — empty inputs produce a graded F but never raise.
+        try:
+            from modules.qa_validation.scorecard import build_scorecard, write_scorecard
+            mesh_obj = None
+            try:
+                if mesh_path.exists():
+                    mesh_obj = trimesh.load(str(mesh_path), force="mesh", process=False)
+                    if isinstance(mesh_obj, trimesh.Scene):
+                        mesh_obj = mesh_obj.dump(concatenate=True)
+            except Exception:
+                mesh_obj = None
+            sc = build_scorecard(
+                job_id=job.job_id,
+                job_dir=job_dir,
+                mesh=mesh_obj,
+                texture_path=str(texture_path) if has_texture else None,
+                expected_product_color=getattr(settings, "expected_product_color", "unknown"),
+                extra_reconstruction_fields={
+                    "engine_used": engine_used,
+                    "elapsed_seconds": round(elapsed_seconds, 2),
+                    "score": float(results.get("metrics_rank_score", 0.0)) if isinstance(results, dict) else 0.0,
+                },
+            )
+            scorecard_path = write_scorecard(job_dir, sc)
+            logging.info(f"Scorecard written: {scorecard_path} (grade={sc['overall']['grade']})")
+        except Exception as e:
+            logging.warning(f"Scorecard generation failed (non-fatal): {e}")
+
         return manifest
 
     def remesh_retry(self, job: ReconstructionJob, depth: int, trim: int) -> OutputManifest:

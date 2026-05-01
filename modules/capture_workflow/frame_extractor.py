@@ -380,6 +380,22 @@ class FrameExtractor:
         except Exception as e:
             logger.warning(f"Color profile detection failed, using fallback: {e}")
 
+        # Sprint 2 — Capture Quality Gate v2 (advisory)
+        capture_gate_dict: Dict[str, Any] = {}
+        try:
+            from .capture_quality_gate import evaluate_capture
+            gate_report = evaluate_capture(
+                frame_paths=extracted_paths,
+                masks_dir=masks_dir,
+            )
+            capture_gate_dict = gate_report.to_dict()
+            logger.info(
+                f"[Extraction] capture_gate decision={gate_report.decision} "
+                f"({len(gate_report.reasons)} reasons, {len(gate_report.suggestions)} suggestions)"
+            )
+        except Exception as e:
+            logger.warning(f"Capture quality gate failed (advisory, non-fatal): {e}")
+
         # Capture profile (object size + scene type → pipeline thresholds)
         # Priority: session_capture_profile.json (UI-supplied) > env settings
         capture_profile_dict: Dict[str, Any] = {}
@@ -428,6 +444,7 @@ class FrameExtractor:
             "timestamp": datetime.now().isoformat(),
             "color_profile": color_profile_dict,
             "capture_profile": capture_profile_dict,
+            "capture_gate": capture_gate_dict,
         }
 
         logger.info(f"[Extraction] Product-aware summary for {extraction_report['video_filename']}:")
@@ -448,6 +465,7 @@ class FrameExtractor:
                 "frame_count": len(extracted_paths),
                 "color_profile": color_profile_dict,
                 "capture_profile": capture_profile_dict,
+                "capture_gate": capture_gate_dict,
             }, f, indent=2)
 
         return extracted_paths, extraction_report

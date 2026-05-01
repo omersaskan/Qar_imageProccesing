@@ -41,7 +41,19 @@ from modules.ai_completion import (
     decide_completion_path,
 )
 from modules.ai_completion.providers import build_provider
-print('SUCCESS: color_profiler, capture_profile, ai_completion all importable.')
+# Sprint 1 — measurement foundation
+from modules.reconstruction_engine.camera_model_resolver import (
+    resolve_for_frames, ColmapCameraModel, CameraModelDecision,
+)
+from modules.qa_validation.coverage_metrics import compute_coverage_report
+from modules.qa_validation.geometric_quality import compute_geometric_report
+from modules.qa_validation.scorecard import build_scorecard, write_scorecard, SCHEMA_VERSION
+# Sprint 2 — capture quality gate
+from modules.capture_workflow.blur_burst_detector import detect_bursts, BlurBurstReport
+from modules.capture_workflow.elevation_estimator import estimate_elevation_distribution, ElevationReport
+from modules.capture_workflow.azimuth_diversity import estimate_azimuth_distribution, AzimuthReport
+from modules.capture_workflow.capture_quality_gate import evaluate_capture, CaptureGateReport, GateThresholds
+print('SUCCESS: sprint1 + sprint2 modules importable.')
 "
 
 # ── 3. Settings Load ─────────────────────────────────────────────────────────
@@ -68,6 +80,7 @@ required = [
     '/api/sessions/upload',
     '/api/sessions/{session_id}/sam2_track',
     '/api/sessions/{session_id}/first-frame',
+    '/api/sessions/{session_id}/capture-gate',
     '/api/sessions/{session_id}/ai-complete',
     '/api/sessions/{session_id}/ai-complete/assess',
 ]

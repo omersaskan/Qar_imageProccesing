@@ -749,6 +749,48 @@ async def list_training_manifests():
 # tüm frame'lerin masks'ini üretir. SAM2_ENABLED=true ve checkpoint gerekli.
 # ─────────────────────────────────────────────────────────────────────────────
 
+@app.get("/api/sessions/{session_id}/capture-gate", dependencies=[Depends(verify_api_key)])
+async def get_capture_gate(session_id: str):
+    """
+    Sprint 2 — return the capture quality gate report from extraction_manifest.json.
+    UI polls this after upload to show the 3×8 matrix overlay + reasons + suggestions.
+
+    Returns 404 until extraction has finished writing the manifest.
+    """
+    capture_path = Path(settings.data_root) / "captures" / session_id
+    manifest_path = capture_path / "frames" / "extraction_manifest.json"
+    if not manifest_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Capture gate not yet available — frame extraction still running or failed",
+        )
+    try:
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            manifest = json.load(f)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Manifest read failed: {e}")
+
+    gate = manifest.get("capture_gate") or {}
+    if not gate:
+        return {
+            "session_id": session_id,
+            "status": "pending",
+            "message": "extraction completed before Sprint 2 gate; legacy session",
+        }
+    return {
+        "session_id": session_id,
+        "status": "ready",
+        "decision": gate.get("decision", "unknown"),
+        "reasons": gate.get("reasons", []),
+        "suggestions": gate.get("suggestions", []),
+        "matrix_3x8": gate.get("matrix_3x8", []),
+        "blur": gate.get("blur", {}),
+        "elevation": gate.get("elevation", {}),
+        "azimuth": gate.get("azimuth", {}),
+        "thresholds": gate.get("gate_thresholds", {}),
+    }
+
+
 @app.get("/api/sessions/{session_id}/first-frame", dependencies=[Depends(verify_api_key)])
 async def get_session_first_frame(session_id: str):
     """

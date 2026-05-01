@@ -132,7 +132,15 @@ class ColmapCommandBuilder:
         images_dir: Path,
         masks_dir: Optional[Path],
         max_size: int,
+        camera_model: str = "RADIAL",
     ) -> List[str]:
+        """
+        Build the COLMAP feature_extractor command.
+
+        `camera_model` accepts: SIMPLE_RADIAL | RADIAL | OPENCV | OPENCV_FISHEYE.
+        Caller resolves the value via `camera_model_resolver.resolve_for_frames()`;
+        defaults to RADIAL for backward compatibility.
+        """
         prefix = self.caps["extraction_prefix"]
         cmd = [
             self.bin,
@@ -158,8 +166,9 @@ class ColmapCommandBuilder:
 
         # Video frames from a single session should share one camera model
         cmd += ["--ImageReader.single_camera", "1"]
-        # Use a robust model for mobile/video captures
-        cmd += ["--ImageReader.camera_model", "RADIAL"]
+        # Camera model — RADIAL default; caller may pass OPENCV / OPENCV_FISHEYE
+        # for wide-angle / ultrawide / fisheye lenses (Sprint 1).
+        cmd += ["--ImageReader.camera_model", str(camera_model)]
 
         return cmd
 
@@ -1208,11 +1217,27 @@ class COLMAPAdapter(ReconstructionAdapter):
                 selected_model_name = "none"
                 db_path = output_dir / "database.db"
 
+                # Sprint 1: resolve camera model from EXIF / device DB / HFOV
+                camera_decision = None
+                try:
+                    from .camera_model_resolver import resolve_for_frames
+                    camera_decision = resolve_for_frames(input_frames)
+                    log_file.write(
+                        f"[camera_model] resolved to {camera_decision.model.value} "
+                        f"(source={camera_decision.source}, hfov~{camera_decision.estimated_hfov_deg:.1f}°, "
+                        f"reason={camera_decision.reason})\n"
+                    )
+                except Exception as e:
+                    log_file.write(f"[camera_model] resolver failed, using RADIAL: {e}\n")
+
+                camera_model = camera_decision.model.value if camera_decision else "RADIAL"
+
                 cmd_extract = self.builder.feature_extractor(
                     db_path,
                     images_dir,
                     sfm_masks_dir,
                     self._max_image_size,
+                    camera_model=camera_model,
                 )
                 self._run_command(cmd_extract, output_dir, log_file)
 
@@ -1589,12 +1614,26 @@ class OpenMVSAdapter(COLMAPAdapter):
             dense_dir.mkdir(exist_ok=True)
 
             try:
+                # Sprint 1: resolve camera model from EXIF / device DB / HFOV
+                _camera_model_str = "RADIAL"
+                try:
+                    from .camera_model_resolver import resolve_for_frames as _resolve_cm
+                    _decision = _resolve_cm(input_frames)
+                    _camera_model_str = _decision.model.value
+                    log_file.write(
+                        f"[camera_model] resolved to {_camera_model_str} "
+                        f"(source={_decision.source}, reason={_decision.reason})\n"
+                    )
+                except Exception as _cm_err:
+                    log_file.write(f"[camera_model] resolver failed, using RADIAL: {_cm_err}\n")
+
                 self._run_command(
                     self.builder.feature_extractor(
                         db_path,
                         images_dir,
                         sfm_masks_dir,
                         self._max_image_size,
+                        camera_model=_camera_model_str,
                     ),
                     output_dir,
                     log_file,
