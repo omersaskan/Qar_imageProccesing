@@ -516,10 +516,6 @@ class ReconstructionRunner:
 
             audit.attempts.append(attempt_res)
 
-            if attempt_res.status == "success" and attempt_res.metrics_rank_score >= self.min_acceptable_score:
-                logging.info(f"Attempt {i} ({step_name}) score {attempt_res.metrics_rank_score:.1f} is acceptable. Skipping remaining fallbacks.")
-                break
-
         if best_results is None:
             audit.final_status = "recapture_required"
             self._save_audit(audit, job_dir)

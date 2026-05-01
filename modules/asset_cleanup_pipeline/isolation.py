@@ -318,7 +318,7 @@ class MeshIsolator:
         # Isolation processing (splitting, plane removal) will use a geom-only copy 
         # to avoid MemoryError with large textures.
         original_visual = None
-        if hasattr(mesh, 'visual') and isinstance(mesh.visual, trimesh.visual.TextureVisuals):
+        if hasattr(mesh, 'visual') and mesh.visual is not None:
             original_visual = mesh.visual
 
         mesh = self._ensure_mesh(mesh)

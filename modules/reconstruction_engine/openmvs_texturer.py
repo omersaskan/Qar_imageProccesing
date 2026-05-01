@@ -53,9 +53,9 @@ class OpenMVSTexturer:
             # Use fast_simplification if available, else trimesh built-in
             try:
                 import fast_simplification
-                # fast_simplification uses a ratio
-                ratio = target_faces / current_faces
-                points, faces = fast_simplification.simplify(mesh.vertices, mesh.faces, ratio)
+                # fast_simplification uses a reduction ratio (fraction of faces to REMOVE)
+                reduction_ratio = 1.0 - (target_faces / current_faces)
+                points, faces = fast_simplification.simplify(mesh.vertices, mesh.faces, reduction_ratio)
                 new_mesh = trimesh.Trimesh(vertices=points, faces=faces)
             except ImportError:
                 log_file.write("fast_simplification not found, using trimesh.simplify_quadratic...\n")
@@ -445,7 +445,6 @@ class OpenMVSTexturer:
                     "-i", str(current_scene),
                     "--mesh-file", str(mesh_path),
                     "-o", str(out_obj),
-                    "--export-type", "obj",
                     "--working-folder", str(output_dir),
                     "--resolution-level", str(att['res_level']),
                 ]
@@ -475,8 +474,14 @@ class OpenMVSTexturer:
                         log_file.write("NATIVE CRASH DETECTED. Mesh simplification might help in next attempt.\n")
                         # Special case: if Attempt C or D crashed, we might want one more even smaller mesh
                         if att['name'] in ["Attempt C", "Attempt D"] and target_crash_retry < att['mesh_faces']:
-                            log_file.write(f"Extra Retry with even lower face count: {target_crash_retry}\n")
-                            # We could dynamically add an attempt or just let it fail
+                            if not any(a["name"] == "Attempt E" for a in attempts):
+                                log_file.write(f"Extra Retry with even lower face count: {target_crash_retry}\n")
+                                attempts.append({
+                                    "name": "Attempt E",
+                                    "mesh_faces": target_crash_retry,
+                                    "res_level": 2,
+                                    "use_raw_all": att['use_raw_all']
+                                })
                 
             if not success:
                 # Diagnostics: List files even after failure

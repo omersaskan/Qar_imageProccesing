@@ -368,6 +368,16 @@ class GLBExporter:
             except Exception as e:
                 logger.warning("Failed to analyze texture in GLB: %s", e)
 
+        # Calculate bounding box
+        if meshes:
+            b_min = np.min([m.bounds[0] for m in meshes if m.bounds is not None], axis=0)
+            b_max = np.max([m.bounds[1] for m in meshes if m.bounds is not None], axis=0)
+        else:
+            b_min = np.array([0.0, 0.0, 0.0])
+            b_max = np.array([0.0, 0.0, 0.0])
+        
+        b_dims = b_max - b_min
+
         return {
             "final_vertex_count": total_verts,
             "final_face_count": total_faces,
@@ -377,5 +387,8 @@ class GLBExporter:
             "all_primitives_have_normal": strict["all_primitives_have_normal"],
             "all_textured_primitives_have_texcoord_0": strict["all_textured_primitives_have_texcoord_0"],
             "highest_black_pixel_ratio": highest_black_pixel_ratio,
-            "primitive_attribute_report": strict["primitive_attribute_report"]
+            "primitive_attribute_report": strict["primitive_attribute_report"],
+            "bounds_min": {"x": float(b_min[0]), "y": float(b_min[1]), "z": float(b_min[2])},
+            "bounds_max": {"x": float(b_max[0]), "y": float(b_max[1]), "z": float(b_max[2])},
+            "bbox": {"x": float(b_dims[0]), "y": float(b_dims[1]), "z": float(b_dims[2])}
         }

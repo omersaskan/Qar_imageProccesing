@@ -286,10 +286,10 @@ class AssetCleaner:
             stats["delivery_profile"] = profile.name
             return metadata, stats, stats["cleaned_mesh_path"]
 
-        isolation_debug_path = job_cleaned_dir / "debug_isolated_mesh.obj"
-        cleaned_mesh_path = job_cleaned_dir / "cleaned_mesh.obj"
+        isolation_debug_path = job_cleaned_dir / "debug_isolated_mesh.ply"
+        cleaned_mesh_path = job_cleaned_dir / "cleaned_mesh.ply"
         metadata_path = job_cleaned_dir / "normalized_metadata.json"
-        pre_aligned_path = job_cleaned_dir / "pre_aligned_mesh.obj"
+        pre_aligned_path = job_cleaned_dir / "pre_aligned_mesh.ply"
 
         logger.info("[%s] Entering cleanup stage for %s", job_id, raw_mesh_path)
         

@@ -25,7 +25,7 @@ def debug_session(session_id: str):
     print(f"--- Debugging Session: {session_id} ---")
     
     # 1. Setup Logging to Console and File
-    setup_logging(level=logging.DEBUG)
+    setup_logging()
     logger = logging.getLogger("debug_tool")
     
     # 2. Check if session file exists

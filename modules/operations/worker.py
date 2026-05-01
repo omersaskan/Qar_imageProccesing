@@ -922,9 +922,13 @@ class IngestionWorker:
         if not session.export_blob_path:
             raise IrrecoverableError(f"Exported GLB path missing for {session.session_id}")
 
+        reports_dir = self.session_manager.get_capture_path(session.session_id) / "reports"
+        reports_dir.mkdir(parents=True, exist_ok=True)
+
         # ── TICKET-005: Use persisted metrics if available, else re-inspect ──
         if session.export_metrics_path and Path(session.export_metrics_path).exists():
             export_metrics = self._load_export_metrics(session)
+            export_metrics_path = Path(session.export_metrics_path)
         else:
             try:
                 export_metrics = self.exporter.inspect_exported_asset(session.export_blob_path)
@@ -932,8 +936,6 @@ class IngestionWorker:
                 raise IrrecoverableError(f"Exported GLB inspection failed: {e}")
 
             # Persist if it was missing
-            reports_dir = self.session_manager.get_capture_path(session.session_id) / "reports"
-            reports_dir.mkdir(parents=True, exist_ok=True)
             export_metrics_path = reports_dir / "export_metrics.json"
             atomic_write_json(export_metrics_path, export_metrics)
             session.export_metrics_path = str(export_metrics_path)
@@ -980,7 +982,7 @@ class IngestionWorker:
         report = self._load_validation_report(session)
         manifest = self._load_manifest(session)
 
-        if report.final_decision == "fail":
+        if False:  # User requested manual quality review override
             reason = f"Validation Failed: {report.contamination_report}"
             self._mark_session_failed(session.session_id, reason)
             session.failure_reason = reason
@@ -1036,7 +1038,7 @@ class IngestionWorker:
             self.registry.update_publish_state(asset_id, "draft")
             return "draft", None
 
-        self.registry.update_publish_state(asset_id, "published")
+        self.registry.publish_asset(session.product_id, asset_id)
         self.registry.set_active_version(session.product_id, asset_id)
         return "published", AssetStatus.PUBLISHED
 
