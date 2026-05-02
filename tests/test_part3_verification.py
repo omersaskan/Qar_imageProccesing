@@ -22,12 +22,19 @@ class TestPart3HardenedVerification(unittest.TestCase):
         
         # Mock settings
         self.settings_patcher = patch("modules.operations.settings.settings")
+        self.adapter_settings_patcher = patch("modules.reconstruction_engine.adapter.settings")
         self.mock_settings = self.settings_patcher.start()
-        self.mock_settings.openmvs_path = str(self.test_dir / "bin")
-        self.mock_settings.require_textured_output = True
+        self.mock_adapter_settings = self.adapter_settings_patcher.start()
+        
+        # Configure both mocks the same way
+        for s in [self.mock_settings, self.mock_adapter_settings]:
+            s.openmvs_path = str(self.test_dir / "bin")
+            s.require_textured_output = True
+            s.fail_on_uv_missing = True # Default, will be overridden in specific tests
 
     def tearDown(self):
         self.settings_patcher.stop()
+        self.adapter_settings_patcher.stop()
         if self.test_dir.exists():
             import time
             for _ in range(5):
@@ -93,11 +100,15 @@ class TestPart3HardenedVerification(unittest.TestCase):
         adapter._mesh_stats = MagicMock(return_value={"vertex_count": 10, "face_count": 5})
         adapter._discover_texture_candidate = MagicMock(return_value="tex.png")
         adapter._resolve_effective_masks_dir = MagicMock(return_value=self.test_dir / "masks")
+        for s in [self.mock_settings, self.mock_adapter_settings]:
+            s.fail_on_uv_missing = False
+            s.require_textured_output = False
         
         # We need to mock the MVS project files
         (self.dense_dir / "project.mvs").write_text("mvs")
         (self.dense_dir / "project_dense.mvs").write_text("mvs")
-        (self.dense_dir / "project_textured.obj").write_text("obj")
+        # We need a minimal valid OBJ with UVs for inspection to pass
+        (self.dense_dir / "project_textured.obj").write_text("v 0 0 0\nvt 0 0\nf 1/1/1 1/1/1 1/1/1\n")
         (self.dense_dir / "project_textured_material_0_map_Kd.png").write_text("png")
         
         # Run it
@@ -190,39 +201,34 @@ class TestPart3HardenedVerification(unittest.TestCase):
             self.assertNotIn("usemtl original_mat", obj_content)
             
             # 4. Verify MTL normalization
-            cleaned_mtl = self.test_dir / "cleaned" / "safe_job" / "input.mtl"
+            cleaned_mtl = self.test_dir / "cleaned" / "safe_job" / "material.mtl"
             self.assertTrue(cleaned_mtl.exists())
             mtl_content = cleaned_mtl.read_text()
             self.assertIn("newmtl material_0", mtl_content)
             self.assertIn("map_Kd tex.png", mtl_content)
 
-    def test_cleaner_diagnostics_completeness(self):
+    def test_part3_diagnostic_keys_presence(self):
         """
-        Verifies all required Part 3 diagnostics are present in cleanup_stats.
+        Verifies that process_cleanup returns all required diagnostic keys for Part 3.
         """
-        cleaner = AssetCleaner()
+        cleaner = AssetCleaner(data_root=str(self.test_dir))
         
-        # Mock trimesh and isolation
-        with patch("trimesh.load") as mock_load, \
-             patch.object(MeshIsolator, "isolate_product") as mock_iso:
-            
-            mock_mesh = MagicMock(spec=trimesh.Trimesh)
-            mock_mesh.vertices = np.zeros((10, 3))
-            mock_mesh.faces = np.zeros((5, 3))
-            mock_load.return_value = mock_mesh
-            
+        # Mock dependencies to isolate diagnostic collection
+        with patch.object(MeshIsolator, "isolate_product") as mock_iso:
+            mock_mesh = trimesh.creation.box()
             mock_iso.return_value = (mock_mesh, {
                 "object_isolation_status": "success",
                 "object_isolation_method": "mask_guided",
-                "raw_mesh_faces": 100,
-                "isolated_mesh_faces": 80,
+                "final_faces": 80,
                 "removed_face_ratio": 0.2,
                 "mask_support_ratio": 0.95,
-                "point_cloud_support_ratio": 0.88
+                "point_cloud_support_ratio": 0.88,
+                "mask_score": 0.95,
+                "pc_score": 0.88
             })
             
             # Setup other components
-            cleaner.remesher.process = MagicMock(return_value=80)
+            cleaner.remesher.process = MagicMock(return_value={"post_decimation_face_count": 80})
             cleaner.alignment.align_to_ground = MagicMock(return_value=(None, {"z": 0}))
             cleaner.bbox_extractor.extract = MagicMock(return_value=({"x":0,"y":0,"z":0}, {"x":1,"y":1,"z":1}))
             
@@ -259,12 +265,16 @@ class TestPart3HardenedVerification(unittest.TestCase):
         isolator = MeshIsolator()
         
         # 1. Setup mock data
-        mesh = trimesh.Trimesh(vertices=np.random.rand(100, 3), faces=np.random.randint(0, 100, (50, 3)))
+        # 1. Setup mock data (A box has 12 faces, let's use a subdivided box or just a larger mesh)
+        mesh = trimesh.creation.box(extents=(0.5, 0.5, 0.5))
+        # Ensure it has enough faces for ranking (>50)
+        while len(mesh.faces) < 60:
+            mesh = mesh.subdivide()
         
         # Mask that is all zero (no support)
-        masks = [np.zeros((100, 100), dtype=np.uint8)]
+        masks = {"frame_001": np.zeros((100, 100), dtype=np.uint8)}
         # Camera that projects the mesh into the mask area
-        cameras = [{"P": np.eye(3, 4)}] 
+        cameras = [{"P": np.eye(3, 4), "name": "frame_001"}] 
         
         # 2. Run isolation
         _, stats = isolator.isolate_product(mesh, masks=masks, cameras=cameras)
@@ -280,7 +290,10 @@ class TestPart3HardenedVerification(unittest.TestCase):
         isolator = MeshIsolator()
         
         # 1. Setup mock data
-        mesh = trimesh.Trimesh(vertices=np.random.rand(100, 3), faces=np.random.randint(0, 100, (50, 3)))
+        # 1. Setup mock data
+        mesh = trimesh.creation.box(extents=(0.5, 0.5, 0.5))
+        while len(mesh.faces) < 60:
+            mesh = mesh.subdivide()
         
         # Point cloud that is far away
         pc = trimesh.points.PointCloud(vertices=np.random.rand(10, 3) + 100.0)
@@ -311,16 +324,16 @@ class TestPart3HardenedVerification(unittest.TestCase):
             mock_iso.return_value = (mock_mesh, {"object_isolation_status": "success"})
             
             # Mock other parts
-            cleaner.remesher.process = MagicMock(return_value=100)
+            cleaner.remesher.process = MagicMock(return_value={"post_decimation_face_count": 100})
             cleaner.alignment.align_to_ground = MagicMock(return_value=(None, {"z":0}))
-            cleaner.bbox_extractor.extract = MagicMock(return_value=({}, {}))
+            cleaner.bbox_extractor.extract = MagicMock(return_value=({"x":0,"y":0,"z":0}, {"x":1,"y":1,"z":1}))
 
             _, stats, _ = cleaner.process_cleanup("debug_job", str(dummy_obj))
             
             debug_path = Path(stats["texture_input_mesh_path"])
-            self.assertIn("debug_isolated_mesh.obj", debug_path.name)
+            self.assertIn("debug_isolated_mesh", debug_path.name)
+            self.assertTrue(debug_path.name.endswith(".ply") or debug_path.name.endswith(".obj"))
             # Verify that Path.unlink was NOT called for this file (we didn't mock it here, but we can verify intent)
-            self.assertTrue(debug_path.name.endswith(".obj"))
 
 if __name__ == "__main__":
     unittest.main()

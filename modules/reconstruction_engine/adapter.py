@@ -421,6 +421,8 @@ class OpenMVSCommandBuilder:
             str(input_scene_mvs.parent),
             "--resolution-level",
             "0",
+            "--export-type",
+            "obj",
         ]
 
 

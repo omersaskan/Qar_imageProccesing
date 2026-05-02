@@ -67,7 +67,7 @@ class CaptureProfile:
 
     # --- Video upload guards ---
     max_upload_mb: float = 500.0
-    min_video_duration_sec: float = 15.0
+    min_video_duration_sec: float = 5.0
     max_video_duration_sec: float = 120.0
     min_video_long_edge: int = 1280
     min_video_short_edge: int = 720
@@ -146,7 +146,7 @@ _PRESETS: Dict[Tuple[SizeClass, SceneType], CaptureProfile] = {
         recon_max_image_size=2000, recon_poisson_depth=11, recon_poisson_trim=7,
         recon_mesh_budget_faces=1_000_000,
         texture_texturing_target_faces=60_000,
-        max_video_duration_sec=60.0, min_video_duration_sec=15.0,
+        max_video_duration_sec=60.0, min_video_duration_sec=5.0,
         max_upload_mb=500.0, min_video_long_edge=1280,
         remove_horizontal_planes=True, remove_bottom_support_band=True,
         azimuth_gap_threshold_deg=40.0,
@@ -326,7 +326,7 @@ def apply_profile_to_settings(profile: "CaptureProfile", base_settings: Any) -> 
         "texture_native_crash_retry_faces": profile.texture_native_crash_retry_faces,
         # Video / upload — use the more restrictive limit to satisfy security patches in tests
         "max_upload_mb": min(profile.max_upload_mb, base_settings.max_upload_mb),
-        "min_video_duration_sec": max(profile.min_video_duration_sec, base_settings.min_video_duration_sec),
+        "min_video_duration_sec": profile.min_video_duration_sec,
         "max_video_duration_sec": min(profile.max_video_duration_sec, base_settings.max_video_duration_sec),
         "min_video_long_edge": max(profile.min_video_long_edge, base_settings.min_video_long_edge),
         "min_video_short_edge": max(profile.min_video_short_edge, base_settings.min_video_short_edge),

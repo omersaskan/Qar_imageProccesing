@@ -265,12 +265,15 @@ def validate_texture_quality(quality_data: Dict[str, Any]) -> str:
 def validate_decimation(stats: Dict[str, Any], texturing_status: str = "absent") -> str:
     """
     Ensures decimation didn't break UVs/Materials.
-    If texturing happened AFTER decimation (texturing_status == "real"), 
-    then decimation preservation flags are effectively superseded by the new atlas.
+    Failure precedence: failed_visual_integrity > failed_uv_preservation > material_preservation.
     """
     status = str(stats.get("decimation_status", "none")).lower()
+    
+    # 1. Hard visual integrity failure (highest priority)
     if status == "failed_visual_integrity":
         return "fail"
+    
+    # 2. Infrastructure errors
     if "error" in status:
         return "review"
     
@@ -278,8 +281,12 @@ def validate_decimation(stats: Dict[str, Any], texturing_status: str = "absent")
     if texturing_status == "real":
         return "pass"
 
-    if not stats.get("uv_preserved", True) or not stats.get("material_preserved", True):
+    # 3. Preservation failures (UV is critical for textured profiles)
+    if not stats.get("uv_preserved", True) or status == "failed_uv_preservation":
         return "fail"
+        
+    if not stats.get("material_preserved", True):
+        return "review"
         
     return "pass"
 
@@ -308,8 +315,19 @@ def validate_export_delivery_status(asset_data: Dict[str, Any]) -> Dict[str, str
     results: Dict[str, str] = {}
     export_status = str(asset_data.get("export_status", "unknown")).lower()
     
-    # Support both old and new key for backward compatibility during transition
-    structural_ready = bool(asset_data.get("structural_export_ready", asset_data.get("delivery_ready", False)))
+    # Support both old and new key for backward compatibility
+    structural_ready = asset_data.get("structural_export_ready")
+    if structural_ready is None:
+        structural_ready = asset_data.get("delivery_ready")
+        
+    # SPRINT Hardening: If both missing, attempt to derive from accessor flags (legacy test compatibility)
+    if structural_ready is None:
+        has_pos = bool(asset_data.get("all_primitives_have_position", asset_data.get("has_position_accessor", False)))
+        has_norm = bool(asset_data.get("all_primitives_have_normal", asset_data.get("has_normal_accessor", False)))
+        structural_ready = has_pos and has_norm
+    else:
+        structural_ready = bool(structural_ready)
+        
     profile = str(asset_data.get("delivery_profile", "raw_archive")).lower()
     
     if export_status in ["success", "unknown"]:
@@ -333,10 +351,20 @@ def validate_export_delivery_status(asset_data: Dict[str, Any]) -> Dict[str, str
 
 
 def validate_object_filtering(asset_data: Dict[str, Any]) -> str:
-    # Legacy compatibility: if key is missing, assume it wasn't required or was handled upstream
-    if "filtering_status" not in asset_data:
-        return "pass"
-    status = str(asset_data.get("filtering_status", "unknown")).lower()
+    """
+    Profile-aware object isolation check.
+    Missing status is accepted for raw_archive but triggers review for mobile/desktop delivery.
+    """
+    profile = str(asset_data.get("delivery_profile", "raw_archive")).lower()
+    status = asset_data.get("filtering_status")
+    
+    if status is None:
+        # Hardening: Missing filtering proof is suspicious for mobile ready assets
+        if profile in ["mobile_preview", "mobile_high", "desktop_high"]:
+            return "review"
+        return "pass" # Legacy/Archive fallback
+        
+    status = str(status).lower()
     if status == "object_isolated": return "pass"
     if status == "failed": return "fail"
     if status == "scene_raw": return "review"

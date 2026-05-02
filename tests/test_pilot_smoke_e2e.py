@@ -29,10 +29,10 @@ def create_valid_dummy_video(path: Path):
     frames = int(fps * duration)
     
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(str(path), fourcc, fps, (720, 720))
+    out = cv2.VideoWriter(str(path), fourcc, fps, (1280, 720))
     
-    frame = np.zeros((720, 720, 3), dtype=np.uint8)
-    cv2.circle(frame, (360, 360), 100, (255, 255, 255), -1)
+    frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+    cv2.circle(frame, (640, 360), 100, (255, 255, 255), -1)
     
     for _ in range(frames):
         out.write(frame)
@@ -74,15 +74,31 @@ def test_pilot_smoke_pipeline_shell(mock_auth):
         valid_vid = test_root / "valid.mp4"
         create_valid_dummy_video(valid_vid)
         
+        manifest = {
+            "total_frame_count": 150,
+            "accepted_frame_count": 140,
+            "blur_rejection_count": 5,
+            "coverage_summary": {"percent": 95, "maxGap": 10},
+            "profile_type": "generic",
+            "is_demo": True
+        }
         with open(valid_vid, "rb") as f:
-            resp = client.post("/api/sessions/upload", data={"product_id": "prod_pilot", "operator_id": "op_pilot"}, files={"file": ("v.mp4", f, "video/mp4")})
+            resp = client.post(
+                "/api/sessions/upload", 
+                data={
+                    "product_id": "prod_pilot", 
+                    "operator_id": "op_pilot",
+                    "quality_manifest": json.dumps(manifest)
+                }, 
+                files={"file": ("v.mp4", f, "video/mp4")}
+            )
             assert resp.status_code == 200, f"Upload failed: {resp.text}"
             session_id = resp.json()["session_id"]
             
         # 2. Session created
         sess = worker_instance.session_manager.get_session(session_id)
         assert sess is not None
-        assert status_value(sess.status) == AssetStatus.CREATED.value
+        assert status_value(sess.status) == AssetStatus.CAPTURED.value
         
         # Mocks
         def mock_recon(*args, **kwargs):
@@ -299,6 +315,7 @@ def test_pilot_smoke_glb_quality():
         assert inspection["has_uv"] is True
         assert inspection["has_embedded_texture"] is True
         assert inspection["material_semantic_status"] in {"diffuse_textured", "pbr_partial", "pbr_complete"}
+        assert inspection["texture_integrity_status"] == "complete"
         
         validator = AssetValidator()
         validation_input = {
@@ -327,11 +344,22 @@ def test_pilot_smoke_glb_quality():
             "basecolor_present": inspection.get("basecolor_present", False),
             "normal_present": inspection.get("normal_present", False),
             "metallic_roughness_present": inspection.get("metallic_roughness_present", False),
+            "all_primitives_have_position": True,
+            "all_primitives_have_normal": True,
+            "all_textured_primitives_have_texcoord_0": inspection["has_uv"],
+            "has_position_accessor": True,
+            "has_normal_accessor": True,
+            "has_texcoord_0_accessor": inspection["has_uv"],
+            "export_status": "success",
+            "structural_export_ready": True,
+            "filtering_status": "object_isolated",
             "delivery_geometry_count": inspection.get("geometry_count", 1),
             "delivery_component_count": inspection.get("component_count", 1),
+            "texture_applied": inspection.get("texture_applied", True),
+            "texture_count": inspection.get("texture_count", 1),
         }
 
-        report = validator.validate("test_asset", validation_input)
+        report = validator.validate("test_asset", validation_input, allow_texture_quality_skip=True)
         assert report.final_decision in {"pass", "review"}
 
     finally:

@@ -11,9 +11,11 @@ from modules.reconstruction_engine.adapter import OpenMVSAdapter
 from modules.operations.settings import settings
 
 def test_validator_with_texture_path_does_not_crash(tmp_path):
-    # Create a dummy texture
     tex_path = tmp_path / "test_texture.png"
-    img = np.full((100, 100, 3), 200, dtype=np.uint8) # Clean gray
+    # Create a dummy texture with some variation to avoid 'flat color' rejection
+    img = np.full((100, 100, 3), 150, dtype=np.uint8) 
+    noise = np.random.normal(0, 20, (100, 100, 3)).astype(np.uint8)
+    img = cv2.add(img, noise)
     cv2.imwrite(str(tex_path), img)
     
     validator = AssetValidator(thresholds=ValidationThresholds())
@@ -62,9 +64,11 @@ def test_contaminated_texture_fails_validation(tmp_path):
     assert report.final_decision == "fail"
 
 def test_clean_white_texture_with_profile_passes(tmp_path):
-    # Create a clean white texture
     tex_path = tmp_path / "white_texture.png"
-    img = np.full((100, 100, 3), 240, dtype=np.uint8)
+    # Create a clean white texture with some detail
+    img = np.full((100, 100, 3), 230, dtype=np.uint8)
+    noise = np.random.normal(0, 10, (100, 100, 3)).astype(np.uint8)
+    img = cv2.add(img, noise)
     cv2.imwrite(str(tex_path), img)
     
     validator = AssetValidator(thresholds=ValidationThresholds())

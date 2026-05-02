@@ -668,24 +668,46 @@ class MeshIsolator:
         largest_kept_component_share = largest_kept_faces / max(final_faces, 1)
 
         # Final Summary Metrics
+        status = "success"
+        if final_faces == 0:
+            status = "failed"
+        else:
+            # Check if we should actually fail due to lack of evidence despite keeping something
+            if isolation_method in ["mask_guided", "hybrid_pc_mask"] and best_scores.get("mask_score", 0.0) < 0.05:
+                # If we had masks but found 0 support, it's a semantic failure
+                if mask_supports and all(m.get("avg_support", 0.0) < 0.01 for m in mask_supports.values()):
+                     status = "failed_mask_support"
+                     final_faces = 0
+                     kept_components = [trimesh.Trimesh()]
+                     final_geom = kept_components[0]
+            
+            if status == "success" and isolation_method in ["pc_guided", "hybrid_pc_mask"] and best_scores.get("pc_score", 0.0) < 0.05:
+                # If we had PC but found 0 support, it's a reconstruction failure
+                if pc_supports and all(p.get("support_ratio", 0.0) < 0.01 for p in pc_supports.values()):
+                     status = "failed_pc_support"
+                     final_faces = 0
+                     kept_components = [trimesh.Trimesh()]
+                     final_geom = kept_components[0]
+
         stats = {
             "initial_faces": initial_faces,
             "initial_vertices": initial_vertices,
             **plane_stats,
             **support_stats,
             **chromatic_stats,
-            "kept_component_count": len(kept_components),
+            "kept_component_count": len(kept_components) if status == "success" else 0,
             "raw_component_count": len(components),
-            "rejected_component_count": len(components) - len(kept_components),
+            "rejected_component_count": len(components) - (len(kept_components) if status == "success" else 0),
             "final_faces": final_faces,
-            "final_vertices": int(len(final_mesh.vertices)),
-            "removed_face_ratio": float(removed_face_ratio),
-            "primary_component_faces": primary_faces,
-            "primary_face_share": float(primary_face_share),
+            "isolated_mesh_faces": final_faces, # Alias for compatibility
+            "final_vertices": int(len(final_geom.vertices)),
+            "removed_face_ratio": float(removed_face_ratio) if status == "success" else 1.0,
+            "primary_component_faces": primary_faces if status == "success" else 0,
+            "primary_face_share": float(primary_face_share) if status == "success" else 0.0,
             "total_kept_faces": final_faces,
-            "kept_to_initial_face_ratio": float(kept_to_initial_face_ratio),
-            "largest_kept_component_share": float(largest_kept_component_share),
-            "object_isolation_status": "success" if final_faces > 0 else "failed",
+            "kept_to_initial_face_ratio": float(kept_to_initial_face_ratio) if status == "success" else 0.0,
+            "largest_kept_component_share": float(largest_kept_component_share) if status == "success" else 0.0,
+            "object_isolation_status": status,
             "object_isolation_method": isolation_method,
             "scene_type": scene_type,
             "remove_horizontal_planes": bool(remove_horizontal_planes),

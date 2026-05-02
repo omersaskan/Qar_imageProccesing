@@ -181,12 +181,15 @@ class TestSam2ReviewOnly:
     def test_sam2_used_asset_metadata(self):
         mock_model = MagicMock()
         mock_img_pred = MagicMock()
+        mock_sam2 = MagicMock()
+        mock_sam2.build_sam.build_sam2.return_value = mock_model
+        mock_sam2.sam2_image_predictor.SAM2ImagePredictor.return_value = mock_img_pred
+        
         with patch("modules.operations.settings.settings.segmentation_method", "sam2"), \
              patch("modules.operations.settings.settings.sam2_enabled", True), \
              patch("modules.ai_segmentation.sam2_wrapper.HAS_SAM2", True), \
              patch("modules.ai_segmentation.sam2_wrapper.SAM2_IMPORT_ERROR_REASON", None), \
-             patch("modules.ai_segmentation.sam2_wrapper.build_sam2", create=True, return_value=mock_model), \
-             patch("modules.ai_segmentation.sam2_wrapper.SAM2ImagePredictor", create=True, return_value=mock_img_pred), \
+             patch.dict("sys.modules", {"sam2": mock_sam2, "sam2.build_sam": mock_sam2.build_sam, "sam2.sam2_image_predictor": mock_sam2.sam2_image_predictor}), \
              patch("pathlib.Path.exists", return_value=True):
             masker = ObjectMasker()
             frame = np.zeros((100, 100, 3), dtype=np.uint8)

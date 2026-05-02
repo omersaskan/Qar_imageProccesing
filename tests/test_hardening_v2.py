@@ -176,8 +176,9 @@ def test_unique_job_ids_no_collision(tmp_path):
             job_id=job.job_id, mesh_path="m.ply", log_path="l.txt", processing_time_seconds=1.0
         ))
         
-        # Trigger two attempts immediately
+        # Trigger two attempts immediately, clearing job_id between to force new job generation
         worker._handle_reconstruction(session)
+        session.reconstruction_job_id = None
         worker._handle_reconstruction(session)
         
         assert len(job_ids) == 2
@@ -348,6 +349,7 @@ def test_handle_reconstruction_unique_job_id(tmp_path):
         ))
         
         worker._handle_reconstruction(session)
+        session.reconstruction_job_id = None
         time.sleep(1.1)
         worker._handle_reconstruction(session)
         

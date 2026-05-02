@@ -55,6 +55,9 @@ class TestEvalIsolation:
         args.gt_dir = str(gt_dir)
         args.output_dir = str(output_dir)
         args.capture_id = None
+        args.max_frames = 20
+        args.sweep = False
+        args.sam2_mode = "image"
         
         results = run_evaluation(args)
         
@@ -113,6 +116,9 @@ class TestEvalIsolation:
         args.gt_dir = str(gt_dir)
         args.output_dir = str(output_dir)
         args.capture_id = None
+        args.max_frames = 20
+        args.sweep = False
+        args.sam2_mode = "image"
         
         results = run_evaluation(args)
         

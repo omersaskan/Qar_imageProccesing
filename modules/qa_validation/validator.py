@@ -75,10 +75,20 @@ class AssetValidator:
                  quality_decision = validate_texture_quality(asset_data)
                  texture_quality_stats = asset_data
             else:
+                 # Profile-aware missing texture metrics hardening
+                 is_textured = semantic_status not in ["geometry_only", "unknown"]
+                 is_delivery_target = profile_name in ["mobile_preview", "mobile_high", "desktop_high"]
+                 
                  if allow_texture_quality_skip:
                      quality_decision = "pass"
+                 elif not is_textured or profile_name == "raw_archive":
+                     quality_decision = "pass"
+                 elif is_delivery_target:
+                     quality_decision = "review" # Review if metrics missing for mobile delivery
                  else:
-                     quality_decision = "pass" if semantic_status == "geometry_only" else "fail"
+                     quality_decision = "fail"
+                     
+                 if quality_decision != "pass":
                      texture_quality_stats = {"texture_quality_status": "fail", "texture_quality_reasons": ["MISSING_TEXTURE_QUALITY_METRICS"]}
 
         # 2. Decision Aggregation

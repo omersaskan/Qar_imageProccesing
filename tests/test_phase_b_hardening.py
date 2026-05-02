@@ -152,6 +152,9 @@ async def test_api_upload_preflight_binary_resolution(monkeypatch):
             product_id="p1", 
             operator_id="test_op", 
             quality_manifest="{}", 
+            capture_profile_size="small",
+            capture_profile_scene="on_surface",
+            material_hint="opaque",
             file=mock_file
         )
     
@@ -179,6 +182,9 @@ async def test_api_upload_preflight_binary_resolution_positive(monkeypatch):
             product_id="p1", 
             operator_id="test_op", 
             quality_manifest="{}", 
+            capture_profile_size="small",
+            capture_profile_scene="on_surface",
+            material_hint="opaque",
             file=mock_file
         )
     except HTTPException as exc:

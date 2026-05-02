@@ -293,6 +293,38 @@ async def upload_video(
             detail="Invalid video format. Supported: .mp4, .mov, .avi, .webm",
         )
 
+    # ── 2. Quality Manifest JSON Parse (Early MALFORMED check) ────────────
+    manifest_data = None
+    if quality_manifest and quality_manifest.strip() not in ("", "null"):
+        try:
+            manifest_data = json.loads(quality_manifest)
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="Malformed JSON in quality_manifest")
+
+    # ── 3. Profile Resolution & Effective Settings ────────────────────────
+    try:
+        sz = SizeClass(capture_profile_size.lower())
+    except ValueError:
+        sz = SizeClass.SMALL
+    try:
+        sc = SceneType(capture_profile_scene.lower())
+    except ValueError:
+        sc = SceneType.ON_SURFACE
+    try:
+        mh = MaterialHint(material_hint.lower())
+    except ValueError:
+        mh = MaterialHint.OPAQUE
+        
+    profile = resolve_capture_profile(sz, sc, mh)
+    eff_settings = apply_profile_to_settings(profile, settings)
+    
+    logger.info(
+        f"Upload received with capture_profile={profile.preset_key} "
+        f"material={mh.value} \u2192 max_upload_mb={eff_settings.max_upload_mb}, "
+        f"min_dur={eff_settings.min_video_duration_sec}s, "
+        f"max_dur={eff_settings.max_video_duration_sec}s"
+    )
+
     session_id = f"cap_{uuid.uuid4().hex[:8]}"
     capture_path = session_manager.get_capture_path(session_id)
     session_created = False
@@ -321,7 +353,7 @@ async def upload_video(
                 failure_reason=f"Upload processing failed: {reason}"
             )
 
-    # ── 2. Environment & Disk Preflight ───────────────────────────────────
+    # ── 4. Environment & Disk Preflight ───────────────────────────────────
     ffmpeg_resolved = settings.resolve_executable(settings.ffmpeg_path)
     ffprobe_resolved = settings.resolve_executable(settings.ffprobe_path)
     
@@ -345,7 +377,7 @@ async def upload_video(
         if free_disk_gb < settings.min_free_disk_gb:
             raise HTTPException(status_code=507, detail="Insufficient disk space")
 
-    # ── 3. Storage Setup & Direct Streaming ───────────────────────────────
+    # ── 5. Storage Setup & Direct Streaming ───────────────────────────────
     video_dir = capture_path / "video"
     video_dir.mkdir(parents=True, exist_ok=True)
     (capture_path / "reports").mkdir(parents=True, exist_ok=True)
@@ -360,7 +392,70 @@ async def upload_video(
             shutil.copyfileobj(file.file, f)
             
         file_size_mb = os.path.getsize(original_path) / (1024 * 1024)
-        # ── 4. Quality Gates (Size, FPS, Duration, Resolution) ────────────────
+        
+        # ── 6. AR Quality Manifest CONTENT Validation (Precedence High) ───────
+        if manifest_data:
+            # A. Demo Mode & Numeric Sanity
+            if manifest_data.get("is_demo") and not settings.is_dev:
+                 raise HTTPException(status_code=422, detail="Demo mode not permitted in production.")
+
+            m_total_frames = manifest_data.get("total_frame_count", 0)
+            m_accepted_frames = manifest_data.get("accepted_frame_count", 0)
+            m_blur_rejections = manifest_data.get("blur_rejection_count", 0)
+            
+            if m_total_frames <= 0:
+                raise HTTPException(status_code=422, detail="Manifest total_frame_count must be > 0")
+            if m_accepted_frames < 0 or m_accepted_frames > m_total_frames:
+                raise HTTPException(status_code=422, detail="Manifest accepted_frame_count inconsistency")
+            if m_blur_rejections < 0 or m_blur_rejections > m_total_frames:
+                raise HTTPException(status_code=422, detail="Manifest blur_rejection_count inconsistency")
+
+            # B. AR Quality Gate Enforcement (Precedence 3)
+            rejection_reasons = []
+            coverage = manifest_data.get("coverage_summary", {}).get("percent", 0)
+            max_gap = manifest_data.get("coverage_summary", {}).get("maxGap", 360)
+            
+            if coverage < settings.ar_min_coverage:
+                rejection_reasons.append(f"Coverage too low: {coverage:.1f}%")
+            if max_gap > settings.ar_max_gap:
+                rejection_reasons.append(f"Gap too large: {max_gap:.1f}°")
+            if m_accepted_frames < settings.ar_min_accepted_frames:
+                rejection_reasons.append(f"Insufficient accepted frames: {m_accepted_frames}")
+
+            # Blur ratio gate
+            blur_ratio = m_blur_rejections / m_total_frames
+            if blur_ratio > settings.ar_max_blur_ratio:
+                rejection_reasons.append(f"Blur ratio too high: {blur_ratio:.2%} > {settings.ar_max_blur_ratio:.2%}")
+
+            # Accepted ratio gate
+            accepted_ratio = m_accepted_frames / m_total_frames
+            if accepted_ratio < settings.ar_min_accepted_ratio:
+                rejection_reasons.append(f"Accepted frame ratio too low: {accepted_ratio:.2%} < {settings.ar_min_accepted_ratio:.2%}")
+
+            # Profile-specific gates
+            profile_type = manifest_data.get("profile_type", "generic").lower()
+            comp = manifest_data.get("profile_completion")
+            
+            if profile_type in ("box", "bottle"):
+                if not comp:
+                    rejection_reasons.append(f"Missing profile_completion data for {profile_type}")
+                else:
+                    if profile_type == "box":
+                        faces = comp.get("faces", [])
+                        if len(faces) < 6:
+                            rejection_reasons.append(f"Box requires 6 completed faces, got {len(faces)}")
+                    elif profile_type == "bottle":
+                        if not comp.get("cap") or not comp.get("base"):
+                            rejection_reasons.append("Bottle requires both cap and base coverage")
+
+            if rejection_reasons:
+                logger.warning(f"Capture failed quality gate for {session_id}. Reasons: {rejection_reasons}")
+                raise HTTPException(
+                    status_code=422, 
+                    detail={"message": "Capture failed quality gate.", "reasons": rejection_reasons}
+                )
+
+        # ── 7. Physical Video Validation (Precedence 4) ───────────────────────
         preflight_errors = []
         
         # A. File Size
@@ -375,35 +470,35 @@ async def upload_video(
         # B. Video Metadata & Integrity
         ok, error, video_meta = validate_video_file(
             original_path,
-            min_fps=0,        # Checked below
-            min_duration=0,   # Checked below
-            max_duration=9999 # Checked below
+            min_fps=0,        # Manual check below using eff_settings
+            min_duration=0,   
+            max_duration=9999 
         )
         if not ok:
             preflight_errors.append(f"Integrity check failed: {error}")
         else:
             # C. FPS
-            if video_meta["fps"] < settings.min_video_fps:
-                preflight_errors.append(f"FPS too low: {video_meta['fps']:.1f} < {settings.min_video_fps}")
+            if video_meta["fps"] < eff_settings.min_video_fps:
+                preflight_errors.append(f"FPS too low: {video_meta['fps']:.1f} < {eff_settings.min_video_fps}")
             
             # D. Duration
             v_dur = video_meta.get("duration", 0)
-            if v_dur < settings.min_video_duration_sec:
-                preflight_errors.append(f"Video too short: {v_dur:.1f}s < {settings.min_video_duration_sec}s")
-            if v_dur > settings.max_video_duration_sec:
-                preflight_errors.append(f"Video too long: {v_dur:.1f}s > {settings.max_video_duration_sec}s")
+            if v_dur < eff_settings.min_video_duration_sec:
+                preflight_errors.append(f"Video too short: {v_dur:.1f}s < {eff_settings.min_video_duration_sec}s")
+            if v_dur > eff_settings.max_video_duration_sec:
+                preflight_errors.append(f"Video too long: {v_dur:.1f}s > {eff_settings.max_video_duration_sec}s")
 
-            # E. Resolution
             _w, _h = video_meta["width"], video_meta["height"]
-            _min_w = getattr(settings, "min_video_width", settings.min_video_short_edge)
-            _min_h = getattr(settings, "min_video_height", settings.min_video_short_edge)
             _short = min(_w, _h)
             _long  = max(_w, _h)
-            if _w < _min_w or _h < _min_h or _short < settings.min_video_short_edge or _long < settings.min_video_long_edge:
+            
+            logger.debug(f"DEBUG: Resolving {_w}x{_h} (short={_short}, long={_long}) vs limits (short={eff_settings.min_video_short_edge}, long={eff_settings.min_video_long_edge})")
+            
+            if _short < eff_settings.min_video_short_edge or _long < eff_settings.min_video_long_edge:
                 preflight_errors.append(
                     f"Resolution too low: {_w}x{_h}. "
-                    f"Short edge must be >= {settings.min_video_short_edge}, "
-                    f"Long edge must be >= {settings.min_video_long_edge}"
+                    f"Short edge must be >= {eff_settings.min_video_short_edge}, "
+                    f"Long edge must be >= {eff_settings.min_video_long_edge}"
                 )
 
         if preflight_errors:
@@ -411,8 +506,20 @@ async def upload_video(
             logger.warning(f"Upload rejected for {session_id}: {msg}")
             raise HTTPException(status_code=400, detail=f"Video validation failed: {msg}")
 
-        # Persist capture profile next to session metadata so downstream
-        # (frame_extractor, runner, isolation) can pick it up.
+        # ── 8. Manifest Missing Check (Precedence Final for legacy compatibility) ──
+        if not manifest_data:
+             raise HTTPException(status_code=422, detail="Missing quality_manifest for AR capture.")
+
+        # Manifest-vs-Video consistency (now we have both)
+        v_frame_count = video_meta["frame_count"]
+        m_total_frames = manifest_data.get("total_frame_count", 0)
+        tolerance = settings.ar_manifest_frame_count_tolerance
+        if m_total_frames > v_frame_count * (1.0 + tolerance):
+            msg = f"Manifest total_frame_count ({m_total_frames}) exceeds video frame count ({v_frame_count}) by >{tolerance*100}%"
+            logger.warning(f"Upload rejected for {session_id}: {msg}")
+            raise HTTPException(status_code=422, detail=msg)
+
+        # ── 9. Normalization & Persist Profile ────────────────────────────────
         try:
             profile_manifest = capture_path / "session_capture_profile.json"
             with open(profile_manifest, "w", encoding="utf-8") as pf:
@@ -420,10 +527,7 @@ async def upload_video(
         except Exception as e:
             logger.warning(f"Could not persist session_capture_profile.json: {e}")
 
-        # ── 5. Normalization ──────────────────────────────────────────────────
         video_path = video_dir / "raw_video.mp4"
-
-        # FFmpeg normalization handles WebM/MOV/AVI and converts to standard H.264
         try:
             normalize_video(
                 original_path,
@@ -435,90 +539,7 @@ async def upload_video(
         except RuntimeError as _norm_err:
             raise HTTPException(status_code=400, detail=f"Video processing failed: {_norm_err}")
 
-        # ── 6. Quality Manifest Validation ────────────────────────────────────
-        if not quality_manifest or quality_manifest.strip() in ("", "null"):
-            raise HTTPException(status_code=422, detail="Missing quality_manifest for AR capture.")
-
-        try:
-            manifest_data = json.loads(quality_manifest)
-        except json.JSONDecodeError:
-            raise HTTPException(status_code=400, detail="Malformed JSON in quality_manifest")
-        
-        # Demo mode guard
-        if manifest_data.get("is_demo") and not settings.is_dev:
-             raise HTTPException(status_code=422, detail="Demo mode not permitted in production.")
-
-        # Manifest numeric sanity
-        m_total_frames = manifest_data.get("total_frame_count", 0)
-        m_accepted_frames = manifest_data.get("accepted_frame_count", 0)
-        m_blur_rejections = manifest_data.get("blur_rejection_count", 0)
-        
-        if m_total_frames <= 0:
-            raise HTTPException(status_code=422, detail="Manifest total_frame_count must be > 0")
-        if m_accepted_frames < 0 or m_accepted_frames > m_total_frames:
-            raise HTTPException(status_code=422, detail="Manifest accepted_frame_count inconsistency")
-        if m_blur_rejections < 0 or m_blur_rejections > m_total_frames:
-            raise HTTPException(status_code=422, detail="Manifest blur_rejection_count inconsistency")
-            
-        # Manifest-vs-Video consistency
-        v_frame_count = video_meta["frame_count"]
-        tolerance = settings.ar_manifest_frame_count_tolerance
-        if m_total_frames > v_frame_count * (1.0 + tolerance):
-            msg = f"Manifest total_frame_count ({m_total_frames}) exceeds video frame count ({v_frame_count}) by >{tolerance*100}%"
-            logger.warning(f"Upload rejected for {session_id}: {msg}")
-            raise HTTPException(
-                status_code=422, 
-                detail=msg
-            )
-        
-        # ── 7. AR Quality Gate Enforcement ───────────────────────────────────
-        rejection_reasons = []
-        coverage = manifest_data.get("coverage_summary", {}).get("percent", 0)
-        max_gap = manifest_data.get("coverage_summary", {}).get("maxGap", 360)
-        
-        if coverage < settings.ar_min_coverage:
-            rejection_reasons.append(f"Coverage too low: {coverage:.1f}%")
-        if max_gap > settings.ar_max_gap:
-            rejection_reasons.append(f"Gap too large: {max_gap:.1f}°")
-        if m_accepted_frames < settings.ar_min_accepted_frames:
-            rejection_reasons.append(f"Insufficient accepted frames: {m_accepted_frames}")
-
-        # Blur ratio gate
-        blur_ratio = m_blur_rejections / m_total_frames
-        if blur_ratio > settings.ar_max_blur_ratio:
-            rejection_reasons.append(f"Blur ratio too high: {blur_ratio:.2%} > {settings.ar_max_blur_ratio:.2%}")
-
-        # Accepted ratio gate
-        accepted_ratio = m_accepted_frames / m_total_frames
-        if accepted_ratio < settings.ar_min_accepted_ratio:
-            rejection_reasons.append(f"Accepted frame ratio too low: {accepted_ratio:.2%} < {settings.ar_min_accepted_ratio:.2%}")
-
-        # Profile-specific gates
-        profile_type = manifest_data.get("profile_type", "generic").lower()
-        comp = manifest_data.get("profile_completion")
-        
-        if profile_type in ("box", "bottle"):
-            if not comp:
-                rejection_reasons.append(f"Missing profile_completion data for {profile_type}")
-            else:
-                if profile_type == "box":
-                    faces = comp.get("faces", [])
-                    if len(faces) < 6:
-                        rejection_reasons.append(f"Box requires 6 completed faces, got {len(faces)}")
-                elif profile_type == "bottle":
-                    if not comp.get("cap") or not comp.get("base"):
-                        rejection_reasons.append("Bottle requires both cap and base coverage")
-
-        if rejection_reasons:
-            logger.warning(
-                f"Capture failed quality gate for {session_id}. Reasons: {rejection_reasons}"
-            )
-            raise HTTPException(
-                status_code=422, 
-                detail={"message": "Capture failed quality gate.", "reasons": rejection_reasons}
-            )
-
-        # ── 8. Session Finalization ───────────────────────────────────────────
+        # ── 10. Session Finalization ──────────────────────────────────────────
         with open(capture_path / "reports" / "ar_quality_manifest.json", "w") as f:
             json.dump(manifest_data, f, indent=2)
 

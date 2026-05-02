@@ -61,6 +61,8 @@ class TextureFrameFilter:
             image_folder.parent.parent / "dense" / "stereo" / "masks",
             image_folder.parent.parent / "dense" / "masks",
             image_folder.parent.parent / "masks",
+            dense_workspace / "stereo" / "masks",
+            dense_workspace / "masks",
             image_folder / "masks", # Some workflows put masks inside images folder
         ]
         
@@ -340,6 +342,8 @@ class TextureFrameFilter:
             "recapture_required": recapture_required,
             "recapture_reason": recapture_reason,
             "try_sam2_masks": try_sam2_masks,
+            "selected_images_dir": str(selected_dir),
+            "masked_images_dir": str(masked_dir),
             "selected_frames": selected_stats,
             "mask_qa_report": mask_qa_report,
             "frame_0021_status": next((s for s in analyzed_stats + rejected_stats if s["name"] == "frame_0021.jpg"), {"reason": "not_found"})

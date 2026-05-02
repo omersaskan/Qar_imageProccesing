@@ -205,6 +205,13 @@ class AssetCleaner:
             "has_material": has_mat,
             "texture_applied": texture_applied,
             "delivery_ready": delivery_ready,
+            "isolated_mesh_faces": isolation_stats.get("final_faces", 0),
+            "object_isolation_status": isolation_stats.get("object_isolation_status", "unknown"),
+            "object_isolation_method": isolation_stats.get("object_isolation_method", "unknown"),
+            "removed_face_ratio": isolation_stats.get("removed_face_ratio", 0.0),
+            "mask_support_ratio": isolation_stats.get("mask_support_ratio", 0.0),
+            "point_cloud_support_ratio": isolation_stats.get("point_cloud_support_ratio", 0.0),
+            "raw_mesh_faces": int(face_count), # Close enough for safe copy
         }
 
     def _safe_align_obj(self, input_path: Path, output_path: Path) -> Tuple[Dict[str, float], Dict[str, float], Dict[str, float]]:
@@ -455,6 +462,13 @@ class AssetCleaner:
                 "oversized_raw_mesh": oversized_raw_mesh,
                 "raw_mesh_faces": raw_faces,
                 "raw_mesh_vertices": raw_verts,
+                "isolated_mesh_faces": isolation_stats.get("final_faces", 0),
+                "object_isolation_status": isolation_stats.get("object_isolation_status", "unknown"),
+                "object_isolation_method": isolation_stats.get("object_isolation_method", "unknown"),
+                "removed_face_ratio": isolation_stats.get("removed_face_ratio", 0.0),
+                "mask_support_ratio": isolation_stats.get("mask_support_ratio", 0.0),
+                "point_cloud_support_ratio": isolation_stats.get("point_cloud_support_ratio", 0.0),
+                "unsafe_scene_copy_forbidden": False,
             }
             return metadata, cleanup_stats, str(cleaned_mesh_path)
 

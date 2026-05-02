@@ -67,6 +67,8 @@ class Remesher:
                     if not has_uv_post or (has_mat_init and not has_mat_post):
                         logger.warning("UV-safe decimation failed visual integrity. Trying fallback...")
                         decimation_status = "failed_visual_integrity"
+                        uv_preserved = has_uv_post
+                        material_preserved = has_mat_post
                         # Fallback will be handled below if still above limit
                     else:
                         mesh = candidate
@@ -74,10 +76,11 @@ class Remesher:
                         material_preserved = True
                 else:
                     # Untextured assets can use fast_simplification directly
-                    points = mesh.vertices.astype(np.float32)
-                    faces = mesh.faces.astype(np.uint32)
-                    reduction_ratio = 1.0 - (target_faces / max(pre_faces, 1))
-                    new_vertices, new_faces = fast_simplification.simplify(points, faces, max(0.0, reduction_ratio))
+                    points = np.ascontiguousarray(mesh.vertices.astype(np.float32))
+                    faces = np.ascontiguousarray(mesh.faces.astype(np.uint32))
+                    reduction = 1.0 - (target_faces / max(pre_faces, 1))
+                    reduction = float(max(0.01, min(0.99, reduction)))
+                    new_vertices, new_faces = fast_simplification.simplify(points, faces, reduction)
                     mesh = trimesh.Trimesh(vertices=new_vertices, faces=new_faces, process=False)
             except Exception as e:
                 logger.error(f"Decimation error: {e}")
@@ -86,23 +89,41 @@ class Remesher:
         # FINAL PASS: Hard enforcement if still above limit or if UV-safe decimation was skipped/failed
         if len(mesh.faces) > target_faces:
             if has_uv_init:
-                 logger.error(f"Mesh still above limit ({len(mesh.faces)} > {target_faces}) but UV-safe decimation failed. Refusing destructive fallback.")
-                 decimation_status = "failed_uv_preservation"
+                 logger.warning(f"UV-safe decimation failed to reach target ({len(mesh.faces)} > {target_faces}). Attempting destructive fallback as per production hardening.")
+                 target_ratio = target_faces / max(len(mesh.faces), 1)
+                 target_ratio = min(1.0, max(0.01, target_ratio))
+                 mesh = mesh.simplify_quadric_decimation(target_ratio)
+                 if len(mesh.faces) > target_faces * 1.1: # If still >10% over target
+                     logger.warning(f"simplify_quadric_decimation failed to reach target. Using fast_simplification as last resort for {len(mesh.faces)} faces.")
+                     try:
+                         points = mesh.vertices.astype(np.float32)
+                         faces = mesh.faces.astype(np.uint32)
+                         new_v, new_f = fast_simplification.simplify(points, faces, target_count=target_faces)
+                         mesh = trimesh.Trimesh(vertices=new_v, faces=new_f, process=False)
+                         logger.info(f"fast_simplification success: reached {len(mesh.faces)} faces.")
+                     except Exception as e:
+                         logger.error(f"fast_simplification failed in fallback: {e}")
+                 
+                 decimation_status = "success_fallback_destructive"
+                 logger.info(f"Destructive fallback final state: {len(mesh.faces)} faces.")
+                 uv_preserved, material_preserved = self._inspect_visuals(mesh)
             else:
                 logger.warning(f"Mesh still above limit ({len(mesh.faces)} > {target_faces}). Forced fast_simplification fallback.")
                 try:
-                    points = mesh.vertices.astype(np.float32)
-                    faces = mesh.faces.astype(np.uint32)
+                    points = np.ascontiguousarray(mesh.vertices.astype(np.float32))
+                    faces = np.ascontiguousarray(mesh.faces.astype(np.uint32))
                     # SPRINT 5C: fast_simplification uses REDUCTION ratio in this environment
-                    reduction_ratio = 1.0 - (target_faces / max(len(mesh.faces), 1))
-                    new_vertices, new_faces = fast_simplification.simplify(points, faces, max(0.0, reduction_ratio))
-                    mesh = trimesh.Trimesh(vertices=new_vertices, faces=new_faces, process=False)
+                    reduction = 1.0 - (target_faces / len(mesh.faces))
+                    reduction = float(max(0.01, min(0.99, reduction)))
+                    new_v, new_f = fast_simplification.simplify(points, faces, reduction)
+                    mesh = trimesh.Trimesh(vertices=new_v, faces=new_f, process=False)
                     decimation_status = "success_fallback"
-                    # UVs are likely lost or corrupted here if they existed
-                    uv_preserved, material_preserved = self._inspect_visuals(mesh)
                 except Exception as e:
-                    logger.error(f"Fallback decimation failed: {e}")
+                    logger.error(f"Fallback fast_simplification failed: {e}")
                     decimation_status = f"failed_fallback: {e}"
+                
+                # UVs are likely lost or corrupted here if they existed
+                uv_preserved, material_preserved = self._inspect_visuals(mesh)
 
         mesh.export(output_path)
         post_faces = len(mesh.faces)

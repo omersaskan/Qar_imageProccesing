@@ -497,6 +497,13 @@ class GLBExporter:
             "has_texcoord_0_accessor": strict["all_textured_primitives_have_texcoord_0"],
             "has_uv": strict["all_textured_primitives_have_texcoord_0"],
             "has_material": strict["material_count"] > 0,
+            "has_embedded_texture": strict["texture_count"] > 0,
+            "texture_integrity_status": "complete" if strict["texture_count"] > 0 and strict["all_textured_primitives_have_texcoord_0"] else "missing",
+            "material_integrity_status": "present" if strict["material_count"] > 0 else "missing",
+            "material_semantic_status": "diffuse_textured" if strict["texture_count"] > 0 else "geometry_only",
+            "ground_offset": float(b_min[2]),
+            "texture_applied": strict["texture_count"] > 0,
+            "texture_count": strict["texture_count"],
         }
 
     def export_to_glb(

@@ -450,9 +450,9 @@ class TestTexturingService:
             json.loads(manifest_p.read_text())
         )
         expected_tex_result = TexturingResult(
-            texturing_status="absent",
+            texturing_status="real",
             cleaned_mesh_path=str(fake_mesh),
-            texture_atlas_paths=[],
+            texture_atlas_paths=[str(cleaned_dir / "texture.png")],
             manifest=loaded_manifest,
         )
 
@@ -583,9 +583,9 @@ class TestHappyPathIntegration:
             json.loads((job_dir / "manifest.json").read_text())
         )
         stub_tex_result = TexturingResult(
-            texturing_status="absent",
+            texturing_status="real",
             cleaned_mesh_path=str(fake_cleaned_mesh),
-            texture_atlas_paths=[],
+            texture_atlas_paths=[str(cleaned_dir / "texture.png")],
             manifest=loaded_manifest,
         )
 
@@ -625,6 +625,14 @@ class TestHappyPathIntegration:
             "bounds_max": {"x": 1.0, "y": 1.0, "z": 1.0},
             "bbox": {"x": 1.0, "y": 1.0, "z": 1.0},
             "ground_offset": 0.0,
+            "has_position_accessor": True,
+            "has_normal_accessor": True,
+            "all_primitives_have_position": True,
+            "all_primitives_have_normal": True,
+            "all_textured_primitives_have_texcoord_0": False,
+            "export_status": "success",
+            "structural_export_ready": True,
+            "filtering_status": "object_isolated",
         }
         with patch.object(worker.exporter, "inspect_exported_asset",
                           return_value=export_metrics):
@@ -749,6 +757,13 @@ class TestDiskSpacePreflight:
         mock_s.check_ml_deps.return_value = []
         mock_s.check_processing_deps.return_value = []
         mock_s.check_free_disk_gb.return_value = 1.5   # LOW
+        mock_s.max_upload_mb = 100.0
+        mock_s.max_video_duration_sec = 600.0
+        mock_s.min_video_long_edge = 720
+        mock_s.min_video_short_edge = 720
+        mock_s.ffmpeg_path = "ffmpeg"
+        mock_s.ffprobe_path = "ffprobe"
+        mock_s.resolve_executable.return_value = "fake_bin"
         mock_s.env.value = "pilot"
 
         with patch("modules.operations.api.settings", mock_s):
@@ -779,6 +794,13 @@ class TestDiskSpacePreflight:
         mock_s.check_ml_deps.return_value = []
         mock_s.check_processing_deps.return_value = []
         mock_s.check_free_disk_gb.return_value = 50.0   # SUFFICIENT
+        mock_s.max_upload_mb = 100.0
+        mock_s.max_video_duration_sec = 600.0
+        mock_s.min_video_long_edge = 720
+        mock_s.min_video_short_edge = 720
+        mock_s.ffmpeg_path = "ffmpeg"
+        mock_s.ffprobe_path = "ffprobe"
+        mock_s.resolve_executable.return_value = "fake_bin"
         mock_s.env.value = "pilot"
 
         with patch("modules.operations.api.settings", mock_s):

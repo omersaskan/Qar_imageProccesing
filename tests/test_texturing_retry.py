@@ -35,8 +35,8 @@ def test_openmvs_timeout_handling(mock_popen, tmp_path):
 def test_openmvs_success(mock_popen, tmp_path):
     # Setup mock process for success
     mock_process = MagicMock()
-    mock_process.poll.side_effect = [None, 0] # Running then finished
-    mock_process.stdout.readline.side_effect = ["Output line 1\n", ""]
+    mock_process.poll.side_effect = [None, None, 0, 0, 0] # Running then finished
+    mock_process.stdout.readline.side_effect = ["Output line 1\n", "", "", ""]
     mock_process.returncode = 0
     mock_popen.return_value = mock_process
     

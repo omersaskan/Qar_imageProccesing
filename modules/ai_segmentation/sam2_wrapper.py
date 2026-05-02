@@ -32,7 +32,27 @@ logger = logging.getLogger(__name__)
 SAM2_IMAGE_MODE = "image_frame"
 SAM2_VIDEO_MODE = "video_temporal"
 
-HAS_SAM2: bool = False  # set to True at runtime if sam2 imports succeed
+HAS_SAM2: bool = False
+HAS_TORCH: bool = False
+SAM2_IMPORT_ERROR_REASON: Optional[str] = None
+
+# Initial probe
+if settings.sam2_enabled:
+    try:
+        import torch  # noqa: F401
+        HAS_TORCH = True
+    except ImportError:
+        SAM2_IMPORT_ERROR_REASON = "torch not installed"
+    
+    if HAS_TORCH:
+        try:
+            from sam2.build_sam import build_sam2  # noqa: F401
+            from sam2.sam2_image_predictor import SAM2ImagePredictor  # noqa: F401
+            HAS_SAM2 = True
+        except ImportError:
+            SAM2_IMPORT_ERROR_REASON = "segment-anything-2 (sam2) package not installed"
+else:
+    SAM2_IMPORT_ERROR_REASON = "SAM2 disabled (SAM2_ENABLED=false)"
 
 
 def probe_sam2_availability() -> Tuple[bool, bool, Optional[str]]:

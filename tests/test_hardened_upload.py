@@ -122,9 +122,10 @@ def test_upload_invalid_video_duration(test_data_root):
     create_dummy_video(video_path, fps=30, duration=1) # 1 sec is too short (min 15 in user req, but let's see settings)
     
     manifest = {
-        "total_frame_count": 30,
-        "accepted_frame_count": 25,
-        "coverage_summary": {"percent": 90, "maxGap": 20}
+        "total_frame_count": 150,
+        "accepted_frame_count": 120,
+        "coverage_summary": {"percent": 95, "maxGap": 10},
+        "is_demo": True
     }
     
     with open(video_path, "rb") as f:

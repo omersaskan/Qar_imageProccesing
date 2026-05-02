@@ -87,10 +87,14 @@ def test_empty_frames_trigger_extraction(test_env):
     dummy_frame = frames_dir / "frame_0001.jpg"
     
     with patch("modules.capture_workflow.frame_extractor.FrameExtractor.extract_keyframes") as mock_extract:
-        # Side effect to create a dummy file so glob finds it
+        # Side effect to create multiple dummy files so we pass the min_frames check (5)
         def side_effect(*args, **kwargs):
-            dummy_frame.touch()
-            return [str(dummy_frame)], {"status": "ok"}
+            frames = []
+            for i in range(5):
+                f = frames_dir / f"frame_{i:04d}.jpg"
+                f.touch()
+                frames.append(str(f))
+            return frames, {"status": "ok"}
             
         mock_extract.side_effect = side_effect
         
