@@ -574,9 +574,11 @@ class COLMAPAdapter(ReconstructionAdapter):
     - logging makes the mask decision visible in reconstruction.log
     """
 
-    def __init__(self, engine_path: Optional[str] = None, settings_override: Optional[Settings] = None):
+    def __init__(self, engine_path: Optional[str] = None,
+                 settings_override: Optional[Settings] = None,
+                 command_config=None):
         active_settings = settings_override or settings
-        
+
         self._engine_path = engine_path or active_settings.colmap_path
 
         if not self._engine_path:
@@ -595,11 +597,30 @@ class COLMAPAdapter(ReconstructionAdapter):
         self._use_gpu = active_settings.use_gpu
         self._gpu_index = active_settings.gpu_index
         self._max_image_size = active_settings.recon_max_image_size
-        self._matcher = active_settings.recon_matcher.lower()
+        # Sprint 4.5: command_config can override max_image_size + matcher
+        self.command_config = command_config
+        if command_config is not None:
+            try:
+                self._max_image_size = int(command_config.colmap.max_image_size)
+                if command_config.colmap.matcher_type in ("exhaustive", "sequential"):
+                    self._matcher = command_config.colmap.matcher_type
+                else:
+                    self._matcher = active_settings.recon_matcher.lower()
+            except Exception:
+                self._matcher = active_settings.recon_matcher.lower()
+        else:
+            self._matcher = active_settings.recon_matcher.lower()
         self._active_settings = active_settings
         self.mesh_selector = MeshSelector()
-        self.builder = ColmapCommandBuilder(self._engine_path, self._use_gpu, self._gpu_index)
-        self.texturer = OpenMVSTexturer(active_settings.openmvs_path, settings_override=active_settings)
+        self.builder = ColmapCommandBuilder(
+            self._engine_path, self._use_gpu, self._gpu_index,
+            command_config=command_config,
+        )
+        self.texturer = OpenMVSTexturer(
+            active_settings.openmvs_path,
+            settings_override=active_settings,
+            command_config=command_config,
+        )
 
     @property
     def engine_type(self) -> str:
@@ -1584,8 +1605,10 @@ class OpenMVSAdapter(COLMAPAdapter):
         colmap_path: Optional[str] = None,
         openmvs_path: Optional[str] = None,
         settings_override: Optional[Settings] = None,
+        command_config=None,
     ):
-        super().__init__(colmap_path, settings_override=settings_override)
+        super().__init__(colmap_path, settings_override=settings_override,
+                         command_config=command_config)
         active = settings_override or settings
         self._openmvs_path = openmvs_path or active.openmvs_path
         self.mvs_builder = OpenMVSCommandBuilder(self._openmvs_path)

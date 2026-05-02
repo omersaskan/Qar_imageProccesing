@@ -143,22 +143,136 @@ class ReconstructionRunner:
                 intrinsics_status = {"status": "disabled", "cache_key": "error", "source": "default",
                                       "error": str(e)[:200]}
 
+        # Sprint 4.5: build typed command config from preset (always non-None)
+        from .reconstruction_command_config import from_preset
+        command_config = from_preset(preset)
+
         return {
-            "version": "v1",
+            "version": "v1.5",
             "enabled": True,
             "profile": profile.to_dict(),
             "preflight": preflight.to_dict(),
             "preset": preset,
+            "command_config": command_config.to_dict(),
             "intrinsics_cache": intrinsics_status,
             "fallback_attempts": [],
+            "final_attempt": 0,
+            "final_status": "pending",
+            # Cached object the runner uses to build adapters (not serialized).
+            "_command_config_obj": command_config,
         }
 
     def _write_hardening_manifest(self, job_dir: Path, block: Dict[str, Any]):
         """Write reconstruction_hardening.json next to the audit; don't touch manifest.json."""
         try:
-            atomic_write_json(job_dir / "reconstruction_hardening.json", block)
+            # Strip non-serializable cached object before writing
+            serializable = {k: v for k, v in block.items() if not k.startswith("_")}
+            atomic_write_json(job_dir / "reconstruction_hardening.json", serializable)
         except Exception as e:
             logging.warning(f"Failed to write reconstruction_hardening.json: {e}")
+
+    def _record_fallback_attempt(
+        self,
+        attempt_num: int,
+        preset_name: str,
+        status: str,
+        failure_class: Optional[str] = None,
+        exit_code: Optional[int] = None,
+        next_action: Optional[str] = None,
+        error_excerpt: Optional[str] = None,
+    ):
+        """
+        Sprint 4.5: append an attempt record to hardening block + advance the
+        command_config if a next_action is supplied.  Caller orchestrates
+        the actual retry loop; this only records bookkeeping.
+        """
+        block = getattr(self, "_hardening_block", None)
+        if not block:
+            return
+        block.setdefault("fallback_attempts", []).append({
+            "attempt": int(attempt_num),
+            "preset": preset_name,
+            "status": status,
+            "failure_class": failure_class,
+            "exit_code": exit_code,
+            "next_action": next_action,
+            "error_excerpt": (error_excerpt or "")[:240] if error_excerpt else None,
+        })
+        block["final_attempt"] = int(attempt_num)
+        if status == "passed":
+            block["final_status"] = "reconstructed"
+        elif next_action is None and status == "failed":
+            block["final_status"] = "failed"
+        else:
+            block["final_status"] = "retrying"
+
+    def _swap_to_next_preset(self, error_excerpt: Optional[str]) -> Optional[str]:
+        """
+        Pick a fallback preset, swap _hardening_block.{_command_config_obj, command_config},
+        invalidate cached adapters so next access rebuilds with the new config.
+
+        Returns the new preset name, or None if the ladder is exhausted /
+        max_attempts reached.
+        """
+        block = getattr(self, "_hardening_block", None)
+        if not block:
+            return None
+
+        from .fallback_ladder import pick_next_preset, FallbackAttempt
+        from .reconstruction_command_config import from_preset
+        from .reconstruction_profile import ReconstructionProfile
+
+        attempts = block.get("fallback_attempts", []) or []
+        max_attempts = int(getattr(settings, "fallback_ladder_max_attempts", 3) or 0)
+        if len(attempts) >= max_attempts:
+            block["final_status"] = "failed"
+            return None
+
+        # Build prior FallbackAttempt list for ladder de-dup
+        prior_used: List[FallbackAttempt] = [
+            FallbackAttempt(
+                step_index=i,
+                preset_name=str(a.get("preset", "")),
+                triggered_by="recorded",
+            )
+            for i, a in enumerate(attempts)
+        ]
+
+        # Reconstruct profile from manifest dict
+        try:
+            profile_dict = block.get("profile") or {}
+            profile = ReconstructionProfile()
+            for k, v in profile_dict.items():
+                if hasattr(profile, k):
+                    try:
+                        setattr(profile, k, type(getattr(profile, k))(v))
+                    except Exception:
+                        pass
+        except Exception:
+            profile = None
+
+        nxt = pick_next_preset(profile=profile, error_excerpt=error_excerpt,
+                               attempts_so_far=prior_used)
+        if not nxt:
+            block["final_status"] = "failed"
+            return None
+
+        # Swap command_config in block + invalidate cached adapters
+        new_cfg = from_preset(nxt.preset_snapshot)
+        block["_command_config_obj"] = new_cfg
+        block["command_config"] = new_cfg.to_dict()
+        block["preset"] = nxt.preset_snapshot
+        for attr in ("_colmap_cached", "_openmvs_cached"):
+            if hasattr(self, attr):
+                delattr(self, attr)
+        return nxt.preset_name
+
+    def _current_command_config(self):
+        """Sprint 4.5: pull the typed command config from hardening block, if active."""
+        block = getattr(self, "_hardening_block", None)
+        if block:
+            return block.get("_command_config_obj")
+        return None
 
     @property
     def colmap_adapter(self) -> "COLMAPAdapter":
@@ -170,7 +284,10 @@ class ReconstructionRunner:
                     raise RuntimeError(f"Production environment must be configured: {e}")
                 logging.warning(f"Configuration warning: {e}")
 
-            self._colmap_cached = COLMAPAdapter(settings_override=self._effective_settings)
+            self._colmap_cached = COLMAPAdapter(
+                settings_override=self._effective_settings,
+                command_config=self._current_command_config(),
+            )
         return self._colmap_cached
 
     @property
@@ -184,7 +301,10 @@ class ReconstructionRunner:
                 logging.warning(f"Configuration warning: {e}")
 
             from .adapter import OpenMVSAdapter
-            self._openmvs_cached = OpenMVSAdapter(settings_override=self._effective_settings)
+            self._openmvs_cached = OpenMVSAdapter(
+                settings_override=self._effective_settings,
+                command_config=self._current_command_config(),
+            )
         return self._openmvs_cached
 
     @property

@@ -73,7 +73,12 @@ from modules.reconstruction_engine.intrinsics_cache import (
 from modules.reconstruction_engine.fallback_ladder import (
     pick_next_preset, classify_error, get_default_ladder,
 )
-print('SUCCESS: sprint1 + sprint2 + sprint3 + sprint4 modules importable.')
+# Sprint 4.5 — command config + executable fallback ladder plumbing
+from modules.reconstruction_engine.reconstruction_command_config import (
+    ReconstructionCommandConfig, ColmapCommandConfig, OpenMVSCommandConfig,
+    baseline_command_config, from_preset,
+)
+print('SUCCESS: sprint1 + sprint2 + sprint3 + sprint4 + sprint4.5 modules importable.')
 "
 
 # ── 3. Settings Load ─────────────────────────────────────────────────────────

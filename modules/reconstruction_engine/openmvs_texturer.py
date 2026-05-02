@@ -16,9 +16,11 @@ class OpenMVSTexturer:
     Coordinates OpenMVS to process a selected COLMAP mesh and output a textured artifact.
     """
 
-    def __init__(self, bin_dir: str = None, settings_override=None):
+    def __init__(self, bin_dir: str = None, settings_override=None, command_config=None):
         from modules.operations.settings import settings as _global_settings
         self._settings = settings_override or _global_settings
+        # Sprint 4.5: optional preset-aware command config
+        self.command_config = command_config
 
         if not bin_dir:
             self.bin_dir = Path(self._settings.openmvs_path)
@@ -312,6 +314,21 @@ class OpenMVSTexturer:
         target_40k = active.texture_safe_texturing_target_faces
         target_crash_retry = active.texture_native_crash_retry_faces
         max_selected_frames = active.texture_max_selected_frames
+
+        # Sprint 4.5: command_config can clamp the texture atlas resolution
+        # (used by glb_exporter / texture pipeline downstream — surfaced in log).
+        if self.command_config is not None:
+            try:
+                cmd_tex_res = int(self.command_config.openmvs.texture_resolution)
+                cmd_threads = int(self.command_config.openmvs.max_threads)
+                # Persist intent to log so QA can audit
+                with open(log_path, "a", encoding="utf-8") as _lf:
+                    _lf.write(
+                        f"[command_config] preset={self.command_config.source_preset_name} "
+                        f"texture_resolution={cmd_tex_res} max_threads={cmd_threads}\n"
+                    )
+            except Exception:
+                pass
         
         used_output_stem = "textured_model"
         

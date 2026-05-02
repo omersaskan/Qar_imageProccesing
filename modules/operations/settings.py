@@ -236,6 +236,14 @@ class Settings(BaseSettings):
         False, validation_alias="RECONSTRUCTION_PRESET_HARDENING_ENABLED"
     )
     intrinsics_cache_enabled: bool = Field(False, validation_alias="INTRINSICS_CACHE_ENABLED")
+    intrinsics_feed_to_colmap_enabled: bool = Field(
+        False, validation_alias="INTRINSICS_FEED_TO_COLMAP_ENABLED"
+    )
+    # Sprint 4.5: how many fallback attempts to try when an attempt fails.
+    # Hard cap to prevent infinite retry loops. 0 = no retry.
+    fallback_ladder_max_attempts: int = Field(
+        3, validation_alias="FALLBACK_LADDER_MAX_ATTEMPTS"
+    )
 
     # --- PHASE 6.1: SAM2 SEGMENTATION ---
     segmentation_method: str = Field("legacy", validation_alias="SEGMENTATION_METHOD")

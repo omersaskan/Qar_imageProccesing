@@ -78,8 +78,12 @@ def from_preset(preset: Optional[Dict[str, Any]]) -> ReconstructionCommandConfig
         return baseline_command_config()
 
     base = baseline_command_config()
-    colmap_in = preset.get("colmap") or {}
-    openmvs_in = preset.get("openmvs") or {}
+    colmap_in = preset.get("colmap")
+    openmvs_in = preset.get("openmvs")
+    if not isinstance(colmap_in, dict):
+        colmap_in = {}
+    if not isinstance(openmvs_in, dict):
+        openmvs_in = {}
 
     cfg_colmap = ColmapCommandConfig(
         feature_quality=str(colmap_in.get("feature_quality", base.colmap.feature_quality)),
