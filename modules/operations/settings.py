@@ -285,6 +285,20 @@ class Settings(BaseSettings):
         False, validation_alias="PROVENANCE_ENABLED"
     )
 
+    # --- PHASE 3B: DEPTH STUDIO ---
+    single_image_depth_enabled: bool = Field(False, validation_alias="SINGLE_IMAGE_DEPTH_ENABLED")
+    depth_studio_enabled: bool = Field(False, validation_alias="DEPTH_STUDIO_ENABLED")
+    depth_studio_allow_video_input: bool = Field(True, validation_alias="DEPTH_STUDIO_ALLOW_VIDEO_INPUT")
+    depth_studio_default_provider: str = Field("depth_anything_v2", validation_alias="DEPTH_STUDIO_DEFAULT_PROVIDER")
+    depth_pro_enabled: bool = Field(False, validation_alias="DEPTH_PRO_ENABLED")
+    depth_output_format: str = Field("png16", validation_alias="DEPTH_OUTPUT_FORMAT")
+    depth_output_allow_exr: bool = Field(True, validation_alias="DEPTH_OUTPUT_ALLOW_EXR")
+    depth_mesh_mode: str = Field("relief_plane", validation_alias="DEPTH_MESH_MODE")
+    depth_grid_resolution: int = Field(256, validation_alias="DEPTH_GRID_RESOLUTION")
+    depth_edge_cleanup_enabled: bool = Field(True, validation_alias="DEPTH_EDGE_CLEANUP_ENABLED")
+    depth_preview_only: bool = Field(True, validation_alias="DEPTH_PREVIEW_ONLY")
+    depth_studio_require_explicit_final_override: bool = Field(True, validation_alias="DEPTH_STUDIO_REQUIRE_EXPLICIT_FINAL_OVERRIDE")
+
     # --- PHASE 6.1: SAM2 SEGMENTATION ---
     segmentation_method: str = Field("legacy", validation_alias="SEGMENTATION_METHOD")
     sam2_enabled: bool = Field(False, validation_alias="SAM2_ENABLED")

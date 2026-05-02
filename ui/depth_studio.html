@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Depth Studio — Single-Image Pseudo-3D</title>
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    .ds-root { max-width: 860px; margin: 0 auto; padding: 24px 16px; font-family: sans-serif; }
+    .ds-header { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
+    .ds-header h1 { font-size: 1.4rem; margin: 0; }
+    .ds-badge { background: #f59e0b; color: #fff; border-radius: 4px; padding: 2px 8px; font-size: 0.75rem; font-weight: 700; }
+    .ds-notice { background: #fef3c7; border: 1px solid #f59e0b; border-radius: 6px; padding: 12px 16px; margin-bottom: 20px; font-size: 0.88rem; color: #92400e; }
+    .ds-notice strong { display: block; margin-bottom: 4px; }
+    .ds-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin-bottom: 16px; }
+    .ds-card h2 { font-size: 1rem; margin: 0 0 14px; color: #374151; }
+    .ds-provider-row { display: flex; gap: 10px; margin-bottom: 14px; }
+    .ds-provider-btn { flex: 1; padding: 10px; border: 2px solid #e5e7eb; border-radius: 6px; background: #f9fafb; cursor: pointer; text-align: center; font-size: 0.85rem; }
+    .ds-provider-btn.active { border-color: #6366f1; background: #eef2ff; color: #4338ca; font-weight: 600; }
+    .ds-drop { border: 2px dashed #d1d5db; border-radius: 8px; padding: 36px; text-align: center; cursor: pointer; color: #6b7280; transition: border-color .2s; }
+    .ds-drop:hover, .ds-drop.dragover { border-color: #6366f1; color: #4338ca; }
+    .ds-drop input { display: none; }
+    .ds-preview-img { max-width: 100%; border-radius: 6px; margin-top: 12px; display: none; }
+    .ds-btn { display: inline-block; padding: 10px 24px; background: #6366f1; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 0.95rem; font-weight: 600; }
+    .ds-btn:disabled { background: #a5b4fc; cursor: not-allowed; }
+    .ds-btn-row { display: flex; gap: 10px; margin-top: 14px; }
+    .ds-status { padding: 10px 14px; border-radius: 6px; font-size: 0.88rem; margin-top: 12px; display: none; }
+    .ds-status.info  { background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; }
+    .ds-status.ok    { background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534; }
+    .ds-status.error { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
+    .ds-outputs { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 8px; }
+    .ds-out-box { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 12px; }
+    .ds-out-box h3 { font-size: 0.82rem; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: .05em; margin: 0 0 8px; }
+    .ds-out-box p  { margin: 0; font-size: 0.88rem; word-break: break-all; color: #111827; }
+    .ds-depth-preview { max-width: 100%; border-radius: 4px; margin-top: 8px; display: none; }
+    .ds-warnings { margin-top: 8px; }
+    .ds-warn-tag { display: inline-block; background: #fef3c7; color: #92400e; border-radius: 4px; padding: 2px 7px; font-size: 0.78rem; margin: 2px 3px 2px 0; }
+    .nav-link { display: inline-block; margin-bottom: 12px; color: #6366f1; text-decoration: none; font-size: 0.88rem; }
+    .nav-link:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+<div class="ds-root">
+  <a href="index.html" class="nav-link">← Back to Photogrammetry</a>
+
+  <div class="ds-header">
+    <h1>Depth Studio</h1>
+    <span class="ds-badge">PREVIEW</span>
+  </div>
+
+  <div class="ds-notice">
+    <strong>⚠ This is NOT full 3D reconstruction</strong>
+    Depth Studio creates a pseudo-3D relief mesh from a single visible view using depth inference.
+    The result is a preview asset — backside geometry is not observed and the output is marked
+    <em>preview_only</em>. For production-quality full 3D, use the
+    <a href="index.html">Photogrammetry pipeline</a>.
+  </div>
+
+  <!-- Provider Selection -->
+  <div class="ds-card">
+    <h2>1. Select Depth Provider</h2>
+    <div class="ds-provider-row">
+      <div class="ds-provider-btn active" data-provider="depth_anything_v2" onclick="selectProvider(this)">
+        <strong>Depth Anything V2</strong><br/>
+        <small>Apache 2.0 · Recommended</small>
+      </div>
+      <div class="ds-provider-btn" data-provider="depth_pro" onclick="selectProvider(this)">
+        <strong>Depth Pro</strong><br/>
+        <small>Experimental · Apple License</small>
+      </div>
+    </div>
+    <div id="provider-note" style="font-size:.82rem;color:#6b7280;"></div>
+  </div>
+
+  <!-- File Upload -->
+  <div class="ds-card">
+    <h2>2. Upload Image or Video</h2>
+    <div class="ds-drop" id="drop-zone" onclick="document.getElementById('file-input').click()"
+         ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event)">
+      <input type="file" id="file-input" accept="image/*,video/*" onchange="onFileSelected(event)" />
+      <div id="drop-label">
+        Drop an image or video here, or click to browse<br/>
+        <small style="color:#9ca3af">JPG, PNG, WebP, MP4, MOV supported</small>
+      </div>
+    </div>
+    <img id="image-preview" class="ds-preview-img" alt="Preview" />
+    <div class="ds-btn-row">
+      <button class="ds-btn" id="upload-btn" disabled onclick="startUpload()">Upload & Process</button>
+    </div>
+    <div class="ds-status info" id="status-box"></div>
+  </div>
+
+  <!-- Results -->
+  <div class="ds-card" id="results-card" style="display:none">
+    <h2>3. Results</h2>
+    <img id="depth-preview" class="ds-depth-preview" alt="Depth preview" />
+    <div class="ds-outputs" id="outputs-grid"></div>
+    <div class="ds-warnings" id="warnings-box"></div>
+  </div>
+</div>
+
+<script>
+  const API = '';
+  let selectedProvider = 'depth_anything_v2';
+  let selectedFile = null;
+  let currentSessionId = null;
+
+  const PROVIDER_NOTES = {
+    depth_anything_v2: 'Depth Anything V2 (Apache 2.0). No license restrictions for commercial use.',
+    depth_pro: '⚠ Depth Pro — Apple Research License. Non-commercial research use only. Verify license before production.'
+  };
+
+  function selectProvider(el) {
+    document.querySelectorAll('.ds-provider-btn').forEach(b => b.classList.remove('active'));
+    el.classList.add('active');
+    selectedProvider = el.dataset.provider;
+    document.getElementById('provider-note').textContent = PROVIDER_NOTES[selectedProvider] || '';
+  }
+
+  function onDragOver(e) { e.preventDefault(); document.getElementById('drop-zone').classList.add('dragover'); }
+  function onDragLeave() { document.getElementById('drop-zone').classList.remove('dragover'); }
+  function onDrop(e) {
+    e.preventDefault();
+    document.getElementById('drop-zone').classList.remove('dragover');
+    const f = e.dataTransfer.files[0];
+    if (f) setFile(f);
+  }
+  function onFileSelected(e) { const f = e.target.files[0]; if (f) setFile(f); }
+
+  function setFile(f) {
+    selectedFile = f;
+    document.getElementById('drop-label').textContent = f.name;
+    document.getElementById('upload-btn').disabled = false;
+    const preview = document.getElementById('image-preview');
+    if (f.type.startsWith('image/')) {
+      preview.src = URL.createObjectURL(f);
+      preview.style.display = 'block';
+    } else {
+      preview.style.display = 'none';
+    }
+  }
+
+  function setStatus(msg, type = 'info') {
+    const box = document.getElementById('status-box');
+    box.textContent = msg;
+    box.className = `ds-status ${type}`;
+    box.style.display = 'block';
+  }
+
+  async function startUpload() {
+    if (!selectedFile) return;
+    document.getElementById('upload-btn').disabled = true;
+    setStatus('Uploading…', 'info');
+
+    const fd = new FormData();
+    fd.append('file', selectedFile, selectedFile.name);
+    fd.append('provider', selectedProvider);
+
+    try {
+      const r = await fetch(`${API}/api/depth-studio/upload`, { method: 'POST', body: fd });
+      if (!r.ok) { const e = await r.json(); throw new Error(e.detail || r.statusText); }
+      const data = await r.json();
+      currentSessionId = data.session_id;
+      setStatus(`Uploaded (session: ${currentSessionId}). Starting depth inference…`, 'info');
+      await processSession();
+    } catch (e) {
+      setStatus(`Upload failed: ${e.message}`, 'error');
+      document.getElementById('upload-btn').disabled = false;
+    }
+  }
+
+  async function processSession() {
+    try {
+      const r = await fetch(`${API}/api/depth-studio/process/${currentSessionId}`, { method: 'POST' });
+      if (!r.ok) { const e = await r.json(); throw new Error(e.detail || r.statusText); }
+      const data = await r.json();
+      const status = data.status;
+      if (status === 'ok' || status === 'partial') {
+        setStatus(`Processing complete (status: ${status}).`, 'ok');
+        showResults(data.manifest);
+      } else {
+        setStatus(`Processing returned status: ${status}`, 'error');
+        if (data.manifest) showResults(data.manifest);
+      }
+    } catch (e) {
+      setStatus(`Processing failed: ${e.message}`, 'error');
+    }
+    document.getElementById('upload-btn').disabled = false;
+  }
+
+  function showResults(manifest) {
+    if (!manifest) return;
+    document.getElementById('results-card').style.display = 'block';
+
+    // Depth preview
+    if (currentSessionId) {
+      const dpImg = document.getElementById('depth-preview');
+      dpImg.src = `/api/depth-studio/preview/${currentSessionId}?t=${Date.now()}`;
+      dpImg.style.display = 'block';
+      dpImg.onerror = () => { dpImg.style.display = 'none'; };
+    }
+
+    // Output grid
+    const grid = document.getElementById('outputs-grid');
+    grid.innerHTML = '';
+    const fields = [
+      ['Provider', manifest.provider],
+      ['Model', manifest.model_name || '—'],
+      ['Depth Format', manifest.depth_format || '—'],
+      ['Mesh Faces', manifest.mesh_face_count ?? '—'],
+      ['GLB Path', manifest.glb_path || '—'],
+      ['Preview Only', manifest.preview_only ? 'Yes' : 'No'],
+    ];
+    fields.forEach(([label, value]) => {
+      grid.innerHTML += `<div class="ds-out-box"><h3>${label}</h3><p>${value}</p></div>`;
+    });
+
+    // Warnings
+    const wbox = document.getElementById('warnings-box');
+    wbox.innerHTML = '';
+    if (manifest.warnings && manifest.warnings.length > 0) {
+      manifest.warnings.forEach(w => {
+        wbox.innerHTML += `<span class="ds-warn-tag">${w}</span>`;
+      });
+    }
+  }
+</script>
+</body>
+</html>

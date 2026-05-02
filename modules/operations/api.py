@@ -1085,6 +1085,115 @@ async def run_ai_completion(
     return result.to_dict()
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# PHASE 3B: DEPTH STUDIO ENDPOINTS
+# ─────────────────────────────────────────────────────────────────────────────
+
+_depth_sessions: Dict[str, Dict[str, Any]] = {}
+_depth_data_root = Path(settings.data_root) / "depth_studio"
+
+
+def _depth_session_dir(session_id: str) -> Path:
+    return _depth_data_root / session_id
+
+
+@app.post("/api/depth-studio/upload", dependencies=[Depends(verify_api_key)])
+async def depth_studio_upload(
+    file: UploadFile = File(...),
+    provider: str = Form(default="depth_anything_v2"),
+    product_id: str = Form(default=""),
+):
+    """Accept an image or video, create a Depth Studio session."""
+    if not settings.depth_studio_enabled:
+        raise HTTPException(status_code=503, detail="Depth Studio is disabled (DEPTH_STUDIO_ENABLED=false)")
+
+    session_id = f"ds_{uuid.uuid4().hex[:12]}"
+    session_dir = _depth_session_dir(session_id)
+    input_dir = session_dir / "input"
+    input_dir.mkdir(parents=True, exist_ok=True)
+
+    suffix = Path(file.filename or "upload.jpg").suffix or ".jpg"
+    dest = input_dir / f"upload{suffix}"
+    with open(str(dest), "wb") as f_out:
+        shutil.copyfileobj(file.file, f_out)
+
+    _depth_sessions[session_id] = {
+        "session_id": session_id,
+        "status": "uploaded",
+        "input_path": str(dest),
+        "provider": provider,
+        "product_id": product_id,
+        "manifest_path": None,
+    }
+    return {"session_id": session_id, "status": "uploaded", "input_path": str(dest)}
+
+
+@app.post("/api/depth-studio/process/{session_id}", dependencies=[Depends(verify_api_key)])
+async def depth_studio_process(session_id: str):
+    """Run depth inference + mesh + GLB for the uploaded file."""
+    if session_id not in _depth_sessions:
+        raise HTTPException(status_code=404, detail=f"Depth Studio session not found: {session_id}")
+
+    info = _depth_sessions[session_id]
+    if info["status"] not in ("uploaded", "failed"):
+        return {"session_id": session_id, "status": info["status"], "detail": "Already processed or processing"}
+
+    info["status"] = "processing"
+    session_dir = _depth_session_dir(session_id)
+
+    try:
+        from modules.depth_studio.pipeline import run_depth_studio
+        manifest = run_depth_studio(
+            session_id=session_id,
+            input_file_path=info["input_path"],
+            output_base_dir=str(session_dir),
+            provider_name=info.get("provider"),
+        )
+        info["status"] = manifest.get("status", "failed")
+        info["manifest_path"] = str(session_dir / "manifests" / "depth_studio_manifest.json")
+        return {"session_id": session_id, "status": info["status"], "manifest": manifest}
+    except Exception as e:
+        info["status"] = "failed"
+        raise HTTPException(status_code=500, detail=f"Depth Studio processing failed: {e}")
+
+
+@app.get("/api/depth-studio/status/{session_id}", dependencies=[Depends(verify_api_key)])
+async def depth_studio_status(session_id: str):
+    """Return current status and summary for a Depth Studio session."""
+    if session_id not in _depth_sessions:
+        raise HTTPException(status_code=404, detail=f"Depth Studio session not found: {session_id}")
+    info = _depth_sessions[session_id]
+    return {
+        "session_id": session_id,
+        "status": info["status"],
+        "provider": info.get("provider"),
+        "manifest_path": info.get("manifest_path"),
+    }
+
+
+@app.get("/api/depth-studio/manifest/{session_id}", dependencies=[Depends(verify_api_key)])
+async def depth_studio_manifest(session_id: str):
+    """Return full depth studio manifest JSON."""
+    if session_id not in _depth_sessions:
+        raise HTTPException(status_code=404, detail=f"Depth Studio session not found: {session_id}")
+    manifest_path = _depth_sessions[session_id].get("manifest_path")
+    if not manifest_path or not Path(manifest_path).exists():
+        raise HTTPException(status_code=404, detail="Manifest not yet generated")
+    with open(manifest_path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+@app.get("/api/depth-studio/preview/{session_id}", dependencies=[Depends(verify_api_key)])
+async def depth_studio_preview(session_id: str):
+    """Return depth preview image if available."""
+    if session_id not in _depth_sessions:
+        raise HTTPException(status_code=404, detail=f"Depth Studio session not found: {session_id}")
+    preview = _depth_session_dir(session_id) / "derived" / "depth_preview.png"
+    if preview.exists():
+        return FileResponse(str(preview), media_type="image/png")
+    raise HTTPException(status_code=404, detail="Depth preview not yet available")
+
+
 # Asset Blobs (GLB Files)
 blobs_dir = Path(settings.data_root) / "registry" / "blobs"
 blobs_dir.mkdir(parents=True, exist_ok=True)
