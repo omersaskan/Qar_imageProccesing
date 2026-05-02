@@ -35,6 +35,13 @@ def build_manifest(
     mask_quality: Optional[str] = None,
     mask_component_count: int = 0,
     mask_selected_area_ratio: Optional[float] = None,
+    # face culling / vertex compaction stats
+    mask_face_culling_applied: bool = False,
+    faces_before_culling: Optional[int] = None,
+    faces_after_culling: Optional[int] = None,
+    culled_face_ratio: Optional[float] = None,
+    vertices_before_compaction: Optional[int] = None,
+    vertices_after_compaction: Optional[int] = None,
 ) -> Dict[str, Any]:
     return {
         "enabled": enabled,
@@ -62,6 +69,12 @@ def build_manifest(
         "mesh_mode": mesh_mode,
         "mesh_vertex_count": mesh_vertex_count,
         "mesh_face_count": mesh_face_count,
+        "mask_face_culling_applied": mask_face_culling_applied,
+        "faces_before_culling": faces_before_culling,
+        "faces_after_culling": faces_after_culling,
+        "culled_face_ratio": culled_face_ratio,
+        "vertices_before_compaction": vertices_before_compaction,
+        "vertices_after_compaction": vertices_after_compaction,
 
         # Masking
         "mask_method": mask_method,

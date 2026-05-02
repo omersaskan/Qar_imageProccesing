@@ -69,6 +69,12 @@ def run_depth_studio(
     mask_component_count: int = 0
     mask_selected_area_ratio: Optional[float] = None
     _subject_mask = None   # kept for GLB face culling
+    mask_face_culling_applied: bool = False
+    faces_before_culling: Optional[int] = None
+    faces_after_culling: Optional[int] = None
+    culled_face_ratio: Optional[float] = None
+    vertices_before_compaction: Optional[int] = None
+    vertices_after_compaction: Optional[int] = None
 
     # ── 1. Route input ────────────────────────────────────────────────────────
     try:
@@ -245,6 +251,12 @@ def run_depth_studio(
     glb_path = glb_result.get("glb_path")
     mesh_vertex_count = glb_result.get("mesh_vertex_count", 0)
     mesh_face_count = glb_result.get("mesh_face_count", 0)
+    mask_face_culling_applied = glb_result.get("mask_face_culling_applied", False)
+    faces_before_culling = glb_result.get("faces_before_culling")
+    faces_after_culling = glb_result.get("faces_after_culling")
+    culled_face_ratio = glb_result.get("culled_face_ratio")
+    vertices_before_compaction = glb_result.get("vertices_before_compaction")
+    vertices_after_compaction = glb_result.get("vertices_after_compaction")
 
     if glb_result.get("status") == "ok":
         if mask_quality in ("review", "low_confidence"):
@@ -252,8 +264,13 @@ def run_depth_studio(
         else:
             final_status = "ok"
     else:
-        warnings.append(f"glb_build_failed: {glb_result.get('reason', '')}")
-        final_status = "partial"
+        reason = glb_result.get("reason", "")
+        if "mask_culled_too_much" in reason:
+            warnings.append("mask_culled_too_much")
+            final_status = "partial"
+        else:
+            warnings.append(f"glb_build_failed: {reason}")
+            final_status = "partial"
 
     # ── 8. Manifest ───────────────────────────────────────────────────────────
     manifest = build_manifest(
@@ -283,6 +300,12 @@ def run_depth_studio(
         mask_quality=mask_quality,
         mask_component_count=mask_component_count,
         mask_selected_area_ratio=mask_selected_area_ratio,
+        mask_face_culling_applied=mask_face_culling_applied,
+        faces_before_culling=faces_before_culling,
+        faces_after_culling=faces_after_culling,
+        culled_face_ratio=culled_face_ratio,
+        vertices_before_compaction=vertices_before_compaction,
+        vertices_after_compaction=vertices_after_compaction,
     )
     write_manifest(manifest, str(manifests_dir))
     return manifest

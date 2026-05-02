@@ -1,5 +1,5 @@
 """
-Tests for Depth Studio subject masker — connected component filtering.
+Tests for Depth Studio subject masker and mesh compaction.
 
 Synthetic scenario: small object (key) on large textured table.
   - Table component: bottom-border-touching, large area → rejected
@@ -179,3 +179,118 @@ class TestComputeSubjectMaskIntegration:
         stats = json.loads((tmp_path / "mask_stats.json").read_text())
         assert "component_count" in stats
         assert "mask_quality" in stats
+
+
+# ── mesh compaction tests ─────────────────────────────────────────────────────
+
+class TestCompactMesh:
+    def test_unreferenced_vertices_removed(self):
+        from modules.depth_studio.depth_to_mesh import compact_mesh
+
+        # 4 vertices, only 3 used by faces (vertex 2 unreferenced)
+        verts = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], dtype=np.float32)
+        faces = np.array([[0, 1, 3]], dtype=np.uint32)   # vertex 2 unused
+        uvs   = np.zeros((4, 2), dtype=np.float32)
+
+        cv, cf, cu = compact_mesh(verts, faces, uvs)
+
+        assert len(cv) == 3, f"Expected 3 vertices, got {len(cv)}"
+        assert cf.max() < len(cv), "Face indices out of range after compaction"
+        assert len(cu) == len(cv)
+
+    def test_empty_faces_returns_empty(self):
+        from modules.depth_studio.depth_to_mesh import compact_mesh
+
+        verts = np.zeros((10, 3), dtype=np.float32)
+        faces = np.empty((0, 3), dtype=np.uint32)
+        uvs   = np.zeros((10, 2), dtype=np.float32)
+
+        cv, cf, cu = compact_mesh(verts, faces, uvs)
+        assert len(cv) == 0
+        assert len(cf) == 0
+
+    def test_all_vertices_referenced_unchanged(self):
+        from modules.depth_studio.depth_to_mesh import compact_mesh
+
+        verts = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=np.float32)
+        faces = np.array([[0, 1, 2]], dtype=np.uint32)
+        uvs   = np.zeros((3, 2), dtype=np.float32)
+
+        cv, cf, cu = compact_mesh(verts, faces, uvs)
+        assert len(cv) == 3
+        assert np.array_equal(cf, [[0, 1, 2]])
+
+
+class TestDepthToGlbCompaction:
+    def test_mask_reduces_vertex_count(self):
+        from modules.depth_studio.depth_to_mesh import depth_to_glb
+        import cv2
+
+        h = w = 64
+        depth = np.full((h, w), 0.5, dtype=np.float32)
+
+        # Mask covers only the left half
+        mask = np.zeros((h, w), dtype=np.uint8)
+        mask[:, :w // 2] = 255
+
+        # Create a dummy texture
+        import tempfile, os
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
+            tex_path = f.name
+        try:
+            cv2.imwrite(tex_path, np.full((h, w, 3), 128, dtype=np.uint8))
+
+            with tempfile.NamedTemporaryFile(suffix=".glb", delete=False) as g:
+                glb_path = g.name
+
+            result = depth_to_glb(
+                depth=depth,
+                texture_image_path=tex_path,
+                output_glb_path=glb_path,
+                grid_resolution=16,
+                mask=mask,
+            )
+            assert result["status"] == "ok", result.get("reason")
+            assert result["mask_face_culling_applied"] is True
+            assert result["faces_after_culling"] < result["faces_before_culling"]
+            assert result["vertices_after_compaction"] < result["vertices_before_compaction"]
+            assert result["culled_face_ratio"] > 0.0
+        finally:
+            for p in (tex_path, glb_path):
+                try:
+                    os.unlink(p)
+                except OSError:
+                    pass
+
+    def test_tiny_mask_triggers_culled_too_much(self):
+        from modules.depth_studio.depth_to_mesh import depth_to_glb
+        import cv2, tempfile, os
+
+        h = w = 64
+        depth = np.full((h, w), 0.5, dtype=np.float32)
+        # Mask covers only 1×1 pixel — far too small
+        mask = np.zeros((h, w), dtype=np.uint8)
+        mask[32, 32] = 255
+
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
+            tex_path = f.name
+        with tempfile.NamedTemporaryFile(suffix=".glb", delete=False) as g:
+            glb_path = g.name
+        try:
+            cv2.imwrite(tex_path, np.full((h, w, 3), 128, dtype=np.uint8))
+            result = depth_to_glb(
+                depth=depth,
+                texture_image_path=tex_path,
+                output_glb_path=glb_path,
+                grid_resolution=16,
+                mask=mask,
+            )
+            assert result["status"] == "failed"
+            assert "mask_culled_too_much" in result.get("reason", "") or \
+                   result.get("warning") == "mask_culled_too_much"
+        finally:
+            for p in (tex_path, glb_path):
+                try:
+                    os.unlink(p)
+                except OSError:
+                    pass

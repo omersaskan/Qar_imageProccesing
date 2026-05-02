@@ -5,6 +5,9 @@ from pathlib import Path
 from typing import Dict, Any, Optional, Tuple
 import numpy as np
 
+# Minimum face count after culling before we consider the result unusable
+_MIN_FACES_AFTER_CULLING = 32
+
 
 def build_relief_mesh(
     depth: np.ndarray,
@@ -29,26 +32,20 @@ def build_relief_mesh(
         import cv2
         depth_grid = cv2.resize(depth, (res, res), interpolation=cv2.INTER_LINEAR)
     except ImportError:
-        # Fallback: nearest neighbour via numpy
         yi = (np.arange(res) * h / res).astype(int).clip(0, h - 1)
         xi = (np.arange(res) * w / res).astype(int).clip(0, w - 1)
         depth_grid = depth[np.ix_(yi, xi)]
 
-    # Build vertex grid
     xs = np.linspace(-0.5, 0.5, res, dtype=np.float32)
     ys = np.linspace(-0.5, 0.5, res, dtype=np.float32)
     xv, yv = np.meshgrid(xs, ys)
-
     zv = (depth_grid.astype(np.float32) - 0.5) * depth_scale
 
     vertices = np.stack([xv.ravel(), yv.ravel(), zv.ravel()], axis=1)
-
-    # UV coords
     u = (xv + 0.5).ravel()
-    v = (0.5 - yv).ravel()  # flip Y for image convention
+    v = (0.5 - yv).ravel()   # flip Y for image convention
     uvs = np.stack([u, v], axis=1)
 
-    # Build quad faces → two triangles each
     rows, cols = res, res
     faces = []
     for r in range(rows - 1):
@@ -62,6 +59,44 @@ def build_relief_mesh(
     faces_arr = np.array(faces, dtype=np.uint32)
 
     return vertices, faces_arr, uvs
+
+
+def compact_mesh(
+    vertices: np.ndarray,
+    faces: np.ndarray,
+    uvs: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Remove vertices/uvs not referenced by any face and remap face indices.
+    Returns (compact_vertices, compact_faces, compact_uvs).
+    """
+    if len(faces) == 0:
+        return vertices[:0], faces, uvs[:0]
+
+    used_idx = np.unique(faces)                        # sorted unique old indices
+    remap = np.empty(len(vertices), dtype=np.uint32)
+    remap[used_idx] = np.arange(len(used_idx), dtype=np.uint32)
+
+    return vertices[used_idx], remap[faces], uvs[used_idx]
+
+
+def _cull_background_faces(
+    faces: np.ndarray,
+    uvs: np.ndarray,
+    mask: np.ndarray,
+) -> np.ndarray:
+    """
+    Remove triangles whose UV centroid falls outside the subject mask.
+    mask: uint8 H×W (255=subject).
+    Returns filtered faces array.
+    """
+    mh, mw = mask.shape[:2]
+    uv_tri = uvs[faces]                           # (M, 3, 2)
+    uv_center = uv_tri.mean(axis=1)               # (M, 2)  u,v in [0,1]
+    px = (uv_center[:, 0] * (mw - 1)).astype(int).clip(0, mw - 1)
+    py = ((1.0 - uv_center[:, 1]) * (mh - 1)).astype(int).clip(0, mh - 1)
+    inside = mask[py, px] > 0
+    return faces[inside]
 
 
 def export_mesh_to_trimesh(
@@ -81,26 +116,6 @@ def export_mesh_to_trimesh(
     return mesh
 
 
-def _cull_background_faces(
-    faces: np.ndarray,
-    uvs: np.ndarray,
-    mask: np.ndarray,
-) -> np.ndarray:
-    """
-    Remove triangles whose UV centroid falls outside the subject mask.
-    mask: uint8 H×W (255=subject).
-    Returns filtered faces array.
-    """
-    mh, mw = mask.shape[:2]
-    # UV centroid per face
-    uv_tri = uvs[faces]                          # (M, 3, 2)
-    uv_center = uv_tri.mean(axis=1)              # (M, 2)  u,v in [0,1]
-    px = (uv_center[:, 0] * (mw - 1)).astype(int).clip(0, mw - 1)
-    py = ((1.0 - uv_center[:, 1]) * (mh - 1)).astype(int).clip(0, mh - 1)
-    inside = mask[py, px] > 0
-    return faces[inside]
-
-
 def depth_to_glb(
     depth: np.ndarray,
     texture_image_path: str,
@@ -110,15 +125,53 @@ def depth_to_glb(
     mask: Optional[np.ndarray] = None,
 ) -> Dict[str, Any]:
     """
-    Full pipeline: depth → mesh → textured GLB.
-    mask (optional): uint8 H×W subject mask — triangles outside are removed.
-    Returns manifest-ready dict.
+    Full pipeline: depth → mesh → (optional cull + compact) → textured GLB.
+
+    mask (optional): uint8 H×W subject mask — triangles outside are removed
+                     and unreferenced vertices are compacted out.
+
+    Returns manifest-ready dict including face/vertex compaction stats.
     """
     vertices, faces, uvs = build_relief_mesh(depth, grid_resolution, depth_scale)
 
-    # Remove background triangles when a subject mask is provided
+    faces_before_culling = len(faces)
+    vertices_before_compaction = len(vertices)
+    mask_face_culling_applied = False
+    faces_after_culling = faces_before_culling
+    vertices_after_compaction = vertices_before_compaction
+
     if mask is not None:
-        faces = _cull_background_faces(faces, uvs, mask)
+        culled_faces = _cull_background_faces(faces, uvs, mask)
+        faces_after_culling = len(culled_faces)
+        mask_face_culling_applied = True
+
+        if faces_after_culling < _MIN_FACES_AFTER_CULLING:
+            culled_face_ratio = 1.0 - (faces_after_culling / max(faces_before_culling, 1))
+            return {
+                "status": "failed",
+                "reason": (
+                    f"mask_culled_too_much: only {faces_after_culling} faces remain "
+                    f"after culling (min={_MIN_FACES_AFTER_CULLING})"
+                ),
+                "glb_path": None,
+                "mesh_vertex_count": 0,
+                "mesh_face_count": 0,
+                "mesh_mode": "relief_plane",
+                "mask_face_culling_applied": mask_face_culling_applied,
+                "faces_before_culling": faces_before_culling,
+                "faces_after_culling": faces_after_culling,
+                "culled_face_ratio": round(culled_face_ratio, 4),
+                "vertices_before_compaction": vertices_before_compaction,
+                "vertices_after_compaction": 0,
+                "warning": "mask_culled_too_much",
+            }
+
+        # Compact: drop vertices no longer referenced by any face
+        vertices, faces, uvs = compact_mesh(vertices, culled_faces, uvs)
+        vertices_after_compaction = len(vertices)
+        faces = culled_faces if len(faces) == 0 else faces   # compact_mesh already remapped
+
+    culled_face_ratio = 1.0 - (faces_after_culling / max(faces_before_culling, 1))
 
     try:
         mesh = export_mesh_to_trimesh(vertices, faces, uvs, texture_image_path)
@@ -130,6 +183,12 @@ def depth_to_glb(
             "mesh_vertex_count": len(vertices),
             "mesh_face_count": len(faces),
             "mesh_mode": "relief_plane",
+            "mask_face_culling_applied": mask_face_culling_applied,
+            "faces_before_culling": faces_before_culling,
+            "faces_after_culling": faces_after_culling,
+            "culled_face_ratio": round(culled_face_ratio, 4),
+            "vertices_before_compaction": vertices_before_compaction,
+            "vertices_after_compaction": vertices_after_compaction,
         }
     except Exception as e:
         return {
@@ -139,4 +198,10 @@ def depth_to_glb(
             "mesh_vertex_count": len(vertices),
             "mesh_face_count": len(faces),
             "mesh_mode": "relief_plane",
+            "mask_face_culling_applied": mask_face_culling_applied,
+            "faces_before_culling": faces_before_culling,
+            "faces_after_culling": faces_after_culling,
+            "culled_face_ratio": round(culled_face_ratio, 4),
+            "vertices_before_compaction": vertices_before_compaction,
+            "vertices_after_compaction": vertices_after_compaction,
         }
