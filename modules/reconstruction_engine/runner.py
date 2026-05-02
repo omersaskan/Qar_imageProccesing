@@ -1257,7 +1257,109 @@ class ReconstructionRunner:
         if getattr(self, "_hardening_block", None):
             manifest_data["reconstruction_hardening"] = self._hardening_block
             self._write_hardening_manifest(job_dir, self._hardening_block)
+
+        # Sprint 6: Blender headless cleanup (opt-in, default off)
+        if getattr(settings, "blender_cleanup_enabled", False):
+            try:
+                from modules.asset_cleanup.blender_headless_worker import run_blender_cleanup
+                from modules.asset_cleanup.mesh_normalization import NormalizationConfig
+                from modules.export_pipeline.glb_export_manifest import (
+                    build_blender_cleanup_block, write_blender_cleanup_sidecar
+                )
+                cleanup_cfg = NormalizationConfig(
+                    decimate_enabled=bool(getattr(settings, "blender_cleanup_decimate_enabled", False)),
+                    decimate_ratio=float(getattr(settings, "blender_cleanup_decimate_ratio", 0.5)),
+                )
+                output_glb = job_dir / "blender_cleanup" / f"{job.job_id}_clean.glb"
+                worker_res = run_blender_cleanup(
+                    input_path=str(mesh_path),
+                    output_glb=str(output_glb),
+                    config=cleanup_cfg,
+                )
+                cleanup_block = build_blender_cleanup_block(worker_res, original_mesh_path=str(mesh_path))
+                manifest_data["blender_cleanup"] = cleanup_block
+                write_blender_cleanup_sidecar(job_dir, cleanup_block)
+                if worker_res.status == "ok" and worker_res.output_glb:
+                    manifest_data["cleaned_glb_path"] = worker_res.output_glb
+            except Exception as _ble:
+                logging.warning(f"blender_cleanup failed (non-fatal): {_ble}")
+
+        # Sprint 7: glTF-Transform optimization + Khronos validation gate (opt-in)
+        if getattr(settings, "gltf_optimization_enabled", False) or getattr(settings, "gltf_validation_enabled", False):
+            try:
+                from modules.export_pipeline.gltf_transform_optimizer import optimize_glb, GltfTransformConfig
+                from modules.qa_validation.gltf_validator import validate_glb
+                from modules.qa_validation.ar_asset_gate import evaluate_ar_gate
+
+                target_glb = manifest_data.get("cleaned_glb_path") or str(mesh_path)
+                opt_result = None
+                val_result = None
+
+                if getattr(settings, "gltf_optimization_enabled", False):
+                    opt_out = job_dir / "gltf_optimized" / f"{job.job_id}_opt.glb"
+                    opt_result = optimize_glb(target_glb, str(opt_out))
+                    manifest_data["gltf_optimization"] = opt_result.to_dict()
+                    if opt_result.status == "ok" and opt_result.output_glb:
+                        target_glb = opt_result.output_glb
+
+                if getattr(settings, "gltf_validation_enabled", False):
+                    val_result = validate_glb(target_glb)
+                    manifest_data["gltf_validation"] = val_result.to_dict()
+
+                gate = evaluate_ar_gate(opt_result, val_result)
+                manifest_data["ar_asset_gate"] = gate.to_dict()
+            except Exception as _s7e:
+                logging.warning(f"Sprint 7 gltf pipeline failed (non-fatal): {_s7e}")
+
+        # Sprint 5: pose-backed coverage (opt-in, default off)
+        if getattr(settings, "pose_backed_coverage_enabled", False):
+            try:
+                from .pose_feedback import generate_pose_feedback
+                attempt_dir = results.get("metadata", {}).get("attempt_dir") or str(job_dir)
+                frame_count = len(getattr(job, "input_frames", None) or [])
+                manifest_data["pose_backed_coverage"] = generate_pose_feedback(
+                    attempt_dir, input_frame_count=frame_count
+                )
+            except Exception as _pfe:
+                logging.warning(f"pose_backed_coverage generation failed (non-fatal): {_pfe}")
+
         atomic_write_json(manifest_path, manifest_data)
+
+        # Sprint 8: license manifest + provenance (opt-in, default off)
+        if getattr(settings, "license_manifest_enabled", False) or getattr(settings, "provenance_enabled", False):
+            try:
+                if getattr(settings, "license_manifest_enabled", False):
+                    from modules.asset_registry.license_manifest import build_license_manifest
+                    active_tools = ["colmap", "openmvs"]
+                    if getattr(settings, "blender_cleanup_enabled", False):
+                        active_tools.append("blender")
+                    if getattr(settings, "gltf_optimization_enabled", False):
+                        active_tools.append("gltf_transform")
+                    if getattr(settings, "gltf_validation_enabled", False):
+                        active_tools.append("gltf_validator")
+                    lm = build_license_manifest(
+                        asset_id=job.product_id,
+                        source_video_path=getattr(job, "source_video_path", None),
+                        active_tools=active_tools,
+                    )
+                    lm.write(job_dir / "license_manifest.json")
+                    manifest_data["license_manifest_path"] = str(job_dir / "license_manifest.json")
+
+                if getattr(settings, "provenance_enabled", False):
+                    from modules.asset_registry.asset_provenance import provenance_from_manifest
+                    prov = provenance_from_manifest(
+                        asset_id=job.product_id,
+                        job_id=job.job_id,
+                        capture_session_id=job.capture_session_id,
+                        manifest_data=manifest_data,
+                    )
+                    prov.write(job_dir / "asset_provenance.json")
+                    manifest_data["provenance_path"] = str(job_dir / "asset_provenance.json")
+
+                # Re-write manifest with updated paths
+                atomic_write_json(manifest_path, manifest_data)
+            except Exception as _s8e:
+                logging.warning(f"Sprint 8 license/provenance failed (non-fatal): {_s8e}")
 
         # Sprint 1: write quality_report.json (scorecard) next to manifest.
         # All inputs optional — empty inputs produce a graded F but never raise.

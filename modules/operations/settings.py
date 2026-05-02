@@ -251,6 +251,37 @@ class Settings(BaseSettings):
     reconstruction_runtime_fallback_enabled: bool = Field(
         False, validation_alias="RECONSTRUCTION_RUNTIME_FALLBACK_ENABLED"
     )
+    # Sprint 5: pose-backed coverage matrix from COLMAP sparse output.
+    pose_backed_coverage_enabled: bool = Field(
+        False, validation_alias="POSE_BACKED_COVERAGE_ENABLED"
+    )
+    # Sprint 6: Blender headless cleanup + GLB re-export (opt-in).
+    blender_cleanup_enabled: bool = Field(
+        False, validation_alias="BLENDER_CLEANUP_ENABLED"
+    )
+    blender_cleanup_decimate_enabled: bool = Field(
+        False, validation_alias="BLENDER_CLEANUP_DECIMATE_ENABLED"
+    )
+    blender_cleanup_decimate_ratio: float = Field(
+        0.5, validation_alias="BLENDER_CLEANUP_DECIMATE_RATIO"
+    )
+    # Sprint 7: glTF-Transform optimization + Khronos validation gate (opt-in).
+    gltf_optimization_enabled: bool = Field(
+        False, validation_alias="GLTF_OPTIMIZATION_ENABLED"
+    )
+    gltf_validation_enabled: bool = Field(
+        False, validation_alias="GLTF_VALIDATION_ENABLED"
+    )
+    gltf_validation_reject_on_error: bool = Field(
+        True, validation_alias="GLTF_VALIDATION_REJECT_ON_ERROR"
+    )
+    # Sprint 8: license manifest + provenance (opt-in).
+    license_manifest_enabled: bool = Field(
+        False, validation_alias="LICENSE_MANIFEST_ENABLED"
+    )
+    provenance_enabled: bool = Field(
+        False, validation_alias="PROVENANCE_ENABLED"
+    )
 
     # --- PHASE 6.1: SAM2 SEGMENTATION ---
     segmentation_method: str = Field("legacy", validation_alias="SEGMENTATION_METHOD")
