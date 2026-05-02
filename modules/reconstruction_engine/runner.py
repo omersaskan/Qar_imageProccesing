@@ -3,6 +3,7 @@ import logging
 import os
 import shutil
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -147,15 +148,28 @@ class ReconstructionRunner:
         from .reconstruction_command_config import from_preset
         command_config = from_preset(preset)
 
+        runtime_fallback_enabled = bool(
+            getattr(settings, "reconstruction_runtime_fallback_enabled", False)
+        )
+        # Sprint 4.6: hardening_mode encodes whether the runtime loop is wired.
+        # disabled         — preset hardening flag is False (block not built).
+        # manifest_only    — flag True but runtime loop disabled (Sprint 4.5).
+        # runtime_enforced — flag True + runtime fallback wired (Sprint 4.6).
+        hardening_mode = "runtime_enforced" if runtime_fallback_enabled else "manifest_only"
+
         return {
-            "version": "v1.5",
+            "version": "v1.6",
             "enabled": True,
+            "hardening_mode": hardening_mode,
+            "runtime_fallback_enabled": runtime_fallback_enabled,
             "profile": profile.to_dict(),
             "preflight": preflight.to_dict(),
             "preset": preset,
+            "active_preset": preset.get("name"),
             "command_config": command_config.to_dict(),
             "intrinsics_cache": intrinsics_status,
-            "fallback_attempts": [],
+            "attempts": [],
+            "fallback_attempts": [],  # legacy alias, kept for backward compat
             "final_attempt": 0,
             "final_status": "pending",
             # Cached object the runner uses to build adapters (not serialized).
@@ -180,28 +194,55 @@ class ReconstructionRunner:
         exit_code: Optional[int] = None,
         next_action: Optional[str] = None,
         error_excerpt: Optional[str] = None,
+        command_config: Optional[Dict[str, Any]] = None,
+        started_at: Optional[str] = None,
+        finished_at: Optional[str] = None,
+        next_preset: Optional[str] = None,
+        error_summary: Optional[str] = None,
     ):
         """
-        Sprint 4.5: append an attempt record to hardening block + advance the
-        command_config if a next_action is supplied.  Caller orchestrates
+        Sprint 4.5/4.6: append an attempt record to hardening block + advance
+        the command_config if a next_action is supplied.  Caller orchestrates
         the actual retry loop; this only records bookkeeping.
+
+        Sprint 4.6 added fields (all optional, additive):
+          - attempt_index, preset_name, command_config snapshot,
+            started_at, finished_at, next_preset, error_summary
         """
         block = getattr(self, "_hardening_block", None)
         if not block:
             return
-        block.setdefault("fallback_attempts", []).append({
+        excerpt = (error_excerpt or error_summary or "")
+        excerpt = excerpt[:240] if excerpt else None
+        summary = (error_summary or error_excerpt or "")
+        summary = summary[:240] if summary else None
+        next_preset_val = next_preset or next_action
+
+        record = {
+            # legacy keys (Sprint 4.5)
             "attempt": int(attempt_num),
             "preset": preset_name,
             "status": status,
             "failure_class": failure_class,
             "exit_code": exit_code,
-            "next_action": next_action,
-            "error_excerpt": (error_excerpt or "")[:240] if error_excerpt else None,
-        })
+            "next_action": next_action or next_preset,
+            "error_excerpt": excerpt,
+            # Sprint 4.6 keys
+            "attempt_index": int(attempt_num),
+            "preset_name": preset_name,
+            "command_config": command_config,
+            "started_at": started_at,
+            "finished_at": finished_at,
+            "error_summary": summary,
+            "next_preset": next_preset_val,
+        }
+        block.setdefault("fallback_attempts", []).append(record)
+        block.setdefault("attempts", []).append(record)
         block["final_attempt"] = int(attempt_num)
         if status == "passed":
             block["final_status"] = "reconstructed"
-        elif next_action is None and status == "failed":
+            block["active_preset"] = preset_name
+        elif next_preset_val is None and status == "failed":
             block["final_status"] = "failed"
         else:
             block["final_status"] = "retrying"
@@ -262,10 +303,297 @@ class ReconstructionRunner:
         block["_command_config_obj"] = new_cfg
         block["command_config"] = new_cfg.to_dict()
         block["preset"] = nxt.preset_snapshot
+        block["active_preset"] = nxt.preset_name
         for attr in ("_colmap_cached", "_openmvs_cached"):
             if hasattr(self, attr):
                 delattr(self, attr)
         return nxt.preset_name
+
+    @staticmethod
+    def _classify_attempt_failure(exc: BaseException) -> Tuple[str, Optional[int], str]:
+        """
+        Sprint 4.6: classify a reconstruction attempt failure into a stable
+        crash class for the fallback ladder.
+
+        Returns (failure_class, exit_code_or_None, error_summary).
+
+        Classes:
+          - native_crash : exit 3221226505 / 0xC0000005 / TextureMesh native crash
+          - oom          : "out of memory" / "memory allocation"
+          - missing_file : "no such file" / "file not found" / MissingArtifactError
+          - timeout      : "timeout" / "timed out"
+          - unknown      : everything else
+        """
+        from .failures import MissingArtifactError, TexturingFailed
+
+        msg = str(exc) if exc is not None else ""
+        if not msg:
+            msg = repr(exc)
+        lo = msg.lower()
+        upper = msg.upper()
+
+        exit_code: Optional[int] = None
+        ec_attr = getattr(exc, "exit_code", None)
+        if isinstance(ec_attr, int):
+            exit_code = ec_attr
+
+        # Missing artifact / file
+        if isinstance(exc, MissingArtifactError):
+            return "missing_file", exit_code, msg[:240]
+        if "no such file" in lo or "file not found" in lo or "missing artifact" in lo:
+            return "missing_file", exit_code, msg[:240]
+
+        # Native crash — TextureMesh on Windows
+        if (
+            "3221226505" in msg
+            or "0XC0000005" in upper
+            or "TEXTUREMESH_NATIVE_CRASH" in upper
+            or "native crash" in lo
+            or isinstance(exc, TexturingFailed)
+        ):
+            if exit_code is None:
+                exit_code = 3221226505
+            return "native_crash", exit_code, msg[:240]
+
+        # OOM
+        if (
+            "out of memory" in lo
+            or "memory allocation" in lo
+            or "cuda error: out of memory" in lo
+            or "oom" in lo
+        ):
+            return "oom", exit_code, msg[:240]
+
+        # Timeout
+        if "timeout" in lo or "timed out" in lo:
+            return "timeout", exit_code, msg[:240]
+
+        return "unknown", exit_code, msg[:240]
+
+    def _runtime_fallback_active(self) -> bool:
+        """Sprint 4.6: gate for the new preset-driven retry loop."""
+        block = getattr(self, "_hardening_block", None)
+        if not block:
+            return False
+        if not bool(getattr(settings, "reconstruction_runtime_fallback_enabled", False)):
+            return False
+        return True
+
+    def _run_runtime_fallback_loop(
+        self,
+        job: ReconstructionJob,
+        validated_frames: List[str],
+        audit: ReconstructionAudit,
+        job_dir: Path,
+    ) -> Tuple[Optional[Dict[str, Any]], int, str]:
+        """
+        Sprint 4.6: preset-aware retry loop replacing the legacy fallback_steps
+        loop when hardening + runtime fallback are both enabled.
+
+        Returns (best_results_or_None, best_index, engine_used). Records each
+        attempt to both the audit and the hardening block.  Caps at
+        settings.fallback_ladder_max_attempts.
+
+        On exhaustion without success, returns (None, -1, "").  Caller decides
+        whether to raise InsufficientReconstructionError.
+        """
+        block = self._hardening_block
+        max_attempts = max(1, int(getattr(settings, "fallback_ladder_max_attempts", 3) or 1))
+
+        best_results: Optional[Dict[str, Any]] = None
+        best_index = -1
+        best_score = float("-inf")
+        best_engine = ""
+
+        attempt_num = 0
+        while attempt_num < max_attempts:
+            attempt_num += 1
+            current_cfg = block.get("_command_config_obj")
+            preset_name = (block.get("preset") or {}).get("name") or block.get("active_preset") or "baseline"
+            cfg_snapshot = current_cfg.to_dict() if current_cfg is not None else None
+
+            attempt_dir = job_dir / f"attempt_{attempt_num}_{preset_name}"
+            attempt_dir.mkdir(parents=True, exist_ok=True)
+            block["active_preset"] = preset_name
+
+            started_at = datetime.now(timezone.utc).isoformat()
+            logging.info(
+                f"[runtime-fallback] attempt {attempt_num}/{max_attempts} preset={preset_name}"
+            )
+
+            try:
+                current_adapter = self.adapter
+                execution_dir, final_dir = self._prepare_execution_workspace(job)
+                if final_dir:
+                    final_dir = attempt_dir
+                else:
+                    execution_dir = attempt_dir
+
+                results = current_adapter.run_reconstruction(
+                    validated_frames,
+                    execution_dir,
+                    density=1.0,
+                    enforce_masks=True,
+                )
+
+                if final_dir:
+                    self._sync_workspace_back(execution_dir, final_dir)
+                    results = self._remap_artifact_paths(results, execution_dir, final_dir)
+                    shutil.rmtree(execution_dir, ignore_errors=True)
+
+                engine_used = current_adapter.engine_type
+                if isinstance(results, dict):
+                    results["engine_used"] = engine_used
+
+                score = self._score_attempt(results)
+
+                attempt_res = ReconstructionAttemptResult(
+                    attempt_type=ReconstructionAttemptType.DEFAULT,
+                    status="success",
+                    frames_used=len(validated_frames),
+                    registered_images=results.get("registered_images", 0),
+                    sparse_points=results.get("sparse_points", 0),
+                    dense_points_fused=results.get("dense_points_fused", 0),
+                    mesher_used=results.get("mesher_used", "none"),
+                    mesh_path=results.get("mesh_path"),
+                    log_path=results.get("log_path"),
+                    metrics_rank_score=score,
+                    metadata={
+                        "engine": engine_used,
+                        "attempt_dir": str(attempt_dir),
+                        "preset": preset_name,
+                        "runtime_fallback": True,
+                    },
+                )
+                audit.attempts.append(attempt_res)
+
+                finished_at = datetime.now(timezone.utc).isoformat()
+                self._record_fallback_attempt(
+                    attempt_num=attempt_num,
+                    preset_name=preset_name,
+                    status="passed",
+                    command_config=cfg_snapshot,
+                    started_at=started_at,
+                    finished_at=finished_at,
+                )
+
+                if score > best_score:
+                    best_score = score
+                    best_results = results
+                    best_index = len(audit.attempts) - 1
+                    best_engine = engine_used
+                # Success — stop the ladder.
+                return best_results, best_index, best_engine
+
+            except Exception as exc:
+                finished_at = datetime.now(timezone.utc).isoformat()
+                failure_class, exit_code, error_summary = self._classify_attempt_failure(exc)
+                logging.warning(
+                    f"[runtime-fallback] attempt {attempt_num} preset={preset_name} "
+                    f"failed: class={failure_class} exit={exit_code}"
+                )
+
+                attempt_res = ReconstructionAttemptResult(
+                    attempt_type=ReconstructionAttemptType.DEFAULT,
+                    status="failed",
+                    frames_used=0,
+                    error_message=error_summary,
+                    metrics_rank_score=-1000.0,
+                    metadata={
+                        "attempt_dir": str(attempt_dir),
+                        "preset": preset_name,
+                        "failure_class": failure_class,
+                        "exit_code": exit_code,
+                        "runtime_fallback": True,
+                    },
+                )
+                audit.attempts.append(attempt_res)
+
+                if failure_class == "missing_file":
+                    self._record_fallback_attempt(
+                        attempt_num=attempt_num,
+                        preset_name=preset_name,
+                        status="failed",
+                        failure_class=failure_class,
+                        exit_code=exit_code,
+                        next_action=None,
+                        next_preset=None,
+                        error_excerpt=error_summary,
+                        error_summary=error_summary,
+                        command_config=cfg_snapshot,
+                        started_at=started_at,
+                        finished_at=finished_at,
+                    )
+                    return None, -1, ""
+
+                # Decide next preset BEFORE recording, so we have next_action.
+                attempts_before_swap = len(block.get("fallback_attempts", []))
+                if attempts_before_swap + 1 >= max_attempts:
+                    next_preset = None
+                else:
+                    next_preset = self._peek_next_preset(error_summary)
+
+                self._record_fallback_attempt(
+                    attempt_num=attempt_num,
+                    preset_name=preset_name,
+                    status="failed",
+                    failure_class=failure_class,
+                    exit_code=exit_code,
+                    next_action=next_preset,
+                    next_preset=next_preset,
+                    error_excerpt=error_summary,
+                    error_summary=error_summary,
+                    command_config=cfg_snapshot,
+                    started_at=started_at,
+                    finished_at=finished_at,
+                )
+
+                if next_preset is None:
+                    block["final_status"] = "failed"
+                    return None, -1, ""
+
+                # Swap to next preset (rebuilds adapter on next access).
+                applied = self._swap_to_next_preset(error_summary)
+                if applied is None:
+                    block["final_status"] = "failed"
+                    return None, -1, ""
+                # Continue loop with new preset.
+
+        # Exhausted attempts without success
+        block["final_status"] = "failed"
+        return None, -1, ""
+
+    def _peek_next_preset(self, error_excerpt: Optional[str]) -> Optional[str]:
+        """Return the name of the preset the ladder would pick, without applying it."""
+        block = getattr(self, "_hardening_block", None)
+        if not block:
+            return None
+        from .fallback_ladder import pick_next_preset, FallbackAttempt
+        from .reconstruction_profile import ReconstructionProfile
+
+        attempts = block.get("fallback_attempts", []) or []
+        prior_used: List[FallbackAttempt] = [
+            FallbackAttempt(
+                step_index=i,
+                preset_name=str(a.get("preset", "")),
+                triggered_by="recorded",
+            )
+            for i, a in enumerate(attempts)
+        ]
+        try:
+            profile_dict = block.get("profile") or {}
+            profile = ReconstructionProfile()
+            for k, v in profile_dict.items():
+                if hasattr(profile, k):
+                    try:
+                        setattr(profile, k, type(getattr(profile, k))(v))
+                    except Exception:
+                        pass
+        except Exception:
+            profile = None
+
+        nxt = pick_next_preset(profile=profile, error_excerpt=error_excerpt, attempts_so_far=prior_used)
+        return nxt.preset_name if nxt else None
 
     def _current_command_config(self):
         """Sprint 4.5: pull the typed command config from hardening block, if active."""
@@ -546,6 +874,9 @@ class ReconstructionRunner:
                 if self._hardening_block.get("preflight", {}).get("decision") == "reject":
                     job_dir = Path(job.job_dir).resolve()
                     job_dir.mkdir(parents=True, exist_ok=True)
+                    # Sprint 4.6: mirror the audit verdict into the hardening
+                    # block so manifest readers see the same final_status.
+                    self._hardening_block["final_status"] = "capture_quality_rejected"
                     self._save_audit(
                         ReconstructionAudit(
                             capture_session_id=job.capture_session_id,
@@ -579,6 +910,33 @@ class ReconstructionRunner:
         best_score = float("-inf")
         best_index = -1
         run_start = time.monotonic()
+
+        # ── Sprint 4.6: runtime fallback dispatch ───────────────────────
+        # When hardening + runtime fallback are both enabled, drive attempts
+        # through the preset-aware ladder instead of the legacy loop.  Legacy
+        # behaviour is preserved verbatim when either flag is off.
+        if self._runtime_fallback_active():
+            best_results, best_index, best_engine = self._run_runtime_fallback_loop(
+                job, validated_frames, audit, job_dir
+            )
+            if best_results is None:
+                audit.final_status = "failed"
+                self._save_audit(audit, job_dir)
+                self._write_hardening_manifest(job_dir, self._hardening_block)
+                last_err = (
+                    audit.attempts[-1].error_message
+                    if audit.attempts else "All preset fallback attempts failed."
+                )
+                raise InsufficientReconstructionError(
+                    f"All preset fallback attempts failed. Last error: {last_err}"
+                )
+            audit.selected_best_index = best_index
+            audit.final_status = "success"
+            self._save_audit(audit, job_dir)
+            elapsed_seconds = time.monotonic() - run_start
+            return self._finalize_best_attempt(
+                best_results, job, job_dir, best_engine, elapsed_seconds
+            )
 
         for i, step_name in enumerate(fallback_steps):
             # Check for external cancellation before each attempt

@@ -244,6 +244,13 @@ class Settings(BaseSettings):
     fallback_ladder_max_attempts: int = Field(
         3, validation_alias="FALLBACK_LADDER_MAX_ATTEMPTS"
     )
+    # Sprint 4.6: when true (and hardening enabled), runner.run() drives
+    # attempts via the preset-aware fallback ladder instead of the legacy
+    # recon_fallback_steps loop.  Default false preserves Sprint 4.5
+    # manifest-only behaviour.
+    reconstruction_runtime_fallback_enabled: bool = Field(
+        False, validation_alias="RECONSTRUCTION_RUNTIME_FALLBACK_ENABLED"
+    )
 
     # --- PHASE 6.1: SAM2 SEGMENTATION ---
     segmentation_method: str = Field("legacy", validation_alias="SEGMENTATION_METHOD")
