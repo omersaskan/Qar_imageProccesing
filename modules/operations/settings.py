@@ -291,6 +291,7 @@ class Settings(BaseSettings):
     depth_studio_allow_video_input: bool = Field(True, validation_alias="DEPTH_STUDIO_ALLOW_VIDEO_INPUT")
     depth_studio_default_provider: str = Field("depth_anything_v2", validation_alias="DEPTH_STUDIO_DEFAULT_PROVIDER")
     depth_pro_enabled: bool = Field(False, validation_alias="DEPTH_PRO_ENABLED")
+    depth_pro_python_path: Optional[str] = Field(None, validation_alias="DEPTH_PRO_PYTHON_PATH")
     depth_output_format: str = Field("png16", validation_alias="DEPTH_OUTPUT_FORMAT")
     depth_output_allow_exr: bool = Field(True, validation_alias="DEPTH_OUTPUT_ALLOW_EXR")
     depth_mesh_mode: str = Field("relief_plane", validation_alias="DEPTH_MESH_MODE")

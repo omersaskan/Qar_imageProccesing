@@ -26,40 +26,72 @@ class DepthProProvider(DepthProviderBase):
         from modules.operations.settings import settings
         if not settings.depth_pro_enabled:
             return False, "DEPTH_PRO_ENABLED=false"
-        try:
-            import depth_pro  # noqa: F401
-            return True, ""
-        except ImportError:
-            return False, "depth_pro package not installed"
+        
+        python_path = settings.depth_pro_python_path
+        if not python_path:
+            return False, "DEPTH_PRO_PYTHON_PATH not configured"
+        
+        if not Path(python_path).exists():
+            return False, f"Depth Pro Python not found at {python_path}"
+            
+        return True, ""
 
     def infer(self, image_path: str, output_dir: str) -> Dict[str, Any]:
-        import depth_pro
-        import numpy as np
-        from PIL import Image
+        from modules.operations.settings import settings
+        import subprocess
+        import json
 
-        Path(output_dir).mkdir(parents=True, exist_ok=True)
-        depth_path = str(Path(output_dir) / "depth_16.png")
+        python_path = settings.depth_pro_python_path
+        worker_script = str(Path("scripts/depth_pro_worker.py").resolve())
+        
+        cmd = [
+            str(Path(python_path).resolve()),
+            worker_script,
+            "--image", str(Path(image_path).resolve()),
+            "--output", str(Path(output_dir).resolve()),
+            "--device", self.device
+        ]
+        
+        if self.checkpoint:
+            cmd.extend(["--checkpoint", str(Path(self.checkpoint).resolve())])
 
-        model, transform = depth_pro.create_model_and_transforms(
-            device=self.device,
-        )
-        model.eval()
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            # Find JSON in stdout (in case of other prints)
+            stdout = result.stdout.strip()
+            # The worker is expected to print exactly one JSON line
+            data = json.loads(stdout)
+            
+            if data.get("status") == "ok":
+                return {
+                    "status": "ok",
+                    "provider": self.name,
+                    "depth_map_path": data["depth_map_path"],
+                    "depth_format": data["depth_format"],
+                    "model_name": data["model_name"],
+                    "warnings": ["isolated_worker"],
+                }
+            else:
+                return {
+                    "status": "error",
+                    "message": data.get("message", "Unknown worker error"),
+                    "provider": self.name
+                }
 
-        image, _, f_px = depth_pro.load_rgb(image_path)
-        prediction = model.infer(transform(image), f_px=f_px)
-        depth = prediction["depth"].detach().cpu().numpy()
-
-        d_min, d_max = depth.min(), depth.max()
-        depth16 = ((depth - d_min) / (d_max - d_min + 1e-8) * 65535).astype("uint16")
-
-        import cv2
-        cv2.imwrite(depth_path, depth16)
-
-        return {
-            "status": "ok",
-            "provider": self.name,
-            "depth_map_path": depth_path,
-            "depth_format": "png16",
-            "model_name": "apple/depth-pro",
-            "warnings": ["experimental_provider"],
-        }
+        except subprocess.CalledProcessError as e:
+            return {
+                "status": "error",
+                "message": f"Worker process failed (exit {e.returncode}): {e.stderr}",
+                "provider": self.name
+            }
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": f"Unexpected error during isolated inference: {str(e)}",
+                "provider": self.name
+            }
