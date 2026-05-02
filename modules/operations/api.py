@@ -1098,6 +1098,59 @@ def _depth_session_dir(session_id: str) -> Path:
     return _depth_data_root / session_id
 
 
+def _depth_session_summary(session_id: str) -> Dict[str, Any]:
+    """
+    Return a compact status summary dict for a session.
+    Reads the persisted manifest if available; falls back to in-memory info.
+    Used to enrich 404 responses on image/artifact endpoints.
+    """
+    info = _depth_sessions.get(session_id, {})
+    manifest_path = info.get("manifest_path")
+    manifest: Dict[str, Any] = {}
+    if manifest_path:
+        try:
+            manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+    status = manifest.get("status") or info.get("status", "unknown")
+    provider_status = manifest.get("provider_status", "unknown")
+    warnings = manifest.get("warnings", [])
+    provider = manifest.get("provider") or info.get("provider", "unknown")
+
+    # Determine which expected outputs are missing
+    derived = _depth_session_dir(session_id) / "derived"
+    expected = {
+        "depth_preview":  derived / "depth_preview.png",
+        "subject_mask":   derived / "subject_mask.png",
+        "mask_overlay":   derived / "mask_overlay.png",
+        "cropped_subject": derived / "cropped_subject.jpg",
+        "glb":            derived / "preview_mesh.glb",
+    }
+    missing_outputs = [name for name, path in expected.items() if not path.exists()]
+
+    summary: Dict[str, Any] = {
+        "session_status": status,
+        "provider": provider,
+        "provider_status": provider_status,
+        "warnings": warnings,
+        "missing_outputs": missing_outputs,
+    }
+
+    # Friendly reason for provider failure
+    if provider_status in ("unavailable", "failed", "disabled"):
+        if "depth_pro" in provider:
+            summary["provider_failure_reason"] = (
+                "Depth Pro unavailable: DEPTH_PRO_ENABLED=false or depth_pro package not installed"
+            )
+        else:
+            summary["provider_failure_reason"] = (
+                f"Provider '{provider}' reported status '{provider_status}'"
+            )
+
+    return summary
+
+
 @app.post("/api/depth-studio/upload", dependencies=[Depends(verify_api_key)])
 async def depth_studio_upload(
     file: UploadFile = File(...),
@@ -1164,7 +1217,36 @@ async def depth_studio_process(session_id: str, body: Optional[_DepthProcessRequ
         )
         info["status"] = manifest.get("status", "failed")
         info["manifest_path"] = str(session_dir / "manifests" / "depth_studio_manifest.json")
-        return {"session_id": session_id, "status": info["status"], "manifest": manifest}
+
+        # Build enriched response so the UI can act on failure without extra round-trips.
+        # missing_outputs comes from disk (written by the pipeline); provider_failure_reason
+        # is derived from the in-hand manifest dict so it works even when the manifest file
+        # was never written (e.g. provider mock in tests).
+        summary = _depth_session_summary(session_id)
+        provider_status = manifest.get("provider_status", "unknown")
+        provider_name = manifest.get("provider") or info.get("provider", "unknown")
+        provider_failure_reason: Optional[str] = None
+        if provider_status in ("unavailable", "failed", "disabled"):
+            if "depth_pro" in (provider_name or ""):
+                provider_failure_reason = (
+                    "Depth Pro unavailable: DEPTH_PRO_ENABLED=false or depth_pro package not installed"
+                )
+            else:
+                provider_failure_reason = (
+                    f"Provider '{provider_name}' reported status '{provider_status}'"
+                )
+
+        response: Dict[str, Any] = {
+            "session_id": session_id,
+            "status": info["status"],
+            "provider_status": provider_status,
+            "warnings": manifest.get("warnings", []),
+            "missing_outputs": summary["missing_outputs"],
+            "manifest": manifest,
+        }
+        if provider_failure_reason:
+            response["provider_failure_reason"] = provider_failure_reason
+        return response
     except Exception as e:
         info["status"] = "failed"
         raise HTTPException(status_code=500, detail=f"Depth Studio processing failed: {e}")
@@ -1196,6 +1278,21 @@ async def depth_studio_manifest(session_id: str):
         return json.load(f)
 
 
+def _artifact_404(session_id: str, artifact_name: str) -> HTTPException:
+    """Build a 404 with session summary embedded so callers understand why the artifact is missing."""
+    summary = _depth_session_summary(session_id)
+    detail: Dict[str, Any] = {
+        "error": f"{artifact_name} not available",
+        "session_status": summary["session_status"],
+        "provider_status": summary["provider_status"],
+        "warnings": summary["warnings"],
+        "missing_outputs": summary["missing_outputs"],
+    }
+    if summary.get("provider_failure_reason"):
+        detail["provider_failure_reason"] = summary["provider_failure_reason"]
+    return HTTPException(status_code=404, detail=detail)
+
+
 @app.get("/api/depth-studio/preview/{session_id}", dependencies=[Depends(verify_api_key)])
 async def depth_studio_preview(session_id: str):
     """Return depth preview image if available."""
@@ -1204,7 +1301,7 @@ async def depth_studio_preview(session_id: str):
     preview = _depth_session_dir(session_id) / "derived" / "depth_preview.png"
     if preview.exists():
         return FileResponse(str(preview), media_type="image/png")
-    raise HTTPException(status_code=404, detail="Depth preview not yet available")
+    raise _artifact_404(session_id, "depth_preview")
 
 
 @app.get("/api/depth-studio/subject-mask/{session_id}", dependencies=[Depends(verify_api_key)])
@@ -1215,7 +1312,7 @@ async def depth_studio_subject_mask(session_id: str):
     p = _depth_session_dir(session_id) / "derived" / "subject_mask.png"
     if p.exists():
         return FileResponse(str(p), media_type="image/png")
-    raise HTTPException(status_code=404, detail="Subject mask not yet available")
+    raise _artifact_404(session_id, "subject_mask")
 
 
 @app.get("/api/depth-studio/cropped-subject/{session_id}", dependencies=[Depends(verify_api_key)])
@@ -1226,7 +1323,7 @@ async def depth_studio_cropped_subject(session_id: str):
     p = _depth_session_dir(session_id) / "derived" / "cropped_subject.jpg"
     if p.exists():
         return FileResponse(str(p), media_type="image/jpeg")
-    raise HTTPException(status_code=404, detail="Cropped subject not yet available")
+    raise _artifact_404(session_id, "cropped_subject")
 
 
 @app.get("/api/depth-studio/mask-overlay/{session_id}", dependencies=[Depends(verify_api_key)])
@@ -1237,7 +1334,7 @@ async def depth_studio_mask_overlay(session_id: str):
     overlay = _depth_session_dir(session_id) / "derived" / "mask_overlay.png"
     if overlay.exists():
         return FileResponse(str(overlay), media_type="image/png")
-    raise HTTPException(status_code=404, detail="Mask overlay not yet available")
+    raise _artifact_404(session_id, "mask_overlay")
 
 
 @app.get("/api/depth-studio/mask-stats/{session_id}", dependencies=[Depends(verify_api_key)])
@@ -1247,9 +1344,8 @@ async def depth_studio_mask_stats(session_id: str):
         raise HTTPException(status_code=404, detail=f"Depth Studio session not found: {session_id}")
     stats_path = _depth_session_dir(session_id) / "derived" / "mask_stats.json"
     if stats_path.exists():
-        import json as _json
-        return _json.loads(stats_path.read_text(encoding="utf-8"))
-    raise HTTPException(status_code=404, detail="Mask stats not yet available")
+        return json.loads(stats_path.read_text(encoding="utf-8"))
+    raise _artifact_404(session_id, "mask_stats")
 
 
 # Asset Blobs (GLB Files)

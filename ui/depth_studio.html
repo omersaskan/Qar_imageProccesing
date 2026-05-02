@@ -93,6 +93,9 @@
     <div class="ds-status info" id="status-box"></div>
   </div>
 
+  <!-- Provider error banner (shown above results card, outside it) -->
+  <div id="provider-error-box" style="display:none;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:12px 16px;margin-bottom:14px;font-size:.88rem;color:#991b1b;"></div>
+
   <!-- Results -->
   <div class="ds-card" id="results-card" style="display:none">
     <h2>3. Results</h2>
@@ -201,12 +204,22 @@
       if (!r.ok) { const e = await r.json(); throw new Error(e.detail || r.statusText); }
       const data = await r.json();
       const status = data.status;
+
+      // Show provider failure banner before rendering results
+      if (data.provider_failure_reason) {
+        showProviderError(data.provider_failure_reason, data.warnings || []);
+      }
+
       if (status === 'ok' || status === 'partial') {
-        setStatus(`Processing complete (status: ${status}).`, 'ok');
-        showResults(data.manifest);
+        setStatus(`Processing complete (status: ${status}).`, status === 'ok' ? 'ok' : 'info');
+        showResults(data.manifest, data.missing_outputs || []);
       } else {
-        setStatus(`Processing returned status: ${status}`, 'error');
-        if (data.manifest) showResults(data.manifest);
+        const warnText = (data.warnings || []).join(', ');
+        setStatus(
+          `Processing failed (status: ${status})` + (warnText ? ` — ${warnText}` : ''),
+          'error'
+        );
+        if (data.manifest) showResults(data.manifest, data.missing_outputs || []);
       }
     } catch (e) {
       setStatus(`Processing failed: ${e.message}`, 'error');
@@ -214,32 +227,35 @@
     document.getElementById('upload-btn').disabled = false;
   }
 
-  function showResults(manifest) {
+  function showProviderError(reason, warnings) {
+    const box = document.getElementById('provider-error-box');
+    if (!box) return;
+    box.innerHTML = `<strong>⚠ Provider failure</strong> ${reason}`;
+    if (warnings.length) {
+      box.innerHTML += `<br/><small>${warnings.join(' · ')}</small>`;
+    }
+    box.style.display = 'block';
+  }
+
+  function showResults(manifest, missingOutputs) {
     if (!manifest) return;
+    missingOutputs = missingOutputs || [];
     document.getElementById('results-card').style.display = 'block';
 
-    // Depth preview + mask overlay
+    // Only request images that the server confirmed exist
     if (currentSessionId) {
       const t = Date.now();
-      const dpImg = document.getElementById('depth-preview');
-      dpImg.src = `/api/depth-studio/preview/${currentSessionId}?t=${t}`;
-      dpImg.style.display = 'block';
-      dpImg.onerror = () => { dpImg.style.display = 'none'; };
-
-      const moImg = document.getElementById('mask-overlay');
-      moImg.src = `/api/depth-studio/mask-overlay/${currentSessionId}?t=${t}`;
-      moImg.style.display = 'block';
-      moImg.onerror = () => { moImg.style.display = 'none'; };
-
-      const smImg = document.getElementById('subject-mask');
-      smImg.src = `/api/depth-studio/subject-mask/${currentSessionId}?t=${t}`;
-      smImg.style.display = 'block';
-      smImg.onerror = () => { smImg.style.display = 'none'; };
-
-      const csImg = document.getElementById('cropped-subject');
-      csImg.src = `/api/depth-studio/cropped-subject/${currentSessionId}?t=${t}`;
-      csImg.style.display = 'block';
-      csImg.onerror = () => { csImg.style.display = 'none'; };
+      const tryLoad = (imgId, endpoint, missing) => {
+        const img = document.getElementById(imgId);
+        if (missing) { img.style.display = 'none'; return; }
+        img.src = `/api/depth-studio/${endpoint}/${currentSessionId}?t=${t}`;
+        img.style.display = 'block';
+        img.onerror = () => { img.style.display = 'none'; };
+      };
+      tryLoad('depth-preview',  'preview',        missingOutputs.includes('depth_preview'));
+      tryLoad('mask-overlay',   'mask-overlay',   missingOutputs.includes('mask_overlay'));
+      tryLoad('subject-mask',   'subject-mask',   missingOutputs.includes('subject_mask'));
+      tryLoad('cropped-subject','cropped-subject', missingOutputs.includes('cropped_subject'));
     }
 
     // Mask quality alert
