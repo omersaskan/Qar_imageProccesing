@@ -4,7 +4,7 @@ import os
 import shutil
 import time
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -88,6 +88,77 @@ class ReconstructionRunner:
         except Exception as e:
             logging.warning(f"Profile resolve failed for reconstruction; using env settings: {e}")
         return settings
+
+    def _run_preset_hardening(self, job: "ReconstructionJob") -> Dict[str, Any]:
+        """
+        Sprint 4 — derive profile + preflight + preset, plus an intrinsics_cache
+        lookup.  Returned block is written to manifest under
+        `reconstruction_hardening`.
+        """
+        from .reconstruction_profile import derive_profile
+        from .reconstruction_preset_resolver import resolve_preset, get_preset_by_name, PRESET_NAME_BASELINE
+        from .reconstruction_preflight import evaluate_preflight, PreflightDecision
+        from .intrinsics_cache import IntrinsicsCache, disabled_lookup
+
+        # 1. Load extraction manifest from session captures dir
+        em: Dict[str, Any] = {}
+        try:
+            cap_dir = Path(settings.data_root) / "captures" / job.capture_session_id / "frames"
+            mf = cap_dir / "extraction_manifest.json"
+            if mf.exists():
+                em = json.loads(mf.read_text(encoding="utf-8"))
+        except Exception:
+            em = {}
+
+        profile = derive_profile(extraction_manifest=em, selected_keyframe_count=len(job.input_frames or []))
+
+        # 2. Preflight on the keyframe set
+        preflight = evaluate_preflight(
+            selected_keyframes=list(job.input_frames or []),
+            capture_gate=em.get("capture_gate"),
+        )
+
+        # 3. Preset selection — review degrades to baseline; reject keeps profile_safe
+        if preflight.decision == PreflightDecision.REVIEW:
+            preset = get_preset_by_name(PRESET_NAME_BASELINE, profile)
+            preset["rationale"] = "preflight=review → baseline (safe path)"
+        else:
+            preset = resolve_preset(profile)
+
+        # 4. Intrinsics cache (probe only — does not yet feed COLMAP)
+        intrinsics_status: Dict[str, Any] = {"status": "disabled", "cache_key": "disabled", "source": "default"}
+        if getattr(settings, "intrinsics_cache_enabled", False):
+            try:
+                first_frame = (job.input_frames or [None])[0]
+                w, h = 0, 0
+                if first_frame:
+                    img = self._read_image(Path(first_frame))
+                    if img is not None:
+                        h, w = img.shape[:2]
+                if w > 0 and h > 0:
+                    cache = IntrinsicsCache(Path(settings.data_root) / "intrinsics_cache.json")
+                    res = cache.lookup(width=w, height=h)
+                    intrinsics_status = res.to_dict()
+            except Exception as e:
+                intrinsics_status = {"status": "disabled", "cache_key": "error", "source": "default",
+                                      "error": str(e)[:200]}
+
+        return {
+            "version": "v1",
+            "enabled": True,
+            "profile": profile.to_dict(),
+            "preflight": preflight.to_dict(),
+            "preset": preset,
+            "intrinsics_cache": intrinsics_status,
+            "fallback_attempts": [],
+        }
+
+    def _write_hardening_manifest(self, job_dir: Path, block: Dict[str, Any]):
+        """Write reconstruction_hardening.json next to the audit; don't touch manifest.json."""
+        try:
+            atomic_write_json(job_dir / "reconstruction_hardening.json", block)
+        except Exception as e:
+            logging.warning(f"Failed to write reconstruction_hardening.json: {e}")
 
     @property
     def colmap_adapter(self) -> "COLMAPAdapter":
@@ -343,6 +414,35 @@ class ReconstructionRunner:
         for attr in ("_colmap_cached", "_openmvs_cached"):
             if hasattr(self, attr):
                 delattr(self, attr)
+
+        # ── Sprint 4: Reconstruction Preset Hardening (opt-in) ───────────
+        # Builds reconstruction_hardening.{profile, preflight, preset, ...}
+        # for the manifest.  Doesn't yet substitute COLMAP/OpenMVS args
+        # (Sprint 4 v2 wires that); manifest visibility is the v1 deliverable.
+        self._hardening_block = None
+        if getattr(settings, "reconstruction_preset_hardening_enabled", False):
+            try:
+                self._hardening_block = self._run_preset_hardening(job)
+                if self._hardening_block.get("preflight", {}).get("decision") == "reject":
+                    job_dir = Path(job.job_dir).resolve()
+                    job_dir.mkdir(parents=True, exist_ok=True)
+                    self._save_audit(
+                        ReconstructionAudit(
+                            capture_session_id=job.capture_session_id,
+                            final_status="capture_quality_rejected",
+                        ),
+                        job_dir,
+                    )
+                    self._write_hardening_manifest(job_dir, self._hardening_block)
+                    raise InsufficientInputError(
+                        f"Preflight rejected reconstruction: "
+                        f"{'; '.join(self._hardening_block['preflight'].get('reasons', []))}"
+                    )
+            except InsufficientInputError:
+                raise
+            except Exception as e:
+                logging.warning(f"Preset hardening failed (non-fatal, continuing legacy path): {e}")
+                self._hardening_block = None
 
         validated_frames = self._validate_input_frames(job.input_frames)
 
@@ -674,7 +774,12 @@ class ReconstructionRunner:
         )
 
         manifest_path = job_dir / "manifest.json"
-        atomic_write_json(manifest_path, manifest.model_dump(mode="json"))
+        manifest_data = manifest.model_dump(mode="json")
+        # Sprint 4: backward-compat optional block
+        if getattr(self, "_hardening_block", None):
+            manifest_data["reconstruction_hardening"] = self._hardening_block
+            self._write_hardening_manifest(job_dir, self._hardening_block)
+        atomic_write_json(manifest_path, manifest_data)
 
         # Sprint 1: write quality_report.json (scorecard) next to manifest.
         # All inputs optional — empty inputs produce a graded F but never raise.

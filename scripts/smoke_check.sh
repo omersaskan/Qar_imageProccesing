@@ -56,7 +56,24 @@ from modules.capture_workflow.capture_quality_gate import evaluate_capture, Capt
 # Sprint 3 — adaptive sampling + coverage-aware selector
 from modules.capture_workflow.adaptive_sampling import AdaptiveSampler, SamplingThresholds, SamplingVerdict
 from modules.capture_workflow.coverage_aware_selector import select_balanced_frames, FrameAssignment, CoverageTargets
-print('SUCCESS: sprint1 + sprint2 + sprint3 modules importable.')
+# Sprint 4 — reconstruction preset hardening
+from modules.reconstruction_engine.reconstruction_profile import (
+    derive_profile, MaterialProfile, SizeProfile, SceneProfile, MotionProfile,
+)
+from modules.reconstruction_engine.reconstruction_preset_resolver import (
+    resolve_preset, get_preset_by_name,
+    PRESET_NAME_BASELINE, PRESET_NAME_PROFILE_SAFE,
+)
+from modules.reconstruction_engine.reconstruction_preflight import (
+    evaluate_preflight, PreflightDecision,
+)
+from modules.reconstruction_engine.intrinsics_cache import (
+    IntrinsicsCache, build_cache_key, disabled_lookup,
+)
+from modules.reconstruction_engine.fallback_ladder import (
+    pick_next_preset, classify_error, get_default_ladder,
+)
+print('SUCCESS: sprint1 + sprint2 + sprint3 + sprint4 modules importable.')
 "
 
 # ── 3. Settings Load ─────────────────────────────────────────────────────────

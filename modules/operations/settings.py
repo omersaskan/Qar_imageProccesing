@@ -229,6 +229,14 @@ class Settings(BaseSettings):
     adaptive_sampling_enabled: bool = Field(False, validation_alias="ADAPTIVE_SAMPLING_ENABLED")
     coverage_aware_rebalance_enabled: bool = Field(False, validation_alias="COVERAGE_AWARE_REBALANCE_ENABLED")
 
+    # --- SPRINT 4: Reconstruction Preset Hardening ---
+    # When false, runner uses the existing global settings tuning verbatim.
+    # When true, reconstruction_profile + preset_resolver pick safer per-job presets.
+    reconstruction_preset_hardening_enabled: bool = Field(
+        False, validation_alias="RECONSTRUCTION_PRESET_HARDENING_ENABLED"
+    )
+    intrinsics_cache_enabled: bool = Field(False, validation_alias="INTRINSICS_CACHE_ENABLED")
+
     # --- PHASE 6.1: SAM2 SEGMENTATION ---
     segmentation_method: str = Field("legacy", validation_alias="SEGMENTATION_METHOD")
     sam2_enabled: bool = Field(False, validation_alias="SAM2_ENABLED")

@@ -115,16 +115,24 @@ class ColmapCommandBuilder:
     """
     Centralized builder for COLMAP commands.
     Now capability-aware to support versions from 3.6 to 4.0+.
+
+    Sprint 4.5: optional `command_config` lets the runner override
+    matcher_type / mapper_min_num_matches / patchmatch_resolution_level
+    per-job (preset-aware).  When None, behavior is identical to legacy.
     """
 
-    def __init__(self, binary_path: str, use_gpu: bool = True, gpu_index: str = "0"):
+    def __init__(self, binary_path: str, use_gpu: bool = True, gpu_index: str = "0",
+                 command_config=None):
         self.bin = binary_path
         self._requested_gpu = use_gpu
         self.gpu_index = gpu_index
         self.caps = ColmapCapabilityManager.get_capabilities(binary_path)
-        
+
         # Override GPU request if the build doesn't support it
         self.use_gpu = use_gpu and self.caps["has_cuda"]
+
+        # Sprint 4.5: optional per-job command config (preset-aware)
+        self.command_config = command_config
 
     def feature_extractor(
         self,
@@ -173,6 +181,11 @@ class ColmapCommandBuilder:
         return cmd
 
     def matcher(self, mode: str, db_path: Path) -> List[str]:
+        # Sprint 4.5: command_config can override the matcher mode
+        if self.command_config is not None:
+            cfg_mode = getattr(self.command_config.colmap, "matcher_type", None)
+            if cfg_mode in ("exhaustive", "sequential"):
+                mode = cfg_mode
         matcher_type = "exhaustive_matcher" if mode == "exhaustive" else "sequential_matcher"
         prefix = self.caps["matching_prefix"]
         cmd = [
@@ -201,10 +214,17 @@ class ColmapCommandBuilder:
             "--output_path",
             str(output_path),
         ]
-        
+
         if self.caps["has_ba_gpu"]:
             cmd += ["--Mapper.ba_use_gpu", "1" if self.use_gpu else "0"]
-            
+
+        # Sprint 4.5: preset can relax mapper_min_num_matches for
+        # low-texture / fast-motion captures
+        if self.command_config is not None:
+            mn = getattr(self.command_config.colmap, "mapper_min_num_matches", None)
+            if isinstance(mn, int) and mn > 0:
+                cmd += ["--Mapper.min_num_matches", str(mn)]
+
         return cmd
 
     def image_undistorter(self, images_dir: Path, input_path: Path, output_path: Path, max_size: Optional[int] = None) -> List[str]:
@@ -237,13 +257,22 @@ class ColmapCommandBuilder:
             "--PatchMatchStereo.filter",
             "1",
         ]
-        
+
         # GPU index -1 means CPU mode in COLMAP
         if self.use_gpu:
             cmd += ["--PatchMatchStereo.gpu_index", self.gpu_index]
         else:
             cmd += ["--PatchMatchStereo.gpu_index", "-1"]
-            
+
+        # Sprint 4.5: preset can downsample for VRAM-tight pods
+        if self.command_config is not None:
+            lvl = getattr(self.command_config.colmap, "patchmatch_resolution_level", None)
+            if isinstance(lvl, int) and lvl >= 1:
+                # COLMAP halves source image dim per resolution level on read.
+                # We mirror that by capping max_image_size at undistort step (handled
+                # in _max_image_size resolution); here we just record the intent in args.
+                cmd += ["--PatchMatchStereo.max_image_size", str(max(800, 4000 // (1 + lvl)))]
+
         return cmd
 
     def stereo_fusion(
