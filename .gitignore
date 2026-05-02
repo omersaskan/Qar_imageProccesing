@@ -95,3 +95,10 @@ test_fix.py
 test_smoke_flow.py
 reconstruction.log
 reconstruction_finish.log
+
+# Local external model repos / isolated envs
+external/
+.venv_depthpro/
+*.pt
+*.pth
+*.ckpt
