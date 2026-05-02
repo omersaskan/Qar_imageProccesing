@@ -53,7 +53,10 @@ from modules.capture_workflow.blur_burst_detector import detect_bursts, BlurBurs
 from modules.capture_workflow.elevation_estimator import estimate_elevation_distribution, ElevationReport
 from modules.capture_workflow.azimuth_diversity import estimate_azimuth_distribution, AzimuthReport
 from modules.capture_workflow.capture_quality_gate import evaluate_capture, CaptureGateReport, GateThresholds
-print('SUCCESS: sprint1 + sprint2 modules importable.')
+# Sprint 3 — adaptive sampling + coverage-aware selector
+from modules.capture_workflow.adaptive_sampling import AdaptiveSampler, SamplingThresholds, SamplingVerdict
+from modules.capture_workflow.coverage_aware_selector import select_balanced_frames, FrameAssignment, CoverageTargets
+print('SUCCESS: sprint1 + sprint2 + sprint3 modules importable.')
 "
 
 # ── 3. Settings Load ─────────────────────────────────────────────────────────

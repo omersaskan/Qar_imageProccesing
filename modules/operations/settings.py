@@ -223,6 +223,12 @@ class Settings(BaseSettings):
     capture_profile: str = Field("small_on_surface", validation_alias="CAPTURE_PROFILE")
     material_hint: str = Field("opaque", validation_alias="MATERIAL_HINT")
 
+    # --- SPRINT 3: Adaptive Keyframe Sampling ---
+    # When false, frame_extractor uses the legacy fixed `frame_sample_rate`.
+    # When true, AdaptiveSampler decides per-frame keep/skip via optical flow.
+    adaptive_sampling_enabled: bool = Field(False, validation_alias="ADAPTIVE_SAMPLING_ENABLED")
+    coverage_aware_rebalance_enabled: bool = Field(False, validation_alias="COVERAGE_AWARE_REBALANCE_ENABLED")
+
     # --- PHASE 6.1: SAM2 SEGMENTATION ---
     segmentation_method: str = Field("legacy", validation_alias="SEGMENTATION_METHOD")
     sam2_enabled: bool = Field(False, validation_alias="SAM2_ENABLED")

@@ -274,16 +274,47 @@ class FrameExtractor:
         masked_dir = output_path / "masked"
         masked_dir.mkdir(parents=True, exist_ok=True)
 
+        # Sprint 3: AdaptiveSampler is opt-in (settings.adaptive_sampling_enabled)
+        adaptive_sampler = None
+        sampling_decisions: List[Dict[str, Any]] = []
+        if getattr(settings, "adaptive_sampling_enabled", False):
+            from .adaptive_sampling import AdaptiveSampler
+            adaptive_sampler = AdaptiveSampler()
+            logger.info("[Extraction] AdaptiveSampler ENABLED — fixed sample_rate bypassed")
+            rejection_counts.setdefault("adaptive_skip_static", 0)
+            rejection_counts.setdefault("adaptive_skip_redundant", 0)
+            rejection_counts.setdefault("adaptive_skip_blurry", 0)
+
         try:
             while True:
                 ret, frame = cap.read()
                 if not ret:
                     break
 
-                if frame_count % self.thresholds.frame_sample_rate != 0:
-                    rejection_counts["sampling"] += 1
-                    frame_count += 1
-                    continue
+                # Sampling: legacy fixed-rate or adaptive (one of two paths)
+                if adaptive_sampler is None:
+                    if frame_count % self.thresholds.frame_sample_rate != 0:
+                        rejection_counts["sampling"] += 1
+                        frame_count += 1
+                        continue
+                else:
+                    # Adaptive needs a quick mask bbox before deciding — but generating
+                    # full mask is expensive. We pass `None` bbox; the sampler still
+                    # gets useful flow + sharpness signals. Real bbox check happens
+                    # later in the existing redundancy filter.
+                    decision = adaptive_sampler.decide(frame, bbox=None)
+                    sampling_decisions.append({
+                        "raw_idx": frame_count,
+                        "verdict": decision.verdict.value,
+                        "flow": round(decision.flow_median, 2),
+                        "sharp": round(decision.sharpness, 1),
+                    })
+                    if decision.verdict.value.startswith("skip"):
+                        rejection_counts[f"adaptive_{decision.verdict.value}"] = (
+                            rejection_counts.get(f"adaptive_{decision.verdict.value}", 0) + 1
+                        )
+                        frame_count += 1
+                        continue
 
                 mask, mask_meta = self.object_masker.generate_mask(frame)
 
@@ -380,6 +411,49 @@ class FrameExtractor:
         except Exception as e:
             logger.warning(f"Color profile detection failed, using fallback: {e}")
 
+        # Sprint 3 — Coverage-aware rebalance (opt-in post-pass)
+        rebalance_dict: Dict[str, Any] = {}
+        if getattr(settings, "coverage_aware_rebalance_enabled", False) and len(extracted_paths) > 0:
+            try:
+                from .coverage_aware_selector import (
+                    select_balanced_frames, FrameAssignment, CoverageTargets,
+                )
+                from .elevation_estimator import estimate_elevation_distribution
+
+                elev = estimate_elevation_distribution(extracted_paths, masks_dir=masks_dir)
+                bucket_for = {fe.frame_name: fe for fe in elev.per_frame}
+
+                assignments: List[FrameAssignment] = []
+                for fp in extracted_paths:
+                    fe = bucket_for.get(Path(fp).name)
+                    assignments.append(FrameAssignment(
+                        frame_path=fp,
+                        elevation_bucket=(fe.bucket if fe else "unknown"),
+                        sharpness=1.0,  # neutral; AdaptiveSampler-supplied sharpness comes in Sprint 3 v2
+                        confidence=(fe.confidence if fe else 0.3),
+                    ))
+
+                kept_paths, sel_rep = select_balanced_frames(assignments)
+                if kept_paths and len(kept_paths) >= 3:
+                    # Drop frames not in kept_paths from disk to keep storage tidy
+                    keep_set = set(kept_paths)
+                    dropped = 0
+                    for fp in extracted_paths:
+                        if fp not in keep_set:
+                            try:
+                                Path(fp).unlink(missing_ok=True)
+                                dropped += 1
+                            except Exception:
+                                pass
+                    extracted_paths = list(kept_paths)
+                    logger.info(
+                        f"[Extraction] coverage-aware rebalance: dropped {dropped}, "
+                        f"kept {len(extracted_paths)}"
+                    )
+                rebalance_dict = sel_rep.to_dict()
+            except Exception as e:
+                logger.warning(f"Coverage-aware rebalance failed (non-fatal): {e}")
+
         # Sprint 2 — Capture Quality Gate v2 (advisory)
         capture_gate_dict: Dict[str, Any] = {}
         try:
@@ -445,6 +519,17 @@ class FrameExtractor:
             "color_profile": color_profile_dict,
             "capture_profile": capture_profile_dict,
             "capture_gate": capture_gate_dict,
+            "adaptive_sampling": (
+                {
+                    "enabled": True,
+                    "stats": adaptive_sampler.stats.to_dict() if adaptive_sampler else None,
+                    "decisions_sample": sampling_decisions[:200],  # cap to avoid huge json
+                }
+                if adaptive_sampler is not None else {"enabled": False}
+            ),
+            "coverage_aware_rebalance": (
+                rebalance_dict if rebalance_dict else {"enabled": False}
+            ),
         }
 
         logger.info(f"[Extraction] Product-aware summary for {extraction_report['video_filename']}:")
