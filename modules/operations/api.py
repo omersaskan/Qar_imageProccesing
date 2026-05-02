@@ -1194,6 +1194,29 @@ async def depth_studio_preview(session_id: str):
     raise HTTPException(status_code=404, detail="Depth preview not yet available")
 
 
+@app.get("/api/depth-studio/mask-overlay/{session_id}", dependencies=[Depends(verify_api_key)])
+async def depth_studio_mask_overlay(session_id: str):
+    """Return subject mask overlay image (green tint on detected foreground)."""
+    if session_id not in _depth_sessions:
+        raise HTTPException(status_code=404, detail=f"Depth Studio session not found: {session_id}")
+    overlay = _depth_session_dir(session_id) / "derived" / "mask_overlay.png"
+    if overlay.exists():
+        return FileResponse(str(overlay), media_type="image/png")
+    raise HTTPException(status_code=404, detail="Mask overlay not yet available")
+
+
+@app.get("/api/depth-studio/mask-stats/{session_id}", dependencies=[Depends(verify_api_key)])
+async def depth_studio_mask_stats(session_id: str):
+    """Return subject mask statistics JSON."""
+    if session_id not in _depth_sessions:
+        raise HTTPException(status_code=404, detail=f"Depth Studio session not found: {session_id}")
+    stats_path = _depth_session_dir(session_id) / "derived" / "mask_stats.json"
+    if stats_path.exists():
+        import json as _json
+        return _json.loads(stats_path.read_text(encoding="utf-8"))
+    raise HTTPException(status_code=404, detail="Mask stats not yet available")
+
+
 # Asset Blobs (GLB Files)
 blobs_dir = Path(settings.data_root) / "registry" / "blobs"
 blobs_dir.mkdir(parents=True, exist_ok=True)

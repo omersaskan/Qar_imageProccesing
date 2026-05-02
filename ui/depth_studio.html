@@ -33,6 +33,9 @@
     .ds-out-box h3 { font-size: 0.82rem; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: .05em; margin: 0 0 8px; }
     .ds-out-box p  { margin: 0; font-size: 0.88rem; word-break: break-all; color: #111827; }
     .ds-depth-preview { max-width: 100%; border-radius: 4px; margin-top: 8px; display: none; }
+    .ds-preview-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px; }
+    .ds-preview-pair figure { margin: 0; }
+    .ds-preview-pair figcaption { font-size: 0.75rem; color: #6b7280; text-align: center; margin-top: 4px; }
     .ds-warnings { margin-top: 8px; }
     .ds-warn-tag { display: inline-block; background: #fef3c7; color: #92400e; border-radius: 4px; padding: 2px 7px; font-size: 0.78rem; margin: 2px 3px 2px 0; }
     .nav-link { display: inline-block; margin-bottom: 12px; color: #6366f1; text-decoration: none; font-size: 0.88rem; }
@@ -93,7 +96,16 @@
   <!-- Results -->
   <div class="ds-card" id="results-card" style="display:none">
     <h2>3. Results</h2>
-    <img id="depth-preview" class="ds-depth-preview" alt="Depth preview" />
+    <div class="ds-preview-pair">
+      <figure>
+        <img id="depth-preview" class="ds-depth-preview" alt="Depth preview" style="width:100%" />
+        <figcaption>Depth map</figcaption>
+      </figure>
+      <figure>
+        <img id="mask-overlay" class="ds-depth-preview" alt="Subject mask overlay" style="width:100%" />
+        <figcaption>Subject mask overlay</figcaption>
+      </figure>
+    </div>
     <div class="ds-outputs" id="outputs-grid"></div>
     <div class="ds-warnings" id="warnings-box"></div>
   </div>
@@ -192,22 +204,32 @@
     if (!manifest) return;
     document.getElementById('results-card').style.display = 'block';
 
-    // Depth preview
+    // Depth preview + mask overlay
     if (currentSessionId) {
+      const t = Date.now();
       const dpImg = document.getElementById('depth-preview');
-      dpImg.src = `/api/depth-studio/preview/${currentSessionId}?t=${Date.now()}`;
+      dpImg.src = `/api/depth-studio/preview/${currentSessionId}?t=${t}`;
       dpImg.style.display = 'block';
       dpImg.onerror = () => { dpImg.style.display = 'none'; };
+
+      const moImg = document.getElementById('mask-overlay');
+      moImg.src = `/api/depth-studio/mask-overlay/${currentSessionId}?t=${t}`;
+      moImg.style.display = 'block';
+      moImg.onerror = () => { moImg.style.display = 'none'; };
     }
 
     // Output grid
     const grid = document.getElementById('outputs-grid');
     grid.innerHTML = '';
+    const fgPct = manifest.mask_fg_ratio != null
+      ? `${(manifest.mask_fg_ratio * 100).toFixed(1)}%` : '—';
     const fields = [
       ['Provider', manifest.provider],
       ['Model', manifest.model_name || '—'],
       ['Depth Format', manifest.depth_format || '—'],
       ['Mesh Faces', manifest.mesh_face_count ?? '—'],
+      ['Mask Method', manifest.mask_method || '—'],
+      ['Foreground Ratio', fgPct],
       ['GLB Path', manifest.glb_path || '—'],
       ['Preview Only', manifest.preview_only ? 'Yes' : 'No'],
     ];

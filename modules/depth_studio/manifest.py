@@ -26,6 +26,12 @@ def build_manifest(
     status: str,
     warnings: List[str],
     enabled: bool = True,
+    mask_method: Optional[str] = None,
+    mask_fg_ratio: Optional[float] = None,
+    mask_bbox: Optional[list] = None,
+    mask_full_frame_fallback: bool = False,
+    mask_overlay_path: Optional[str] = None,
+    mask_stats_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     return {
         "enabled": enabled,
@@ -53,6 +59,14 @@ def build_manifest(
         "mesh_mode": mesh_mode,
         "mesh_vertex_count": mesh_vertex_count,
         "mesh_face_count": mesh_face_count,
+
+        # Masking
+        "mask_method": mask_method,
+        "mask_fg_ratio": mask_fg_ratio,
+        "mask_bbox": mask_bbox,
+        "mask_full_frame_fallback": mask_full_frame_fallback,
+        "mask_overlay_path": mask_overlay_path,
+        "mask_stats_path": mask_stats_path,
 
         # Output
         "glb_path": glb_path,

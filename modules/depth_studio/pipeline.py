@@ -15,6 +15,7 @@ from .depth_refinement import refine_depth
 from .texture_projection import prepare_texture
 from .glb_builder import build_glb
 from .manifest import build_manifest, write_manifest
+from .subject_masker import compute_subject_mask, apply_mask_to_depth
 from modules.operations.settings import settings
 
 
@@ -57,6 +58,12 @@ def run_depth_studio(
     mesh_face_count = 0
     refinement_applied = False
     final_status = "failed"
+    mask_method: Optional[str] = None
+    mask_fg_ratio: Optional[float] = None
+    mask_bbox: Optional[list] = None
+    mask_full_frame_fallback: bool = False
+    mask_overlay_path: Optional[str] = None
+    mask_stats_path: Optional[str] = None
 
     # ── 1. Route input ────────────────────────────────────────────────────────
     try:
@@ -180,6 +187,35 @@ def run_depth_studio(
         except Exception:
             pass
 
+    # ── 5b. Subject masking → masked depth ───────────────────────────────────
+    try:
+        import numpy as np
+        import cv2 as _cv2
+        d_for_mask = _cv2.imread(depth_map_path, _cv2.IMREAD_UNCHANGED)
+        if d_for_mask is not None:
+            d_float = d_for_mask.astype(np.float32) / 65535.0
+            mask_result = compute_subject_mask(
+                image_path=image_path_for_depth,
+                depth_norm=d_float,
+                output_dir=str(derived_dir),
+            )
+            mask_method = mask_result["method_used"]
+            mask_fg_ratio = mask_result["fg_ratio"]
+            mask_bbox = mask_result["bbox"]
+            mask_full_frame_fallback = mask_result["full_frame_fallback_used"]
+            mask_overlay_path = mask_result.get("overlay_path")
+            mask_stats_path = mask_result.get("stats_path")
+            warnings.extend([f"mask:{w}" for w in mask_result.get("warnings", [])])
+
+            # Apply mask: push background depth to far value
+            masked_depth = apply_mask_to_depth(d_float, mask_result["mask"])
+            masked_d16 = (masked_depth * 65535).astype(np.uint16)
+            masked_depth_path = str(derived_dir / "depth_masked_16.png")
+            _cv2.imwrite(masked_depth_path, masked_d16)
+            depth_map_path = masked_depth_path
+    except Exception as _mask_err:
+        warnings.append(f"subject_masking_failed:{_mask_err}")
+
     # ── 6. Texture preparation ────────────────────────────────────────────────
     tex_result = prepare_texture(image_path_for_depth, str(derived_dir))
     texture_path = tex_result.get("texture_path")
@@ -224,6 +260,12 @@ def run_depth_studio(
         glb_path=glb_path,
         status=final_status,
         warnings=list(dict.fromkeys(warnings)),  # deduplicate while preserving order
+        mask_method=mask_method,
+        mask_fg_ratio=mask_fg_ratio,
+        mask_bbox=mask_bbox,
+        mask_full_frame_fallback=mask_full_frame_fallback,
+        mask_overlay_path=mask_overlay_path,
+        mask_stats_path=mask_stats_path,
     )
     write_manifest(manifest, str(manifests_dir))
     return manifest
