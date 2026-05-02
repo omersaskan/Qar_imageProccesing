@@ -37,7 +37,18 @@ class DepthProviderBase(ABC):
                 "warnings": ["unavailable_model"],
             }
         try:
-            return self.infer(image_path, output_dir)
+            result = self.infer(image_path, output_dir)
+            # Normalize non-ok status values so callers see a consistent vocabulary:
+            # "ok" stays "ok"; anything else that isn't already a known failure
+            # status gets mapped to "failed" so the pipeline / API layer can treat
+            # it uniformly (the original status is preserved in "reason").
+            _OK = "ok"
+            _KNOWN_FAILURE = ("unavailable", "failed", "disabled")
+            if result.get("status") != _OK and result.get("status") not in _KNOWN_FAILURE:
+                result = dict(result)
+                result["reason"] = result.get("reason") or result.get("message") or result.get("status")
+                result["status"] = "failed"
+            return result
         except Exception as e:
             return {
                 "status": "failed",

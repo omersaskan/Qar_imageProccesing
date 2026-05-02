@@ -1,4 +1,4 @@
-"""
+﻿"""
 Tests for Depth Studio API hardening:
   - provider unavailable → enriched process response body
   - missing_outputs list is accurate
@@ -252,6 +252,30 @@ class TestDepthSessionSummary:
         summary = _depth_session_summary(session_id)
         assert "provider_failure_reason" not in summary
 
+    def test_depth_pro_error_status_reason(self, tmp_path):
+        """provider_status='error' (worker crash) must produce provider_failure_reason."""
+        from modules.operations.api import _depth_sessions, _depth_session_summary
+
+        session_id = f"ds_{uuid.uuid4().hex[:8]}"
+        manifest = {
+            "status": "failed",
+            "provider": "depth_pro",
+            "provider_status": "failed",   # normalised from "error" by safe_infer
+            "warnings": [],
+        }
+        mp = tmp_path / "manifest.json"
+        mp.write_text(json.dumps(manifest), encoding="utf-8")
+        _depth_sessions[session_id] = {
+            "status": "failed",
+            "provider": "depth_pro",
+            "manifest_path": str(mp),
+        }
+
+        summary = _depth_session_summary(session_id)
+        assert "provider_failure_reason" in summary
+        # "failed" for depth_pro → "unavailable" message path
+        assert "Depth Pro" in summary["provider_failure_reason"]
+
     def test_generic_provider_failure_reason(self, tmp_path):
         from modules.operations.api import _depth_sessions, _depth_session_summary
 
@@ -273,3 +297,47 @@ class TestDepthSessionSummary:
         summary = _depth_session_summary(session_id)
         assert "provider_failure_reason" in summary
         assert "depth_anything_v2" in summary["provider_failure_reason"]
+
+
+# ── safe_infer normalisation tests ───────────────────────────────────────────
+
+class TestSafeInferNormalisation:
+    """safe_infer must normalise non-ok, non-standard status values to 'failed'."""
+
+    def _make_provider(self, infer_return: dict):
+        from modules.depth_studio.depth_provider_base import DepthProviderBase
+
+        class _FakeProvider(DepthProviderBase):
+            name = "fake"
+            license_note = ""
+            def is_available(self):
+                return True, ""
+            def infer(self, image_path, output_dir):
+                return infer_return
+
+        return _FakeProvider()
+
+    def test_error_status_normalised_to_failed(self):
+        p = self._make_provider({"status": "error", "message": "worker crashed"})
+        result = p.safe_infer("/fake/img.jpg", "/fake/out")
+        assert result["status"] == "failed", f"Expected 'failed', got '{result['status']}'"
+        assert result.get("reason")   # original message preserved
+
+    def test_ok_status_passes_through(self):
+        p = self._make_provider({
+            "status": "ok", "depth_map_path": "/out/depth.png",
+            "depth_format": "png16", "model_name": "test", "warnings": []
+        })
+        result = p.safe_infer("/fake/img.jpg", "/fake/out")
+        assert result["status"] == "ok"
+
+    def test_unavailable_status_passes_through(self):
+        p = self._make_provider({"status": "unavailable", "reason": "disabled"})
+        result = p.safe_infer("/fake/img.jpg", "/fake/out")
+        assert result["status"] == "unavailable"
+
+    def test_arbitrary_unknown_status_normalised(self):
+        p = self._make_provider({"status": "timeout", "reason": "took too long"})
+        result = p.safe_infer("/fake/img.jpg", "/fake/out")
+        assert result["status"] == "failed"
+        assert result.get("reason") is not None  # original reason preserved

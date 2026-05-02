@@ -1138,11 +1138,18 @@ def _depth_session_summary(session_id: str) -> Dict[str, Any]:
     }
 
     # Friendly reason for provider failure
-    if provider_status in ("unavailable", "failed", "disabled"):
+    _PROVIDER_FAILURE_STATUSES = ("unavailable", "failed", "disabled", "error")
+    if provider_status in _PROVIDER_FAILURE_STATUSES:
         if "depth_pro" in provider:
-            summary["provider_failure_reason"] = (
-                "Depth Pro unavailable: DEPTH_PRO_ENABLED=false or depth_pro package not installed"
-            )
+            if provider_status == "error":
+                summary["provider_failure_reason"] = (
+                    "Depth Pro worker process failed: check DEPTH_PRO_PYTHON_PATH, "
+                    "venv installation, and worker logs"
+                )
+            else:
+                summary["provider_failure_reason"] = (
+                    "Depth Pro unavailable: DEPTH_PRO_ENABLED=false or depth_pro package not installed"
+                )
         else:
             summary["provider_failure_reason"] = (
                 f"Provider '{provider}' reported status '{provider_status}'"
@@ -1226,11 +1233,18 @@ async def depth_studio_process(session_id: str, body: Optional[_DepthProcessRequ
         provider_status = manifest.get("provider_status", "unknown")
         provider_name = manifest.get("provider") or info.get("provider", "unknown")
         provider_failure_reason: Optional[str] = None
-        if provider_status in ("unavailable", "failed", "disabled"):
+        _PROVIDER_FAILURE_STATUSES = ("unavailable", "failed", "disabled", "error")
+        if provider_status in _PROVIDER_FAILURE_STATUSES:
             if "depth_pro" in (provider_name or ""):
-                provider_failure_reason = (
-                    "Depth Pro unavailable: DEPTH_PRO_ENABLED=false or depth_pro package not installed"
-                )
+                if provider_status == "error":
+                    provider_failure_reason = (
+                        "Depth Pro worker process failed: check DEPTH_PRO_PYTHON_PATH, "
+                        "venv installation, and worker logs"
+                    )
+                else:
+                    provider_failure_reason = (
+                        "Depth Pro unavailable: DEPTH_PRO_ENABLED=false or depth_pro package not installed"
+                    )
             else:
                 provider_failure_reason = (
                     f"Provider '{provider_name}' reported status '{provider_status}'"
