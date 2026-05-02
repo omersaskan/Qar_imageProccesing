@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Optional
+
+import numpy as np
 
 from .depth_output import load_depth_png16
 from .depth_to_mesh import depth_to_glb
@@ -15,6 +17,7 @@ def build_glb(
     output_glb_path: str,
     grid_resolution: int = None,
     depth_scale: float = 0.3,
+    mask: Optional[np.ndarray] = None,
 ) -> Dict[str, Any]:
     """
     Load depth map, build displaced plane mesh, texture it, export GLB.
@@ -38,4 +41,5 @@ def build_glb(
         output_glb_path=output_glb_path,
         grid_resolution=res,
         depth_scale=depth_scale,
+        mask=mask,
     )

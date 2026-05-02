@@ -14,6 +14,7 @@ Changes:
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, File, UploadFile, Form, Header, Depends, Body
+from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -1128,9 +1129,16 @@ async def depth_studio_upload(
     return {"session_id": session_id, "status": "uploaded", "input_path": str(dest)}
 
 
+class _DepthProcessRequest(BaseModel):
+    prompt_box: Optional[list] = None   # [x0, y0, x1, y1]
+
+
 @app.post("/api/depth-studio/process/{session_id}", dependencies=[Depends(verify_api_key)])
-async def depth_studio_process(session_id: str):
-    """Run depth inference + mesh + GLB for the uploaded file."""
+async def depth_studio_process(session_id: str, body: Optional[_DepthProcessRequest] = None):
+    """Run depth inference + mesh + GLB for the uploaded file.
+
+    Optional JSON body: {"prompt_box": [x0, y0, x1, y1]}
+    """
     if session_id not in _depth_sessions:
         raise HTTPException(status_code=404, detail=f"Depth Studio session not found: {session_id}")
 
@@ -1141,6 +1149,10 @@ async def depth_studio_process(session_id: str):
     info["status"] = "processing"
     session_dir = _depth_session_dir(session_id)
 
+    prompt_box = None
+    if body and body.prompt_box and len(body.prompt_box) == 4:
+        prompt_box = tuple(int(v) for v in body.prompt_box)
+
     try:
         from modules.depth_studio.pipeline import run_depth_studio
         manifest = run_depth_studio(
@@ -1148,6 +1160,7 @@ async def depth_studio_process(session_id: str):
             input_file_path=info["input_path"],
             output_base_dir=str(session_dir),
             provider_name=info.get("provider"),
+            prompt_box=prompt_box,
         )
         info["status"] = manifest.get("status", "failed")
         info["manifest_path"] = str(session_dir / "manifests" / "depth_studio_manifest.json")
@@ -1192,6 +1205,28 @@ async def depth_studio_preview(session_id: str):
     if preview.exists():
         return FileResponse(str(preview), media_type="image/png")
     raise HTTPException(status_code=404, detail="Depth preview not yet available")
+
+
+@app.get("/api/depth-studio/subject-mask/{session_id}", dependencies=[Depends(verify_api_key)])
+async def depth_studio_subject_mask(session_id: str):
+    """Return binary subject mask PNG."""
+    if session_id not in _depth_sessions:
+        raise HTTPException(status_code=404, detail=f"Depth Studio session not found: {session_id}")
+    p = _depth_session_dir(session_id) / "derived" / "subject_mask.png"
+    if p.exists():
+        return FileResponse(str(p), media_type="image/png")
+    raise HTTPException(status_code=404, detail="Subject mask not yet available")
+
+
+@app.get("/api/depth-studio/cropped-subject/{session_id}", dependencies=[Depends(verify_api_key)])
+async def depth_studio_cropped_subject(session_id: str):
+    """Return cropped subject JPEG."""
+    if session_id not in _depth_sessions:
+        raise HTTPException(status_code=404, detail=f"Depth Studio session not found: {session_id}")
+    p = _depth_session_dir(session_id) / "derived" / "cropped_subject.jpg"
+    if p.exists():
+        return FileResponse(str(p), media_type="image/jpeg")
+    raise HTTPException(status_code=404, detail="Cropped subject not yet available")
 
 
 @app.get("/api/depth-studio/mask-overlay/{session_id}", dependencies=[Depends(verify_api_key)])

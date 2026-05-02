@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Optional, Tuple
 import numpy as np
 
 
@@ -81,18 +81,44 @@ def export_mesh_to_trimesh(
     return mesh
 
 
+def _cull_background_faces(
+    faces: np.ndarray,
+    uvs: np.ndarray,
+    mask: np.ndarray,
+) -> np.ndarray:
+    """
+    Remove triangles whose UV centroid falls outside the subject mask.
+    mask: uint8 H×W (255=subject).
+    Returns filtered faces array.
+    """
+    mh, mw = mask.shape[:2]
+    # UV centroid per face
+    uv_tri = uvs[faces]                          # (M, 3, 2)
+    uv_center = uv_tri.mean(axis=1)              # (M, 2)  u,v in [0,1]
+    px = (uv_center[:, 0] * (mw - 1)).astype(int).clip(0, mw - 1)
+    py = ((1.0 - uv_center[:, 1]) * (mh - 1)).astype(int).clip(0, mh - 1)
+    inside = mask[py, px] > 0
+    return faces[inside]
+
+
 def depth_to_glb(
     depth: np.ndarray,
     texture_image_path: str,
     output_glb_path: str,
     grid_resolution: int = 256,
     depth_scale: float = 0.3,
+    mask: Optional[np.ndarray] = None,
 ) -> Dict[str, Any]:
     """
     Full pipeline: depth → mesh → textured GLB.
+    mask (optional): uint8 H×W subject mask — triangles outside are removed.
     Returns manifest-ready dict.
     """
     vertices, faces, uvs = build_relief_mesh(depth, grid_resolution, depth_scale)
+
+    # Remove background triangles when a subject mask is provided
+    if mask is not None:
+        faces = _cull_background_faces(faces, uvs, mask)
 
     try:
         mesh = export_mesh_to_trimesh(vertices, faces, uvs, texture_image_path)

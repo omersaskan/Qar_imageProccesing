@@ -34,6 +34,7 @@ def run_depth_studio(
     output_base_dir: str,
     provider_name: Optional[str] = None,
     explicit_final_override: bool = False,
+    prompt_box: Optional[tuple] = None,
 ) -> Dict[str, Any]:
     """
     Full Depth Studio pipeline.
@@ -64,6 +65,10 @@ def run_depth_studio(
     mask_full_frame_fallback: bool = False
     mask_overlay_path: Optional[str] = None
     mask_stats_path: Optional[str] = None
+    mask_quality: Optional[str] = None
+    mask_component_count: int = 0
+    mask_selected_area_ratio: Optional[float] = None
+    _subject_mask = None   # kept for GLB face culling
 
     # ── 1. Route input ────────────────────────────────────────────────────────
     try:
@@ -198,6 +203,7 @@ def run_depth_studio(
                 image_path=image_path_for_depth,
                 depth_norm=d_float,
                 output_dir=str(derived_dir),
+                prompt_box=prompt_box,
             )
             mask_method = mask_result["method_used"]
             mask_fg_ratio = mask_result["fg_ratio"]
@@ -205,6 +211,10 @@ def run_depth_studio(
             mask_full_frame_fallback = mask_result["full_frame_fallback_used"]
             mask_overlay_path = mask_result.get("overlay_path")
             mask_stats_path = mask_result.get("stats_path")
+            _subject_mask = mask_result.get("mask")
+            mask_quality = mask_result.get("mask_quality")
+            mask_component_count = mask_result.get("component_count", 0)
+            mask_selected_area_ratio = mask_result.get("selected_component_area_ratio")
             warnings.extend([f"mask:{w}" for w in mask_result.get("warnings", [])])
 
             # Apply mask: push background depth to far value
@@ -230,13 +240,17 @@ def run_depth_studio(
         texture_path=texture_path,
         output_glb_path=glb_out,
         grid_resolution=settings.depth_grid_resolution,
+        mask=_subject_mask,
     )
     glb_path = glb_result.get("glb_path")
     mesh_vertex_count = glb_result.get("mesh_vertex_count", 0)
     mesh_face_count = glb_result.get("mesh_face_count", 0)
 
     if glb_result.get("status") == "ok":
-        final_status = "ok"
+        if mask_quality in ("review", "low_confidence"):
+            final_status = "partial"
+        else:
+            final_status = "ok"
     else:
         warnings.append(f"glb_build_failed: {glb_result.get('reason', '')}")
         final_status = "partial"
@@ -266,6 +280,9 @@ def run_depth_studio(
         mask_full_frame_fallback=mask_full_frame_fallback,
         mask_overlay_path=mask_overlay_path,
         mask_stats_path=mask_stats_path,
+        mask_quality=mask_quality,
+        mask_component_count=mask_component_count,
+        mask_selected_area_ratio=mask_selected_area_ratio,
     )
     write_manifest(manifest, str(manifests_dir))
     return manifest

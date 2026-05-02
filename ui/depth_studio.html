@@ -96,6 +96,10 @@
   <!-- Results -->
   <div class="ds-card" id="results-card" style="display:none">
     <h2>3. Results</h2>
+    <div id="mask-quality-alert" style="display:none;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:10px 14px;margin-bottom:12px;color:#991b1b;font-size:.88rem;">
+      <strong>⚠ Mask low confidence — table/background included.</strong>
+      <span id="mask-quality-detail"></span>
+    </div>
     <div class="ds-preview-pair">
       <figure>
         <img id="depth-preview" class="ds-depth-preview" alt="Depth preview" style="width:100%" />
@@ -103,7 +107,17 @@
       </figure>
       <figure>
         <img id="mask-overlay" class="ds-depth-preview" alt="Subject mask overlay" style="width:100%" />
-        <figcaption>Subject mask overlay</figcaption>
+        <figcaption>Mask overlay</figcaption>
+      </figure>
+    </div>
+    <div class="ds-preview-pair" style="margin-top:10px">
+      <figure>
+        <img id="subject-mask" class="ds-depth-preview" alt="Binary subject mask" style="width:100%" />
+        <figcaption>Binary mask</figcaption>
+      </figure>
+      <figure>
+        <img id="cropped-subject" class="ds-depth-preview" alt="Cropped subject" style="width:100%" />
+        <figcaption>Cropped subject</figcaption>
       </figure>
     </div>
     <div class="ds-outputs" id="outputs-grid"></div>
@@ -216,6 +230,36 @@
       moImg.src = `/api/depth-studio/mask-overlay/${currentSessionId}?t=${t}`;
       moImg.style.display = 'block';
       moImg.onerror = () => { moImg.style.display = 'none'; };
+
+      const smImg = document.getElementById('subject-mask');
+      smImg.src = `/api/depth-studio/subject-mask/${currentSessionId}?t=${t}`;
+      smImg.style.display = 'block';
+      smImg.onerror = () => { smImg.style.display = 'none'; };
+
+      const csImg = document.getElementById('cropped-subject');
+      csImg.src = `/api/depth-studio/cropped-subject/${currentSessionId}?t=${t}`;
+      csImg.style.display = 'block';
+      csImg.onerror = () => { csImg.style.display = 'none'; };
+    }
+
+    // Mask quality alert
+    const qualityAlert = document.getElementById('mask-quality-alert');
+    const qualityDetail = document.getElementById('mask-quality-detail');
+    const quality = manifest.mask_quality;
+    const fgRaw = manifest.mask_fg_ratio;
+    const bbox = manifest.mask_bbox;
+    if (quality === 'low_confidence' || quality === 'review') {
+      let detail = '';
+      if (manifest.mask_full_frame_fallback) detail += ' Full-frame fallback used.';
+      if (fgRaw > 0.25) detail += ` Foreground ratio ${(fgRaw*100).toFixed(1)}% is high.`;
+      if (bbox && bbox[3] !== undefined) detail += ' Bbox touches image border.';
+      qualityDetail.textContent = detail;
+      qualityAlert.style.display = 'block';
+      qualityAlert.style.background = quality === 'low_confidence' ? '#fef2f2' : '#fef3c7';
+      qualityAlert.style.borderColor = quality === 'low_confidence' ? '#fecaca' : '#f59e0b';
+      qualityAlert.style.color = quality === 'low_confidence' ? '#991b1b' : '#92400e';
+    } else {
+      qualityAlert.style.display = 'none';
     }
 
     // Output grid

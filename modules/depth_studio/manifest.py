@@ -32,6 +32,9 @@ def build_manifest(
     mask_full_frame_fallback: bool = False,
     mask_overlay_path: Optional[str] = None,
     mask_stats_path: Optional[str] = None,
+    mask_quality: Optional[str] = None,
+    mask_component_count: int = 0,
+    mask_selected_area_ratio: Optional[float] = None,
 ) -> Dict[str, Any]:
     return {
         "enabled": enabled,
@@ -65,6 +68,9 @@ def build_manifest(
         "mask_fg_ratio": mask_fg_ratio,
         "mask_bbox": mask_bbox,
         "mask_full_frame_fallback": mask_full_frame_fallback,
+        "mask_quality": mask_quality,
+        "mask_component_count": mask_component_count,
+        "mask_selected_area_ratio": mask_selected_area_ratio,
         "mask_overlay_path": mask_overlay_path,
         "mask_stats_path": mask_stats_path,
 
