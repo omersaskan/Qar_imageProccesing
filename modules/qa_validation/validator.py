@@ -37,7 +37,7 @@ class AssetValidator:
         """
         Validates an asset against delivery rules.
         """
-        profile_name = asset_data.get("delivery_profile", "raw_archive")
+        profile_name = asset_data.get("delivery_profile", "unknown")
         poly_count = asset_data.get("poly_count", 0)
         
         poly_decision = validate_polycount_by_profile(poly_count, profile_name)
@@ -203,6 +203,7 @@ class AssetValidator:
             texture_quality_reasons=texture_quality_stats.get("texture_quality_reasons", []),
             black_pixel_ratio=texture_quality_stats.get("black_pixel_ratio", 0.0),
             near_black_ratio=texture_quality_stats.get("near_black_ratio", 0.0),
+            near_white_ratio=texture_quality_stats.get("near_white_ratio", 0.0),
             dominant_color_ratio=texture_quality_stats.get("dominant_color_ratio", 0.0),
             dominant_background_color_ratio=texture_quality_stats.get("dominant_background_color_ratio", 0.0),
             atlas_coverage_ratio=texture_quality_stats.get("atlas_coverage_ratio", 0.0),

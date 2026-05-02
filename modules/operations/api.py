@@ -360,17 +360,56 @@ async def upload_video(
             shutil.copyfileobj(file.file, f)
             
         file_size_mb = os.path.getsize(original_path) / (1024 * 1024)
+        # ── 4. Quality Gates (Size, FPS, Duration, Resolution) ────────────────
+        preflight_errors = []
+        
+        # A. File Size
         if file_size_mb == 0 or file_size_mb < 0.1:
-            raise HTTPException(status_code=400, detail="Video file is too small or empty.")
-        if file_size_mb > eff_settings.max_upload_mb:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"File size {file_size_mb:.1f}MB exceeds {eff_settings.max_upload_mb}MB "
-                    f"for capture_profile={profile.preset_key}. "
-                    f"Use a larger profile (e.g. large_freestanding) for big objects."
-                ),
+            preflight_errors.append("Video file is too small or empty.")
+        elif file_size_mb > eff_settings.max_upload_mb:
+            preflight_errors.append(
+                f"File size {file_size_mb:.1f}MB exceeds maximum allowed {eff_settings.max_upload_mb}MB "
+                f"for capture_profile={profile.preset_key}."
             )
+
+        # B. Video Metadata & Integrity
+        ok, error, video_meta = validate_video_file(
+            original_path,
+            min_fps=0,        # Checked below
+            min_duration=0,   # Checked below
+            max_duration=9999 # Checked below
+        )
+        if not ok:
+            preflight_errors.append(f"Integrity check failed: {error}")
+        else:
+            # C. FPS
+            if video_meta["fps"] < settings.min_video_fps:
+                preflight_errors.append(f"FPS too low: {video_meta['fps']:.1f} < {settings.min_video_fps}")
+            
+            # D. Duration
+            v_dur = video_meta.get("duration", 0)
+            if v_dur < settings.min_video_duration_sec:
+                preflight_errors.append(f"Video too short: {v_dur:.1f}s < {settings.min_video_duration_sec}s")
+            if v_dur > settings.max_video_duration_sec:
+                preflight_errors.append(f"Video too long: {v_dur:.1f}s > {settings.max_video_duration_sec}s")
+
+            # E. Resolution
+            _w, _h = video_meta["width"], video_meta["height"]
+            _min_w = getattr(settings, "min_video_width", settings.min_video_short_edge)
+            _min_h = getattr(settings, "min_video_height", settings.min_video_short_edge)
+            _short = min(_w, _h)
+            _long  = max(_w, _h)
+            if _w < _min_w or _h < _min_h or _short < settings.min_video_short_edge or _long < settings.min_video_long_edge:
+                preflight_errors.append(
+                    f"Resolution too low: {_w}x{_h}. "
+                    f"Short edge must be >= {settings.min_video_short_edge}, "
+                    f"Long edge must be >= {settings.min_video_long_edge}"
+                )
+
+        if preflight_errors:
+            msg = " | ".join(preflight_errors)
+            logger.warning(f"Upload rejected for {session_id}: {msg}")
+            raise HTTPException(status_code=400, detail=f"Video validation failed: {msg}")
 
         # Persist capture profile next to session metadata so downstream
         # (frame_extractor, runner, isolation) can pick it up.
@@ -380,28 +419,6 @@ async def upload_video(
                 json.dump(profile.to_dict(), pf, indent=2)
         except Exception as e:
             logger.warning(f"Could not persist session_capture_profile.json: {e}")
-
-        # ── 4. Pre-Normalization Validation (fast cv2 checks on original) ───────
-        ok, error, video_meta = validate_video_file(
-            original_path,
-            min_fps=settings.min_video_fps,
-            min_duration=settings.min_video_duration_sec,
-            max_duration=settings.max_video_duration_sec
-        )
-        if not ok:
-            raise HTTPException(status_code=400, detail=f"Video validation failed: {error}")
-
-        # Resolution gate — supports both short/long-edge and width/height settings
-        _w, _h = video_meta["width"], video_meta["height"]
-        _min_w = getattr(settings, "min_video_width", settings.min_video_short_edge)
-        _min_h = getattr(settings, "min_video_height", settings.min_video_short_edge)
-        _short = min(_w, _h)
-        _long  = max(_w, _h)
-        if _w < _min_w or _h < _min_h or _short < settings.min_video_short_edge or _long < settings.min_video_long_edge:
-            msg = (f"Video resolution too low: {_w}x{_h}. "
-                   f"Short edge must be >= {settings.min_video_short_edge}, Long edge must be >= {settings.min_video_long_edge}")
-            logger.warning(f"Upload rejected for {session_id}: {msg}")
-            raise HTTPException(status_code=400, detail=msg)
 
         # ── 5. Normalization ──────────────────────────────────────────────────
         video_path = video_dir / "raw_video.mp4"

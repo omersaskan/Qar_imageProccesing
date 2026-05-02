@@ -41,7 +41,7 @@ def inspect_glb_primitive_attributes(glb_path: str) -> Dict[str, Any]:
                 else:
                     f.seek(c_len, 1)
             if not found_json:
-                raise ValueError("Could not find JSON chunk in GLB")
+                raise ValueError("Could find JSON chunk in GLB")
 
     all_primitives_have_position = True
     all_primitives_have_normal = True
@@ -96,6 +96,11 @@ def inspect_glb_primitive_attributes(glb_path: str) -> Dict[str, Any]:
         "primitive_attribute_report": primitive_reports,
         "texture_count": len(gltf.get("textures", [])),
         "material_count": len(gltf.get("materials", [])),
+        "has_position_accessor": all_primitives_have_position,
+        "has_normal_accessor": all_primitives_have_normal,
+        "has_texcoord_0_accessor": all_textured_primitives_have_texcoord_0,
+        "has_uv": all_textured_primitives_have_texcoord_0,
+        "has_material": len(gltf.get("materials", [])) > 0,
     }
 
 class GLBExporter:
@@ -195,6 +200,10 @@ class GLBExporter:
         # 5. Final Strict Inspection
         inspection = self.inspect_exported_asset(output_path)
         
+        # SPRINT 5 HARDENING: Mandatory normal accessor for textured assets
+        if texture_applied and not inspection["has_normal_accessor"]:
+            raise ValueError("All textured GLB primitives must have NORMAL accessor for production lighting.")
+        
         # Delivery Gate logic
         all_accessors = (
             inspection["all_primitives_have_position"] and
@@ -233,6 +242,7 @@ class GLBExporter:
             "smoothing_mode": smoothing_mode,
             "texture_applied": texture_applied,
             "texture_applied_successfully": texture_applied,
+            "material_semantic_status": "diffuse_textured" if texture_applied else "geometry_only",
             "optimization_hooks": opt_report,
             "structural_export_ready": structural_export_ready,
             "export_status": export_status,
@@ -480,7 +490,13 @@ class GLBExporter:
             "primitive_attribute_report": strict["primitive_attribute_report"],
             "bounds_min": {"x": float(b_min[0]), "y": float(b_min[1]), "z": float(b_min[2])},
             "bounds_max": {"x": float(b_max[0]), "y": float(b_max[1]), "z": float(b_max[2])},
-            "bbox": {"x": float(b_dims[0]), "y": float(b_dims[1]), "z": float(b_dims[2])}
+            "bbox": {"x": float(b_dims[0]), "y": float(b_dims[1]), "z": float(b_dims[2])},
+            "face_count": total_faces, # Alias for backward compatibility
+            "has_position_accessor": strict["all_primitives_have_position"],
+            "has_normal_accessor": strict["all_primitives_have_normal"],
+            "has_texcoord_0_accessor": strict["all_textured_primitives_have_texcoord_0"],
+            "has_uv": strict["all_textured_primitives_have_texcoord_0"],
+            "has_material": strict["material_count"] > 0,
         }
 
     def export_to_glb(

@@ -20,7 +20,7 @@ class IntegrationFlow:
         input_data = {
             "poly_count": metadata.final_polycount,
             "bbox": {"width": width, "height": height, "depth": depth},
-            "ground_offset": metadata.pivot_offset.get("z", 0.0),
+            "ground_offset": (metadata.pivot_offset or {}).get("z", 0.0),
             "cleanup_stats": cleanup_stats or {},
             "delivery_profile": (cleanup_stats or {}).get("delivery_profile") or (export_report or {}).get("profile", "raw_archive"),
             "material_semantic_status": "geometry_only", # Default
@@ -34,7 +34,14 @@ class IntegrationFlow:
             input_data["has_uv"] = bool(cleanup_stats.get("has_uv", False))
             input_data["has_material"] = bool(cleanup_stats.get("has_material", False))
             input_data["texture_integrity_status"] = cleanup_stats.get("texture_integrity_status", "missing")
-            input_data["material_semantic_status"] = cleanup_stats.get("material_semantic_status", "geometry_only")
+            
+            # Better semantic mapping
+            input_data["material_semantic_status"] = cleanup_stats.get("material_semantic_status")
+            if not input_data["material_semantic_status"]:
+                if input_data["has_uv"]:
+                    input_data["material_semantic_status"] = "uv_only"
+                else:
+                    input_data["material_semantic_status"] = "geometry_only"
             
             # SPRINT 5C: Load and merge texture quality metrics
             report_path = cleanup_stats.get("texture_quality_report_path")
@@ -71,7 +78,10 @@ class IntegrationFlow:
             final_mat_count = export_report.get("material_count", 0)
             final_uv_accessor = export_report.get("all_textured_primitives_have_texcoord_0", False)
             
-            if final_tex_count > 0 and final_mat_count > 0 and final_uv_accessor:
+            # Use final_tex_count as proxy for material presence in legacy export reports
+            effective_mat_count = final_mat_count if "material_count" in export_report else (1 if final_tex_count > 0 else 0)
+            
+            if final_tex_count > 0 and effective_mat_count > 0 and final_uv_accessor:
                 input_data["has_uv"] = True
                 input_data["has_material"] = True
                 input_data["texture_integrity_status"] = "complete"

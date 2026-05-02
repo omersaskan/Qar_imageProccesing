@@ -82,7 +82,17 @@ class JobManager:
         except Exception as e:
             logger.error(f"Failed to load job {job_id}: {e}")
             return None
-
+    def find_by_session_id(self, session_id: str) -> Optional[ReconstructionJob]:
+        """Scans the reconstructions directory to find a job matching the given session ID."""
+        session_id = validate_identifier(session_id, "Session ID")
+        if not os.path.exists(self.reconstructions_dir):
+            return None
+            
+        for job_id in os.listdir(self.reconstructions_dir):
+            job = self.get_job(job_id)
+            if job and job.capture_session_id == session_id:
+                return job
+        return None
     def update_job_status(self, job_id: str, status: ReconstructionStatus, failure_reason: Optional[str] = None) -> ReconstructionJob:
         job_id = validate_identifier(job_id, "Job ID")
         job_dir = os.path.join(self.reconstructions_dir, job_id)

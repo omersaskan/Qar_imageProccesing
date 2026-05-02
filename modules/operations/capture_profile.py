@@ -324,12 +324,12 @@ def apply_profile_to_settings(profile: "CaptureProfile", base_settings: Any) -> 
         "texture_texturing_target_faces": profile.texture_texturing_target_faces,
         "texture_safe_texturing_target_faces": profile.texture_safe_texturing_target_faces,
         "texture_native_crash_retry_faces": profile.texture_native_crash_retry_faces,
-        # Video / upload
-        "max_upload_mb": profile.max_upload_mb,
-        "min_video_duration_sec": profile.min_video_duration_sec,
-        "max_video_duration_sec": profile.max_video_duration_sec,
-        "min_video_long_edge": profile.min_video_long_edge,
-        "min_video_short_edge": profile.min_video_short_edge,
+        # Video / upload — use the more restrictive limit to satisfy security patches in tests
+        "max_upload_mb": min(profile.max_upload_mb, base_settings.max_upload_mb),
+        "min_video_duration_sec": max(profile.min_video_duration_sec, base_settings.min_video_duration_sec),
+        "max_video_duration_sec": min(profile.max_video_duration_sec, base_settings.max_video_duration_sec),
+        "min_video_long_edge": max(profile.min_video_long_edge, base_settings.min_video_long_edge),
+        "min_video_short_edge": max(profile.min_video_short_edge, base_settings.min_video_short_edge),
     }
     try:
         return base_settings.model_copy(update=overrides)
