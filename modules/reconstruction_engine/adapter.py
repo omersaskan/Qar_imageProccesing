@@ -1858,6 +1858,7 @@ class OpenMVSAdapter(COLMAPAdapter):
                 log_file.write(f"TextureMesh output check: obj={obj_exists}, mtl={mtl_exists}, tex={texture_exists}\n")
 
                 # Robust texture discovery and validation
+                used_output_stem = "project_textured"
                 discovered_texture = None
                 for ext in [".jpg", ".png", ".jpeg"]:
                     # Look for anything that looks like a texture map from OpenMVS

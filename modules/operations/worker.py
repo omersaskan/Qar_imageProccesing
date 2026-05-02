@@ -581,7 +581,8 @@ class IngestionWorker:
                 job_id = session.reconstruction_job_id
                 logger.info(f"Resuming existing reconstruction job: {job_id}")
             else:
-                job_id = f"job_{session.session_id}_{time.time_ns()}"
+                import uuid as _uuid
+                job_id = f"job_{session.session_id}_{time.time_ns()}_{_uuid.uuid4().hex[:8]}"
                 logger.info(f"Starting new reconstruction job: {job_id}")
 
             draft = ReconstructionJobDraft(
@@ -896,6 +897,9 @@ class IngestionWorker:
                 f"GLB Export failed: {type(e).__name__}: {e}\n{traceback.format_exc()[-4000:]}"
             )
 
+        if export_metrics is None:
+            export_metrics = {}
+
         # Persist metrics immediately after export
         reports_dir = self.session_manager.get_capture_path(session.session_id) / "reports"
         reports_dir.mkdir(parents=True, exist_ok=True)
@@ -1115,7 +1119,8 @@ class IngestionWorker:
             p = Path(session.export_metrics_path)
             if p.exists():
                 with open(p, "r", encoding="utf-8") as f:
-                    return json.load(f)
+                    data = json.load(f)
+                    return data if isinstance(data, dict) else {}
 
         # Fallback: re-inspect GLB (safe but slower; logs a warning so operators notice).
         logger.warning(

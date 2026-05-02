@@ -106,7 +106,7 @@ class Remesher:
 
         mesh.export(output_path)
         post_faces = len(mesh.faces)
-        
+
         return {
             "pre_decimation_face_count": int(pre_faces),
             "post_decimation_face_count": int(post_faces),
@@ -116,3 +116,47 @@ class Remesher:
             "texture_preserved": uv_preserved and material_preserved,
             "decimation_status": decimation_status
         }
+
+    def pre_decimate(
+        self, mesh_path: str, output_path: str, target_faces: int
+    ) -> Dict[str, Any]:
+        """
+        Aggressive pre-decimation pass for oversized raw meshes before cleanup.
+        Uses fast_simplification (may not preserve UVs).
+        Returns dict with status, pre/post face counts, and optional error.
+        """
+        try:
+            mesh = trimesh.load(mesh_path, force="mesh", process=False)
+        except Exception as e:
+            return {"status": "failed_memory_limit", "error": f"Load failed: {e}",
+                    "pre_decimation_face_count": 0, "post_decimation_face_count": 0}
+
+        pre_faces = len(mesh.faces)
+
+        if pre_faces <= target_faces:
+            import shutil
+            shutil.copy2(mesh_path, output_path)
+            return {"status": "skipped_already_small",
+                    "pre_decimation_face_count": int(pre_faces),
+                    "post_decimation_face_count": int(pre_faces)}
+
+        try:
+            reduction_ratio = 1.0 - (target_faces / max(pre_faces, 1))
+            points = mesh.vertices.astype(np.float32)
+            faces_arr = mesh.faces.astype(np.uint32)
+            new_verts, new_faces_arr = fast_simplification.simplify(
+                points, faces_arr, max(0.0, min(0.99, reduction_ratio))
+            )
+            result_mesh = trimesh.Trimesh(vertices=new_verts, faces=new_faces_arr, process=False)
+            result_mesh.export(output_path)
+            return {
+                "status": "success",
+                "pre_decimation_face_count": int(pre_faces),
+                "post_decimation_face_count": int(len(result_mesh.faces)),
+            }
+        except MemoryError as e:
+            return {"status": "failed_memory_limit", "error": str(e),
+                    "pre_decimation_face_count": int(pre_faces), "post_decimation_face_count": int(pre_faces)}
+        except Exception as e:
+            return {"status": "failed_pre_decimation", "error": str(e),
+                    "pre_decimation_face_count": int(pre_faces), "post_decimation_face_count": int(pre_faces)}

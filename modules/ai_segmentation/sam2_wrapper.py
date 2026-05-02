@@ -32,6 +32,8 @@ logger = logging.getLogger(__name__)
 SAM2_IMAGE_MODE = "image_frame"
 SAM2_VIDEO_MODE = "video_temporal"
 
+HAS_SAM2: bool = False  # set to True at runtime if sam2 imports succeed
+
 
 def probe_sam2_availability() -> Tuple[bool, bool, Optional[str]]:
     """

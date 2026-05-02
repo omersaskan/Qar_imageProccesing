@@ -232,9 +232,11 @@ class GLBExporter:
             "profile": profile_name,
             "smoothing_mode": smoothing_mode,
             "texture_applied": texture_applied,
+            "texture_applied_successfully": texture_applied,
             "optimization_hooks": opt_report,
             "structural_export_ready": structural_export_ready,
             "export_status": export_status,
+            "delivery_ready": export_status == "success",
             **inspection
         }
 
@@ -480,3 +482,18 @@ class GLBExporter:
             "bounds_max": {"x": float(b_max[0]), "y": float(b_max[1]), "z": float(b_max[2])},
             "bbox": {"x": float(b_dims[0]), "y": float(b_dims[1]), "z": float(b_dims[2])}
         }
+
+    def export_to_glb(
+        self,
+        mesh_path: str,
+        texture_path: Optional[str] = None,
+        output_path: Optional[str] = None,
+        **kwargs,
+    ) -> Dict[str, Any]:
+        """Alias for export() with positional texture_path for backward compatibility."""
+        return self.export(
+            mesh_path=mesh_path,
+            output_path=output_path or mesh_path.replace(".ply", ".glb").replace(".obj", ".glb"),
+            texture_path=texture_path,
+            **kwargs,
+        )

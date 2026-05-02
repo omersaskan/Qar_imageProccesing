@@ -381,22 +381,9 @@ async def upload_video(
         except Exception as e:
             logger.warning(f"Could not persist session_capture_profile.json: {e}")
 
-        # ── 4. Normalization ──────────────────────────────────────────────────
-        video_path = video_dir / "raw_video.mp4"
-        
-        # FFmpeg normalization handles WebM/MOV/AVI and converts to standard H.264
-        normalize_video(
-            original_path, 
-            video_path, 
-            ffmpeg_path=ffmpeg_resolved, 
-            ffprobe_path=ffprobe_resolved,
-            timeout=settings.video_normalize_timeout_sec
-        )
-        
-        # ── 5. Post-Normalization Validation ──────────────────────────────────
-        # Now that it's a standard MP4, OpenCV MUST be able to read it.
+        # ── 4. Pre-Normalization Validation (fast cv2 checks on original) ───────
         ok, error, video_meta = validate_video_file(
-            video_path, 
+            original_path,
             min_fps=settings.min_video_fps,
             min_duration=settings.min_video_duration_sec,
             max_duration=settings.max_video_duration_sec
@@ -404,18 +391,32 @@ async def upload_video(
         if not ok:
             raise HTTPException(status_code=400, detail=f"Video validation failed: {error}")
 
-        # Basic resolution gate (Orientation Agnostic)
-        short_edge = min(video_meta["width"], video_meta["height"])
-        long_edge = max(video_meta["width"], video_meta["height"])
-        
-        if short_edge < settings.min_video_short_edge or long_edge < settings.min_video_long_edge:
-             msg = (f"Video resolution too low: {video_meta['width']}x{video_meta['height']}. "
-                    f"Short edge must be >= {settings.min_video_short_edge}, Long edge must be >= {settings.min_video_long_edge}")
-             logger.warning(f"Upload rejected for {session_id}: {msg}")
-             raise HTTPException(
-                 status_code=400, 
-                 detail=msg
-             )
+        # Resolution gate — supports both short/long-edge and width/height settings
+        _w, _h = video_meta["width"], video_meta["height"]
+        _min_w = getattr(settings, "min_video_width", settings.min_video_short_edge)
+        _min_h = getattr(settings, "min_video_height", settings.min_video_short_edge)
+        _short = min(_w, _h)
+        _long  = max(_w, _h)
+        if _w < _min_w or _h < _min_h or _short < settings.min_video_short_edge or _long < settings.min_video_long_edge:
+            msg = (f"Video resolution too low: {_w}x{_h}. "
+                   f"Short edge must be >= {settings.min_video_short_edge}, Long edge must be >= {settings.min_video_long_edge}")
+            logger.warning(f"Upload rejected for {session_id}: {msg}")
+            raise HTTPException(status_code=400, detail=msg)
+
+        # ── 5. Normalization ──────────────────────────────────────────────────
+        video_path = video_dir / "raw_video.mp4"
+
+        # FFmpeg normalization handles WebM/MOV/AVI and converts to standard H.264
+        try:
+            normalize_video(
+                original_path,
+                video_path,
+                ffmpeg_path=ffmpeg_resolved,
+                ffprobe_path=ffprobe_resolved,
+                timeout=settings.video_normalize_timeout_sec
+            )
+        except RuntimeError as _norm_err:
+            raise HTTPException(status_code=400, detail=f"Video processing failed: {_norm_err}")
 
         # ── 6. Quality Manifest Validation ────────────────────────────────────
         if not quality_manifest or quality_manifest.strip() in ("", "null"):

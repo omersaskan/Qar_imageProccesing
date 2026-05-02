@@ -146,8 +146,8 @@ class TextureQualityAnalyzer:
 
         # 3. Decision Logic (Hard Gates)
         reasons = []
-        status = "pass"
-        
+        status = "success"
+
         # Thresholds (using safe defaults if settings missing)
         thr_black = getattr(self.thresholds, "max_black_pixel_ratio", 0.40)
         thr_near_black = getattr(self.thresholds, "max_near_black_ratio", 0.60)
@@ -246,7 +246,7 @@ class TextureQualityAnalyzer:
         """
         Assigns a letter grade (A-F) based on quality metrics.
         """
-        if status == "fail":
+        if status in ("fail", "contaminated"):
             return "F"
         if status == "review":
             return "C"

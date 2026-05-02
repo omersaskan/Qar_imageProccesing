@@ -128,57 +128,39 @@ class OpenMVSTexturer:
         log_file.write(f"\n--- Running: {' '.join(cmd)} (timeout={timeout}s) ---\n")
         log_file.flush()
 
-        # Create a temporary file for stdout/stderr to ensure we capture EVERYTHING
-        # even if the process crashes natively. 
-        temp_log_path = cwd / f"process_{int(time.time()*1000)}.tmp.log"
-        
-        try:
-            with open(temp_log_path, "w", encoding="utf-8") as tmp_f:
-                start_time = time.time()
-                process = subprocess.Popen(
-                    cmd,
-                    stdout=tmp_f,
-                    stderr=subprocess.STDOUT,
-                    cwd=str(cwd),
-                )
+        start_time = time.time()
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            cwd=str(cwd),
+        )
 
-                # Monitor loop
-                while process.poll() is None:
-                    if timeout and (time.time() - start_time) > timeout:
-                        process.kill()
-                        log_file.write("\n\n!!! ERROR: TIMEOUT EXCEEDED !!!\n")
-                        raise RuntimeError(f"OpenMVS command timed out after {timeout}s: {' '.join(cmd)}")
-                    time.sleep(0.5)
-
-            # Append the temp log content to the main log file
-            if temp_log_path.exists():
-                with open(temp_log_path, "r", encoding="utf-8", errors="ignore") as tmp_f:
-                    content = tmp_f.read()
-                    if content:
-                        log_file.write(content)
-                temp_log_path.unlink()
-            
-            if process.returncode != 0:
-                # SPRINT: Check for specific native crash code 3221226505
-                raise RuntimeError(f"Command failed with exit code {process.returncode}")
-                
-        except Exception as e:
-            # Cleanup if needed
-            if temp_log_path.exists():
-                try:
-                    with open(temp_log_path, "r", encoding="utf-8", errors="ignore") as tmp_f:
-                        content = tmp_f.read()
-                        if content:
-                            log_file.write(content)
-                    temp_log_path.unlink()
-                except: pass
-            raise e
-            if "timed out" in str(e):
-                raise
-            # If any other error occurs, make sure to kill the process
-            if process.poll() is None:
+        while True:
+            if timeout and (time.time() - start_time) > timeout:
                 process.kill()
-            raise
+                log_file.write("\n\n!!! ERROR: TIMEOUT EXCEEDED !!!\n")
+                log_file.flush()
+                drained, _ = process.communicate()
+                if drained:
+                    text = drained if isinstance(drained, str) else drained.decode("utf-8", errors="replace")
+                    log_file.write(text)
+                raise RuntimeError(f"OpenMVS command timed out after {timeout}s: {' '.join(cmd)}")
+
+            line = process.stdout.readline()
+            if isinstance(line, bytes):
+                line = line.decode("utf-8", errors="replace")
+
+            if line:
+                log_file.write(line)
+                log_file.flush()
+            elif process.poll() is not None:
+                break
+            else:
+                time.sleep(0.05)
+
+        if process.returncode != 0:
+            raise RuntimeError(f"Command failed with exit code {process.returncode}")
 
     def _create_compatible_image_folder(
         self, 

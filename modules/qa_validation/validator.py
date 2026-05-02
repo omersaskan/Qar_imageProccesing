@@ -19,6 +19,16 @@ from .rules import (
 from .texture_quality import TextureQualityAnalyzer
 
 
+def _normalize_texture_quality_status(raw: str) -> str:
+    """Translate analyzer status to semantic report vocabulary."""
+    s = str(raw).lower()
+    if s in ("success", "pass", "clean"):
+        return "clean"
+    if s in ("fail", "failed", "contaminated"):
+        return "contaminated"
+    return raw
+
+
 class AssetValidator:
     def __init__(self, thresholds: ValidationThresholds = None):
         self.thresholds = thresholds or ValidationThresholds()
@@ -188,7 +198,7 @@ class AssetValidator:
             passed_checks=passed_checks,
             raw_metrics=asset_data,
 
-            texture_quality_status=texture_quality_stats.get("texture_quality_status", "unknown"),
+            texture_quality_status=_normalize_texture_quality_status(texture_quality_stats.get("texture_quality_status", "unknown")),
             texture_quality_grade=texture_quality_stats.get("texture_quality_grade", "F"),
             texture_quality_reasons=texture_quality_stats.get("texture_quality_reasons", []),
             black_pixel_ratio=texture_quality_stats.get("black_pixel_ratio", 0.0),
