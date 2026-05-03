@@ -26,6 +26,7 @@ Args:
 import sys
 import json
 import argparse
+import contextlib
 import logging
 from pathlib import Path
 
@@ -159,11 +160,14 @@ def main():
         autocast_ctx = (
             torch.autocast(device_type="cuda", dtype=torch.bfloat16)
             if device == "cuda"
-            else __import__("contextlib").nullcontext()
+            else contextlib.nullcontext()
         )
 
         peak_mem_mb = None
-        with torch.no_grad(), autocast_ctx:
+        # Redirect Python stdout → stderr during model.run_image so that
+        # native remesh progress lines ("After Remesh N M") go to stderr
+        # and cannot contaminate the single JSON object we write to stdout.
+        with torch.no_grad(), autocast_ctx, contextlib.redirect_stdout(sys.stderr):
             mesh, glob_dict = model.run_image(
                 [img],
                 bake_resolution=args.texture_resolution,
@@ -176,7 +180,9 @@ def main():
 
         # ── export GLB ───────────────────────────────────────────────────────
         output_glb = output_dir / f"output.{args.output_format}"
-        mesh.export(str(output_glb), include_normals=True)
+        # Redirect stdout during export too — trimesh/gpytoolbox may print
+        with contextlib.redirect_stdout(sys.stderr):
+            mesh.export(str(output_glb), include_normals=True)
         log.info("GLB exported: %s  size=%d bytes", output_glb, output_glb.stat().st_size)
 
         if not output_glb.exists() or output_glb.stat().st_size == 0:

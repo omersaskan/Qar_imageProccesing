@@ -77,8 +77,20 @@ def generate_ai_3d(
     # ── 1. Copy input ─────────────────────────────────────────────────────────
     suffix = Path(input_file_path).suffix or ".jpg"
     dest_input = input_dir / f"upload{suffix}"
-    shutil.copy2(input_file_path, str(dest_input))
+    src_input = Path(input_file_path)
+    try:
+        src_resolved = src_input.resolve()
+        dest_resolved = dest_input.resolve()
+    except Exception:
+        src_resolved = src_input
+        dest_resolved = dest_input
 
+# Upload endpoint may already store the file at data/ai_3d/<session>/input/upload.*
+# In that case copy2(src, src) raises SameFileError; skip the copy safely.
+    if src_resolved != dest_resolved:
+        shutil.copy2(str(src_resolved), str(dest_input))
+    else:
+        logger.info("AI 3D input already in session input dir; skipping copy: %s", dest_input)
     # ── 2. Route & frame selection ────────────────────────────────────────────
     from modules.depth_studio.input_router import route_input
     try:

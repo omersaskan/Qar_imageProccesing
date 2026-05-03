@@ -881,6 +881,147 @@ class TestSF3DProviderWSLMode(unittest.TestCase):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Phase 4D — Noisy stdout parsing (_parse_worker_stdout)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestParseWorkerStdout(unittest.TestCase):
+    """Regression tests for _parse_worker_stdout noisy-stdout tolerance."""
+
+    def _parse(self, stdout):
+        from modules.ai_3d_generation.sf3d_provider import _parse_worker_stdout
+        return _parse_worker_stdout(stdout)
+
+    # ── happy-path ─────────────────────────────────────────────────────────────
+
+    def test_clean_stdout_ok(self):
+        """Clean stdout (single JSON line) parses fine."""
+        payload = json.dumps({
+            "status": "ok",
+            "output_path": "/mnt/c/data/derived/output.glb",
+            "model_name": "stable-fast-3d",
+            "warnings": [],
+            "metadata": {"device": "cuda", "peak_mem_mb": 6000.0},
+        })
+        result = self._parse(payload + "\n")
+        self.assertEqual(result["status"], "ok")
+        self.assertNotIn("worker_stdout_had_extra_lines", result["warnings"])
+
+    def test_empty_stdout_returns_none(self):
+        self.assertIsNone(self._parse(""))
+        self.assertIsNone(self._parse("   \n  "))
+
+    def test_totally_invalid_stdout_returns_none(self):
+        self.assertIsNone(self._parse("After Remesh 9298 18592\nsome other noise"))
+
+    # ── dirty-path (extra lines before JSON) ──────────────────────────────────
+
+    def test_noisy_stdout_returns_ok(self):
+        """'After Remesh N M' line before JSON → status ok, warning added."""
+        json_line = json.dumps({
+            "status": "ok",
+            "output_path": "/mnt/c/data/derived/output.glb",
+            "model_name": "stable-fast-3d",
+            "warnings": [],
+            "metadata": {"device": "cuda", "peak_mem_mb": 6173.5,
+                         "output_size_bytes": 1346664},
+        })
+        noisy_stdout = f"After Remesh 9298 18592\n{json_line}\n"
+        result = self._parse(noisy_stdout)
+        self.assertIsNotNone(result, "should parse despite noisy line")
+        self.assertEqual(result["status"], "ok")
+        self.assertIn("worker_stdout_had_extra_lines", result["warnings"])
+        self.assertIn("worker_stdout_had_extra_lines", result["logs"])
+
+    def test_noisy_stdout_output_path_preserved(self):
+        """output_path from JSON is preserved correctly after noisy-stdout parse."""
+        glb_path = "/mnt/c/data/derived/output.glb"
+        json_line = json.dumps({
+            "status": "ok",
+            "output_path": glb_path,
+            "model_name": "stable-fast-3d",
+            "warnings": [],
+            "metadata": {},
+        })
+        noisy_stdout = f"After Remesh 9298 18592\n{json_line}"
+        result = self._parse(noisy_stdout)
+        self.assertEqual(result["output_path"], glb_path)
+
+    def test_noisy_stdout_multiple_extra_lines(self):
+        """Multiple junk lines before JSON still parsed correctly."""
+        json_line = json.dumps({"status": "ok", "output_path": "/tmp/out.glb",
+                                "warnings": [], "metadata": {}})
+        noisy = f"[info] loading model\nProcessing mesh...\nAfter Remesh 100 200\n{json_line}"
+        result = self._parse(noisy)
+        self.assertIsNotNone(result)
+        self.assertEqual(result["status"], "ok")
+        self.assertIn("worker_stdout_had_extra_lines", result["warnings"])
+
+    def test_noisy_stdout_failed_json(self):
+        """Noisy stdout with failed JSON parses correctly."""
+        json_line = json.dumps({
+            "status": "failed",
+            "error_code": "sf3d_inference_error",
+            "message": "CUDA OOM",
+            "warnings": [],
+        })
+        noisy_stdout = f"After Remesh 50 100\n{json_line}"
+        result = self._parse(noisy_stdout)
+        self.assertIsNotNone(result)
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["error_code"], "sf3d_inference_error")
+
+    def test_provider_noisy_stdout_full_pipeline(self):
+        """Provider._run_worker correctly handles noisy stdout → status ok."""
+        from modules.ai_3d_generation.sf3d_provider import SF3DProvider
+        import tempfile, os
+        mock_s = MagicMock(
+            sf3d_enabled=True,
+            sf3d_execution_mode="local_windows",
+            sf3d_python_path=r"C:\dummy\python.exe",
+            sf3d_worker_script=r"C:\dummy\sf3d_worker.py",
+            sf3d_device="cpu",
+            sf3d_input_size=512,
+            sf3d_texture_resolution=512,
+            sf3d_remesh="none",
+            sf3d_output_format="glb",
+            sf3d_timeout_sec=60,
+        )
+        p = SF3DProvider.__new__(SF3DProvider)
+        p._settings = mock_s
+
+        # Create a real GLB temp file so existence check passes
+        with tempfile.NamedTemporaryFile(suffix=".glb", delete=False) as f:
+            f.write(b"GLB_DUMMY")
+            glb_path = f.name
+
+        try:
+            json_line = json.dumps({
+                "status": "ok",
+                "output_path": glb_path,
+                "model_name": "stable-fast-3d",
+                "warnings": [],
+                "metadata": {"device": "cpu", "peak_mem_mb": None,
+                             "output_size_bytes": 9},
+            })
+            noisy_stdout = f"After Remesh 9298 18592\n{json_line}\n"
+
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(
+                    stdout=noisy_stdout, stderr="", returncode=0
+                )
+                result = p._run_worker(
+                    ["fake_cmd"], 60, glb_path, normalize_path=False
+                )
+
+            self.assertEqual(result["status"], "ok",
+                             f"Expected ok, got {result}")
+            self.assertEqual(result["output_path"], glb_path)
+            self.assertIn("worker_stdout_had_extra_lines", result["warnings"])
+        finally:
+            os.unlink(glb_path)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Phase 4D — Manifest execution_mode + worker_metadata
 # ─────────────────────────────────────────────────────────────────────────────
 

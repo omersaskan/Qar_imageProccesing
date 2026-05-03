@@ -124,6 +124,56 @@ def _wsl_to_windows_path(path_str: str) -> str:
     return f"{drive}:\\{rest}" if rest else f"{drive}:\\"
 
 
+def _parse_worker_stdout(stdout: str) -> Optional[Dict[str, Any]]:
+    """
+    Robustly parse the JSON output from sf3d_worker.py.
+
+    The worker contract is "exactly one JSON object on stdout", but native
+    C libraries called by the worker (e.g. gpytoolbox remesh) may write
+    progress lines directly to fd=1, producing output like:
+
+        After Remesh 9298 18592
+        {"status":"ok","output_path":"...","metadata":{...}}
+
+    Strategy:
+      1. Happy path  — json.loads(stdout.strip()) succeeds.
+      2. Dirty path  — scan lines bottom-up for the last line that looks
+                       like a complete JSON object (starts with '{',
+                       ends with '}').  On success, appends
+                       "worker_stdout_had_extra_lines" to both
+                       data["warnings"] and data["logs"].
+      3. Failure     — return None; caller emits sf3d_worker_invalid_json.
+    """
+    if not stdout:
+        return None
+
+    # 1. Happy path
+    try:
+        return json.loads(stdout.strip())
+    except json.JSONDecodeError:
+        pass
+
+    # 2. Dirty path — scan from bottom for JSON line
+    for line in reversed(stdout.splitlines()):
+        line = line.strip()
+        if line.startswith("{") and line.endswith("}"):
+            try:
+                data = json.loads(line)
+                # Flag that extra lines contaminated stdout
+                if not isinstance(data.get("warnings"), list):
+                    data["warnings"] = []
+                if "worker_stdout_had_extra_lines" not in data["warnings"]:
+                    data["warnings"].append("worker_stdout_had_extra_lines")
+                if not isinstance(data.get("logs"), list):
+                    data["logs"] = []
+                data["logs"].append("worker_stdout_had_extra_lines")
+                return data
+            except json.JSONDecodeError:
+                continue
+
+    return None
+
+
 class SF3DProvider(AI3DProviderBase):
 
     name = "sf3d"
@@ -438,8 +488,8 @@ class SF3DProvider(AI3DProviderBase):
         stderr_lines = (proc.stderr or "").splitlines()
         logs = stderr_lines[-_STDERR_TAIL_LINES:]
 
-        stdout = (proc.stdout or "").strip()
-        if not stdout:
+        raw_stdout = proc.stdout or ""
+        if not raw_stdout.strip():
             return _error_result(
                 "sf3d_worker_invalid_json",
                 f"SF3D worker produced no stdout (exit={proc.returncode})",
@@ -447,15 +497,23 @@ class SF3DProvider(AI3DProviderBase):
                 logs=logs,
             )
 
-        try:
-            data = json.loads(stdout)
-        except json.JSONDecodeError as exc:
+        data = _parse_worker_stdout(raw_stdout)
+        if data is None:
             return _error_result(
                 "sf3d_worker_invalid_json",
-                f"SF3D worker JSON parse error: {exc} — stdout: {stdout[:200]}",
+                (
+                    f"SF3D worker stdout is not valid JSON "
+                    f"(exit={proc.returncode}) — "
+                    f"stdout: {raw_stdout[:300]!r}"
+                ),
                 self.name, self.output_format,
                 logs=logs,
             )
+
+        # Merge any worker-level logs into our collected log lines
+        if data.get("logs"):
+            logs = list(logs) + [l for l in data["logs"]
+                                  if l not in logs]
 
         return self._build_result(data, input_image_path, logs, normalize_path)
 
