@@ -33,6 +33,12 @@ def build_manifest(
     worker_metadata: Optional[Dict[str, Any]] = None,
     provider_failure_reason: Optional[str] = None,
     missing_outputs: Optional[List[str]] = None,
+    # ── Phase 4E additions (all optional for backward compat) ─────────────────
+    generation_started_at: Optional[str] = None,
+    generation_finished_at: Optional[str] = None,
+    duration_sec: Optional[float] = None,
+    output_size_bytes: Optional[int] = None,
+    path_diagnostics: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     _worker_meta = worker_metadata or {}
     return {
@@ -70,10 +76,19 @@ def build_manifest(
         "output_format": output_format,
         "preview_image_path": preview_image_path,
         "missing_outputs": missing_outputs or [],
+        "output_size_bytes": output_size_bytes,
 
         # Worker runtime metadata
         "worker_metadata": _worker_meta,
         "peak_mem_mb": _worker_meta.get("peak_mem_mb"),
+
+        # Runtime timing (Phase 4E)
+        "generation_started_at": generation_started_at,
+        "generation_finished_at": generation_finished_at,
+        "duration_sec": duration_sec,
+
+        # Path diagnostics (Phase 4E)
+        "path_diagnostics": path_diagnostics or {},
 
         # Status
         "status": status,

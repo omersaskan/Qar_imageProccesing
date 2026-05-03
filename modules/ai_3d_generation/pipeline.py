@@ -18,8 +18,10 @@ from __future__ import annotations
 
 import logging
 import shutil
+import time
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 
 from .manifest import build_manifest, write_manifest
 from .input_preprocessor import preprocess_input
@@ -60,6 +62,7 @@ def generate_ai_3d(
     manifests_dir = Path(output_base_dir) / "manifests"
     for d in (input_dir, derived_dir, manifests_dir):
         d.mkdir(parents=True, exist_ok=True)
+    derived_dir_abs = derived_dir.resolve()
 
     warnings: list[str] = []
     errors: list[str] = []
@@ -126,17 +129,39 @@ def generate_ai_3d(
     generation_input = prepared_image_path or image_path_for_gen
 
     # ── 4. Generate ───────────────────────────────────────────────────────────
+    # Normalise generation_input to absolute path before handing to provider
+    if generation_input:
+        try:
+            generation_input = str(Path(generation_input).resolve())
+        except Exception:
+            pass
+
+    _t0 = time.monotonic()
+    _started_at = datetime.now(tz=timezone.utc).isoformat()
+
     provider_result = provider.safe_generate(
         input_image_path=generation_input,
-        output_dir=str(derived_dir),
+        output_dir=str(derived_dir_abs),
         options=opts,
     )
+
+    _t1 = time.monotonic()
+    _finished_at = datetime.now(tz=timezone.utc).isoformat()
+    _duration_sec = round(_t1 - _t0, 2)
+
     warnings.extend(provider_result.get("warnings", []))
     if provider_result.get("error"):
         errors.append(provider_result["error"])
 
     output_glb_path    = provider_result.get("output_path")
     preview_image_path = provider_result.get("preview_image_path")
+
+    # Normalise GLB path to absolute
+    if output_glb_path:
+        try:
+            output_glb_path = str(Path(output_glb_path).resolve())
+        except Exception:
+            pass
 
     # ── 5. Postprocess ────────────────────────────────────────────────────────
     postprocessing_meta = run_postprocess(
@@ -152,6 +177,44 @@ def generate_ai_3d(
 
     # ── 7. Manifest ───────────────────────────────────────────────────────────
     _prov_status = provider_result.get("status", "failed")
+
+    # ── compute output_size_bytes ─────────────────────────────────────────────
+    _output_size_bytes: Optional[int] = None
+    if output_glb_path:
+        try:
+            _glb_p = Path(output_glb_path)
+            if _glb_p.exists():
+                _output_size_bytes = _glb_p.stat().st_size
+        except Exception:
+            pass
+
+    # ── compute missing_outputs ───────────────────────────────────────────────
+    _expected_outputs = {
+        "prepared_input": derived_dir_abs / "ai3d_input.png",
+        "output_glb":     derived_dir_abs / "output.glb",
+    }
+    _missing_outputs: List[str] = [
+        k for k, p in _expected_outputs.items() if not p.exists()
+    ]
+
+    # ── build path_diagnostics ────────────────────────────────────────────────
+    _path_diag: Dict[str, Any] = {
+        "source_input_path":    str(Path(input_file_path).resolve()),
+        "generation_input":     generation_input,
+        "output_dir":           str(derived_dir_abs),
+        "output_glb_path":      output_glb_path,
+    }
+    _exec_mode = getattr(settings, "sf3d_execution_mode", "disabled")
+    if _exec_mode == "wsl_subprocess":
+        try:
+            from .sf3d_provider import _windows_to_wsl_path
+            _path_diag["generation_input_wsl"] = (
+                _windows_to_wsl_path(generation_input) if generation_input else None
+            )
+            _path_diag["output_dir_wsl"] = _windows_to_wsl_path(str(derived_dir_abs))
+        except Exception:
+            pass
+
     manifest = build_manifest(
         session_id=session_id,
         source_input_path=input_file_path,
@@ -173,12 +236,19 @@ def generate_ai_3d(
         errors=errors,
         review_required=review_required,
         # Phase 4D
-        execution_mode=getattr(settings, "sf3d_execution_mode", "disabled"),
+        execution_mode=_exec_mode,
         worker_metadata=provider_result.get("metadata", {}),
         provider_failure_reason=(
             provider_result.get("error")
             if _prov_status != "ok" else None
         ),
+        missing_outputs=_missing_outputs,
+        # Phase 4E — timing + diagnostics
+        generation_started_at=_started_at,
+        generation_finished_at=_finished_at,
+        duration_sec=_duration_sec,
+        output_size_bytes=_output_size_bytes,
+        path_diagnostics=_path_diag,
     )
     write_manifest(manifest, str(manifests_dir))
 

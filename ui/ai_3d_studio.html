@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>AI 3D Studio — SF3D Generated 3D</title>
   <link rel="stylesheet" href="style.css" />
+  <!-- model-viewer: Google's web component for GLB/GLTF preview in-browser -->
+  <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
   <style>
     .ai3d-root { max-width: 860px; margin: 0 auto; padding: 24px 16px; font-family: sans-serif; }
     .ai3d-header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
@@ -43,6 +45,9 @@
     .ai3d-download { display: none; margin-top: 12px; }
     .ai3d-download a { display: inline-block; padding: 9px 20px; background: #059669; color: #fff; border-radius: 6px; text-decoration: none; font-size: .9rem; font-weight: 600; }
     .ai3d-download a:hover { background: #047857; }
+    .ai3d-model-viewer-wrap { display: none; margin-top: 14px; }
+    .ai3d-model-viewer-wrap h3 { font-size: .8rem; font-weight: 600; color: #6b7280; text-transform: uppercase; margin: 0 0 8px; letter-spacing: .05em; }
+    model-viewer { width: 100%; height: 340px; background: #f1f5f9; border-radius: 8px; border: 1px solid #e5e7eb; }
   </style>
 </head>
 <body>
@@ -118,6 +123,19 @@
 
     <div class="ai3d-download" id="download-row">
       <a id="download-link" href="#" download="output.glb">⬇ Download GLB</a>
+    </div>
+
+    <!-- In-browser 3D preview via <model-viewer> web component -->
+    <div class="ai3d-model-viewer-wrap" id="model-viewer-row">
+      <h3>3D Preview</h3>
+      <model-viewer
+        id="glb-model-viewer"
+        alt="AI-generated 3D model"
+        camera-controls
+        auto-rotate
+        shadow-intensity="1"
+        environment-image="neutral"
+      ></model-viewer>
     </div>
 
     <div class="ai3d-outputs" id="outputs-grid"></div>
@@ -224,12 +242,20 @@
     tryImg('prepared-input-img', 'prepared-input', missingOutputs.includes('prepared_input'));
     tryImg('preview-img', 'prepared-input', true);   // preview not yet generated
 
-    // Download link
+    // Download link + model-viewer
     if (!missingOutputs.includes('output_glb')) {
+      const glbUrl = `/api/ai-3d/output/${currentSessionId}?t=${t}`;
+
       const dl = document.getElementById('download-row');
       document.getElementById('download-link').href =
         `/api/ai-3d/output/${currentSessionId}`;
       dl.style.display = 'block';
+
+      // Wire model-viewer for in-browser 3D preview
+      const mv = document.getElementById('glb-model-viewer');
+      const mvRow = document.getElementById('model-viewer-row');
+      mv.src = glbUrl;
+      mvRow.style.display = 'block';
     }
 
     // Execution mode badge + label

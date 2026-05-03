@@ -40,9 +40,13 @@ def evaluate(
 
     output_exists = bool(output_glb_path and Path(output_glb_path).exists())
 
-    if status == "unavailable":
+    if status in ("unavailable", "busy"):
         return _gate("unavailable", output_exists, warnings,
-                     reason=provider_result.get("error", "provider_unavailable"))
+                     reason=(
+                         provider_result.get("error_code")
+                         or provider_result.get("error")
+                         or "provider_unavailable"
+                     ))
 
     if status != "ok":
         return _gate("failed", output_exists, warnings,

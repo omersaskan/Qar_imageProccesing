@@ -1395,6 +1395,28 @@ def _ai3d_artifact_404(session_id: str, artifact_name: str) -> HTTPException:
     return HTTPException(status_code=404, detail=detail)
 
 
+@app.get("/api/ai-3d/preflight", dependencies=[Depends(verify_api_key)])
+async def ai3d_preflight():
+    """
+    Run WSL2 preflight checks without inference.
+
+    Returns the 5-step check result:
+      wsl_exe, distro, python, worker_script, dry_run_contract
+
+    No GPU is allocated — safe to call at any time to verify the
+    wsl_subprocess execution mode is correctly configured.
+    """
+    try:
+        from modules.ai_3d_generation.sf3d_provider import SF3DProvider
+        provider = SF3DProvider()
+        result = provider.preflight_wsl()
+        status_code = 200 if result.get("ok") else 503
+        from fastapi.responses import JSONResponse
+        return JSONResponse(content=result, status_code=status_code)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Preflight error: {exc}")
+
+
 @app.post("/api/ai-3d/upload", dependencies=[Depends(verify_api_key)])
 async def ai3d_upload(
     file: UploadFile = File(...),
@@ -1473,6 +1495,19 @@ async def ai3d_process(session_id: str, body: Optional[_AI3DProcessRequest] = No
         missing_outputs = [k for k, p in expected.items() if not p.exists()]
 
         provider_status = manifest.get("provider_status", "unknown")
+
+        # 409 — GPU lock held (transient; client should retry)
+        if provider_status == "busy":
+            info["status"] = "uploaded"  # Reset so the session can be retried
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "sf3d_job_already_running",
+                    "message": "An SF3D inference job is already running. Retry after it completes.",
+                    "session_id": session_id,
+                },
+            )
+
         provider_failure_reason: Optional[str] = None
         if provider_status in ("unavailable", "failed", "disabled", "error"):
             p_name = manifest.get("provider", provider_name)

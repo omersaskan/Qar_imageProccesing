@@ -98,7 +98,7 @@ def _failed_result(provider: str, output_format: str, reason: str,
     return r
 
 
-_KNOWN_STATUSES = ("ok", "unavailable", "failed", "disabled")
+_KNOWN_STATUSES = ("ok", "unavailable", "failed", "disabled", "busy")
 
 
 def _normalise_status(result: Dict[str, Any], provider: str, output_format: str) -> Dict[str, Any]:

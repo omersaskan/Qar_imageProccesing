@@ -926,5 +926,215 @@ class TestManifestExecutionMode(unittest.TestCase):
         self.assertEqual(m["missing_outputs"], [])
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 4E — Path edge cases
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestSF3DPathEdgeCases(unittest.TestCase):
+
+    def _w2w(self, p):
+        from modules.ai_3d_generation.sf3d_provider import _windows_to_wsl_path
+        return _windows_to_wsl_path(p)
+
+    def _w2n(self, p):
+        from modules.ai_3d_generation.sf3d_provider import _wsl_to_windows_path
+        return _wsl_to_windows_path(p)
+
+    def test_unc_path_returned_unchanged(self):
+        """UNC paths are not convertible — returned as-is with no crash."""
+        unc = r"\\server\share\file.png"
+        result = self._w2w(unc)
+        self.assertEqual(result, unc)
+
+    def test_bare_mnt_drive_wsl_to_windows(self):
+        """/mnt/c with no trailing path → C:\\"""
+        result = self._w2n("/mnt/c")
+        self.assertEqual(result, "C:\\")
+
+    def test_mnt_drive_trailing_slash(self):
+        """/mnt/c/ (trailing slash) converts cleanly."""
+        result = self._w2n("/mnt/c/")
+        self.assertEqual(result, "C:\\")
+
+    def test_empty_string_unchanged(self):
+        """Empty string input → empty string output."""
+        self.assertEqual(self._w2w(""), "")
+        self.assertEqual(self._w2n(""), "")
+
+    def test_wsl_lowercase_drive(self):
+        """/mnt/d/… → D:\\…"""
+        result = self._w2n("/mnt/d/data/file.glb")
+        self.assertEqual(result, r"D:\data\file.glb")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 4E — GPU busy lock
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestSF3DBusyLock(unittest.TestCase):
+
+    def _make_provider(self):
+        from modules.ai_3d_generation.sf3d_provider import SF3DProvider
+        mock_s = MagicMock(
+            sf3d_enabled=True,
+            sf3d_execution_mode="wsl_subprocess",
+            sf3d_wsl_python_path="/home/lenovo/sf3d_venv/bin/python",
+            sf3d_wsl_distro="Ubuntu-24.04",
+            sf3d_wsl_repo_root="/mnt/c/fake/repo",
+            sf3d_wsl_timeout_sec=60,
+            sf3d_device="cuda",
+            sf3d_input_size=512,
+            sf3d_texture_resolution=512,
+            sf3d_remesh="none",
+            sf3d_output_format="glb",
+        )
+        p = SF3DProvider.__new__(SF3DProvider)
+        p._settings = mock_s
+        return p
+
+    def test_lock_held_returns_busy(self):
+        """When _sf3d_lock is already held, generate() returns status=busy.
+
+        We acquire the module-level lock on this thread before calling
+        generate(), which uses blocking=False — so it immediately sees the
+        lock is taken and returns busy without deadlocking.
+        """
+        import modules.ai_3d_generation.sf3d_provider as mod
+        p = self._make_provider()
+        mod._sf3d_lock.acquire()
+        try:
+            with patch(
+                "modules.ai_3d_generation.sf3d_provider.SF3DProvider.is_available",
+                return_value=(True, ""),
+            ):
+                result = p.generate("C:\\img.png", "C:\\out")
+        finally:
+            mod._sf3d_lock.release()
+        self.assertEqual(result["status"], "busy")
+        self.assertEqual(result["error_code"], "sf3d_job_already_running")
+
+    def test_busy_passthrough_in_safe_generate(self):
+        """safe_generate() preserves status=busy (not remapped to failed)."""
+        from modules.ai_3d_generation.provider_base import _KNOWN_STATUSES
+        self.assertIn("busy", _KNOWN_STATUSES)
+
+    def test_busy_maps_to_unavailable_in_quality_gate(self):
+        """quality_gate.evaluate() maps status=busy → verdict=unavailable."""
+        from modules.ai_3d_generation.quality_gate import evaluate
+        provider_result = {
+            "status": "busy",
+            "error_code": "sf3d_job_already_running",
+            "error": "sf3d_job_already_running",
+        }
+        gate = evaluate(provider_result, output_glb_path=None, review_required=False)
+        self.assertEqual(gate["verdict"], "unavailable")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 4E — WSL2 preflight
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestSF3DPreflight(unittest.TestCase):
+
+    def _make_provider(self, exec_mode="wsl_subprocess"):
+        from modules.ai_3d_generation.sf3d_provider import SF3DProvider
+        mock_s = MagicMock(
+            sf3d_enabled=True,
+            sf3d_execution_mode=exec_mode,
+            sf3d_wsl_python_path="/home/lenovo/sf3d_venv/bin/python",
+            sf3d_wsl_distro="Ubuntu-24.04",
+            sf3d_wsl_repo_root="/mnt/c/fake/repo",
+            sf3d_wsl_timeout_sec=60,
+        )
+        p = SF3DProvider.__new__(SF3DProvider)
+        p._settings = mock_s
+        return p
+
+    def test_preflight_not_wsl_mode_returns_ok_false(self):
+        """preflight_wsl() in disabled mode reports ok=False, not a crash."""
+        p = self._make_provider(exec_mode="disabled")
+        result = p.preflight_wsl()
+        self.assertIn("ok", result)
+        self.assertFalse(result["ok"])
+
+    def test_preflight_wsl_exe_missing(self):
+        """When wsl.exe is not on PATH, the wsl_exe check ok=False."""
+        p = self._make_provider()
+        with patch("shutil.which", return_value=None):
+            result = p.preflight_wsl()
+        checks = result.get("checks", {})
+        # Each check value is {"ok": bool, "detail": ...}
+        self.assertFalse(checks.get("wsl_exe", {}).get("ok", True))
+        self.assertFalse(result["ok"])
+
+    def test_preflight_structure(self):
+        """preflight_wsl() always returns dict with ok, checks, execution_mode."""
+        p = self._make_provider()
+        with patch("shutil.which", return_value=None):
+            result = p.preflight_wsl()
+        self.assertIn("ok", result)
+        self.assertIn("checks", result)
+        self.assertIn("execution_mode", result)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 4E — Manifest timing and path_diagnostics fields
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestManifestTimingFields(unittest.TestCase):
+
+    def _build(self, **kw):
+        from modules.ai_3d_generation.manifest import build_manifest
+        base = dict(
+            session_id="s1", source_input_path="/in/img.jpg", input_type="image",
+            provider="sf3d", provider_status="ok", model_name="stable-fast-3d",
+            license_note="test", selected_frame_path=None, prepared_image_path=None,
+            preprocessing={}, postprocessing={},
+            quality_gate={"verdict": "ok", "output_exists": True, "warnings": [], "reason": None},
+            output_glb_path="/out/output.glb", output_format="glb",
+            preview_image_path=None, status="ok",
+            warnings=[], errors=[],
+        )
+        base.update(kw)
+        return build_manifest(**base)
+
+    def test_timing_fields_present(self):
+        m = self._build(
+            generation_started_at="2026-05-03T10:00:00+00:00",
+            generation_finished_at="2026-05-03T10:00:35+00:00",
+            duration_sec=35.1,
+        )
+        self.assertEqual(m["generation_started_at"], "2026-05-03T10:00:00+00:00")
+        self.assertEqual(m["generation_finished_at"], "2026-05-03T10:00:35+00:00")
+        self.assertAlmostEqual(m["duration_sec"], 35.1)
+
+    def test_timing_fields_default_none(self):
+        """Timing fields default to None for backward compat."""
+        m = self._build()
+        self.assertIsNone(m["generation_started_at"])
+        self.assertIsNone(m["generation_finished_at"])
+        self.assertIsNone(m["duration_sec"])
+
+    def test_output_size_bytes_field(self):
+        m = self._build(output_size_bytes=1346664)
+        self.assertEqual(m["output_size_bytes"], 1346664)
+
+    def test_path_diagnostics_field(self):
+        diag = {
+            "source_input_path": r"C:\data\img.png",
+            "output_dir":        r"C:\data\out",
+            "generation_input_wsl": "/mnt/c/data/img.png",
+            "output_dir_wsl":    "/mnt/c/data/out",
+        }
+        m = self._build(path_diagnostics=diag)
+        self.assertEqual(m["path_diagnostics"]["generation_input_wsl"],
+                         "/mnt/c/data/img.png")
+
+    def test_path_diagnostics_default_empty_dict(self):
+        """path_diagnostics defaults to {} when not provided."""
+        m = self._build()
+        self.assertEqual(m["path_diagnostics"], {})
+
+
 if __name__ == "__main__":
     unittest.main()
