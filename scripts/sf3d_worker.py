@@ -16,6 +16,10 @@ Args:
   --texture-resolution Texture resolution (default: 1024)
   --remesh             none | quad | triangle  (default: none)
   --output-format      glb | obj  (default: glb)
+  --pretrained-model   HuggingFace model id or local path
+                       (default: stabilityai/stable-fast-3d)
+  --foreground-ratio   Foreground ratio for resize (default: 0.85)
+  --no-remove-bg       Skip rembg background removal (use prepared alpha)
   --dry-run            Validate args only, no inference
 """
 
@@ -45,11 +49,14 @@ def main():
                         choices=["none", "quad", "triangle"])
     parser.add_argument("--output-format",      default="glb",
                         choices=["glb", "obj"])
+    parser.add_argument("--pretrained-model",   default="stabilityai/stable-fast-3d")
+    parser.add_argument("--foreground-ratio",   type=float, default=0.85)
+    parser.add_argument("--no-remove-bg",       action="store_true")
     parser.add_argument("--dry-run",            action="store_true")
     args = parser.parse_args()
 
-    image_path  = Path(args.image)
-    output_dir  = Path(args.output_dir)
+    image_path = Path(args.image)
+    output_dir = Path(args.output_dir)
 
     # ── dry-run: validate paths and return early ──────────────────────────────
     if args.dry_run:
@@ -89,9 +96,10 @@ def main():
         })
         sys.exit(0)   # exit 0 — unavailable is not a crash
 
-    # ── real inference (only reached when sf3d is installed) ─────────────────
+    # ── real inference (only reached when sf3d is installed) ──────────────────
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # ── resolve device ────────────────────────────────────────────────────────
     device = args.device
     if device == "auto":
         try:
@@ -102,21 +110,83 @@ def main():
     log.info("Using device: %s", device)
 
     try:
-        import sf3d.run as sf3d_run   # adjust to actual SF3D API
+        import torch
+        from PIL import Image
+        from sf3d.system import SF3D
+        from sf3d.utils import remove_background, resize_foreground
 
-        output_glb = output_dir / f"output.{args.output_format}"
-        sf3d_run.run(
-            image=str(image_path),
-            output_dir=str(output_dir),
-            device=device,
-            texture_resolution=args.texture_resolution,
-            remesh_option=args.remesh,
+        # ── load model ───────────────────────────────────────────────────────
+        log.info("Loading SF3D model from: %s", args.pretrained_model)
+        try:
+            model = SF3D.from_pretrained(
+                args.pretrained_model,
+                config_name="config.yaml",
+                weight_name="model.safetensors",
+            )
+        except Exception as auth_exc:
+            _auth_msg = str(auth_exc)
+            if "401" in _auth_msg or "gated" in _auth_msg.lower() or "GatedRepoError" in type(auth_exc).__name__:
+                _out({
+                    "status": "unavailable",
+                    "error_code": "sf3d_model_auth_required",
+                    "message": (
+                        "stabilityai/stable-fast-3d is a gated model. "
+                        "Accept the license at https://huggingface.co/stabilityai/stable-fast-3d "
+                        "then set HF_TOKEN env var or run: huggingface-cli login"
+                    ),
+                    "warnings": ["sf3d_model_auth_required"],
+                })
+                sys.exit(0)   # unavailable — not a crash
+            raise  # re-raise unexpected errors
+        model.to(device)
+        model.eval()
+        log.info("Model loaded on %s", device)
+
+        # ── load and preprocess image ────────────────────────────────────────
+        img = Image.open(str(image_path)).convert("RGBA")
+
+        if not args.no_remove_bg:
+            import rembg
+            log.info("Removing background with rembg...")
+            rembg_session = rembg.new_session()
+            img = remove_background(img, rembg_session)
+
+        img = resize_foreground(img, args.foreground_ratio)
+        log.info("Image preprocessed: size=%s mode=%s", img.size, img.mode)
+
+        # ── inference ────────────────────────────────────────────────────────
+        log.info("Running SF3D inference...")
+        autocast_ctx = (
+            torch.autocast(device_type="cuda", dtype=torch.bfloat16)
+            if device == "cuda"
+            else __import__("contextlib").nullcontext()
         )
 
-        if not output_glb.exists():
-            # SF3D may use a different output filename; find it
-            candidates = list(output_dir.glob(f"*.{args.output_format}"))
-            output_glb = candidates[0] if candidates else output_glb
+        peak_mem_mb = None
+        with torch.no_grad(), autocast_ctx:
+            mesh, glob_dict = model.run_image(
+                [img],
+                bake_resolution=args.texture_resolution,
+                remesh=args.remesh,
+            )
+
+        if device == "cuda" and torch.cuda.is_available():
+            peak_mem_mb = round(torch.cuda.max_memory_allocated() / 1024 / 1024, 1)
+            log.info("Peak GPU memory: %.1f MB", peak_mem_mb)
+
+        # ── export GLB ───────────────────────────────────────────────────────
+        output_glb = output_dir / f"output.{args.output_format}"
+        mesh.export(str(output_glb), include_normals=True)
+        log.info("GLB exported: %s  size=%d bytes", output_glb, output_glb.stat().st_size)
+
+        if not output_glb.exists() or output_glb.stat().st_size == 0:
+            _out({
+                "status": "failed",
+                "error_code": "sf3d_output_empty",
+                "message": f"Output GLB missing or empty: {output_glb}",
+                "warnings": [],
+            })
+            sys.exit(1)
 
         _out({
             "status": "ok",
@@ -130,6 +200,10 @@ def main():
                 "input_size": args.input_size,
                 "texture_resolution": args.texture_resolution,
                 "remesh": args.remesh,
+                "pretrained_model": args.pretrained_model,
+                "foreground_ratio": args.foreground_ratio,
+                "peak_mem_mb": peak_mem_mb,
+                "output_size_bytes": output_glb.stat().st_size,
             },
         })
 
