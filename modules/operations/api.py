@@ -1362,6 +1362,216 @@ async def depth_studio_mask_stats(session_id: str):
     raise _artifact_404(session_id, "mask_stats")
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# AI 3D GENERATION ENDPOINTS
+# ─────────────────────────────────────────────────────────────────────────────
+
+_ai3d_sessions: Dict[str, Dict[str, Any]] = {}
+_ai3d_data_root = Path(settings.data_root) / "ai_3d"
+
+
+def _ai3d_session_dir(session_id: str) -> Path:
+    return _ai3d_data_root / session_id
+
+
+def _ai3d_artifact_404(session_id: str, artifact_name: str) -> HTTPException:
+    """Structured 404 with session summary for missing AI 3D artifacts."""
+    info = _ai3d_sessions.get(session_id, {})
+    manifest_path = info.get("manifest_path")
+    manifest: Dict[str, Any] = {}
+    if manifest_path:
+        try:
+            manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    detail: Dict[str, Any] = {
+        "error": f"{artifact_name} not available",
+        "session_status": manifest.get("status") or info.get("status", "unknown"),
+        "provider": manifest.get("provider") or info.get("provider", "unknown"),
+        "provider_status": manifest.get("provider_status", "unknown"),
+        "warnings": manifest.get("warnings", []),
+        "errors": manifest.get("errors", []),
+    }
+    return HTTPException(status_code=404, detail=detail)
+
+
+@app.post("/api/ai-3d/upload", dependencies=[Depends(verify_api_key)])
+async def ai3d_upload(
+    file: UploadFile = File(...),
+    provider: str = Form(default="sf3d"),
+):
+    """Accept an image or video, create an AI 3D session."""
+    if not settings.ai_3d_generation_enabled:
+        raise HTTPException(
+            status_code=503,
+            detail="AI 3D Generation is disabled (AI_3D_GENERATION_ENABLED=false)",
+        )
+    session_id = f"ai3d_{uuid.uuid4().hex[:12]}"
+    session_dir = _ai3d_session_dir(session_id)
+    input_dir = session_dir / "input"
+    input_dir.mkdir(parents=True, exist_ok=True)
+
+    suffix = Path(file.filename or "upload.jpg").suffix or ".jpg"
+    dest = input_dir / f"upload{suffix}"
+    with open(str(dest), "wb") as f_out:
+        shutil.copyfileobj(file.file, f_out)
+
+    _ai3d_sessions[session_id] = {
+        "session_id": session_id,
+        "status": "uploaded",
+        "input_path": str(dest),
+        "provider": provider,
+        "manifest_path": None,
+    }
+    return {
+        "session_id": session_id,
+        "status": "uploaded",
+        "provider": provider,
+        "input_path": str(dest),
+    }
+
+
+class _AI3DProcessRequest(BaseModel):
+    options: Optional[dict] = None
+
+
+@app.post("/api/ai-3d/process/{session_id}", dependencies=[Depends(verify_api_key)])
+async def ai3d_process(session_id: str, body: Optional[_AI3DProcessRequest] = None):
+    """Run AI 3D generation for the uploaded file."""
+    if session_id not in _ai3d_sessions:
+        raise HTTPException(status_code=404, detail=f"AI 3D session not found: {session_id}")
+
+    info = _ai3d_sessions[session_id]
+    if info["status"] not in ("uploaded", "failed"):
+        return {"session_id": session_id, "status": info["status"],
+                "detail": "Already processed or processing"}
+
+    info["status"] = "processing"
+    session_dir = _ai3d_session_dir(session_id)
+    opts = (body.options if body and body.options else {}) or {}
+
+    provider_name = info.get("provider") or settings.ai_3d_default_provider
+
+    try:
+        from modules.ai_3d_generation.pipeline import generate_ai_3d
+        manifest = generate_ai_3d(
+            session_id=session_id,
+            input_file_path=info["input_path"],
+            output_base_dir=str(session_dir),
+            provider_name=provider_name,
+            options=opts,
+        )
+        info["status"] = manifest.get("status", "failed")
+        info["manifest_path"] = str(session_dir / "manifests" / "ai3d_manifest.json")
+
+        # Determine which expected outputs are missing
+        derived = session_dir / "derived"
+        expected = {
+            "prepared_input": derived / "ai3d_input.png",
+            "output_glb":     derived / "output.glb",
+        }
+        missing_outputs = [k for k, p in expected.items() if not p.exists()]
+
+        provider_status = manifest.get("provider_status", "unknown")
+        provider_failure_reason: Optional[str] = None
+        if provider_status in ("unavailable", "failed", "disabled", "error"):
+            p_name = manifest.get("provider", provider_name)
+            if "sf3d" in (p_name or ""):
+                errors = manifest.get("errors", [])
+                err_str = errors[0] if errors else provider_status
+                if "sf3d_disabled" in err_str:
+                    provider_failure_reason = (
+                        "SF3D is disabled (SF3D_ENABLED=false)"
+                    )
+                elif "sf3d_python_missing" in err_str:
+                    provider_failure_reason = (
+                        "SF3D Python not found — install under "
+                        "external/stable-fast-3d/.venv_sf3d and set SF3D_PYTHON_PATH"
+                    )
+                elif "sf3d_worker_missing" in err_str:
+                    provider_failure_reason = (
+                        "SF3D worker script not found at SF3D_WORKER_SCRIPT path"
+                    )
+                else:
+                    provider_failure_reason = (
+                        f"SF3D provider unavailable: {err_str}"
+                    )
+
+        response: Dict[str, Any] = {
+            "session_id": session_id,
+            "status": info["status"],
+            "provider_status": provider_status,
+            "warnings": manifest.get("warnings", []),
+            "errors": manifest.get("errors", []),
+            "missing_outputs": missing_outputs,
+            "manifest": manifest,
+        }
+        if provider_failure_reason:
+            response["provider_failure_reason"] = provider_failure_reason
+        return response
+    except Exception as e:
+        info["status"] = "failed"
+        raise HTTPException(status_code=500, detail=f"AI 3D processing failed: {e}")
+
+
+@app.get("/api/ai-3d/status/{session_id}", dependencies=[Depends(verify_api_key)])
+async def ai3d_status(session_id: str):
+    """Return session status."""
+    if session_id not in _ai3d_sessions:
+        raise HTTPException(status_code=404, detail=f"AI 3D session not found: {session_id}")
+    info = _ai3d_sessions[session_id]
+    manifest: Dict[str, Any] = {}
+    if info.get("manifest_path"):
+        try:
+            manifest = json.loads(
+                Path(info["manifest_path"]).read_text(encoding="utf-8")
+            )
+        except Exception:
+            pass
+    return {
+        "session_id": session_id,
+        "status": info["status"],
+        "provider": info.get("provider"),
+        "provider_status": manifest.get("provider_status"),
+        "manifest_path": info.get("manifest_path"),
+    }
+
+
+@app.get("/api/ai-3d/output/{session_id}", dependencies=[Depends(verify_api_key)])
+async def ai3d_output(session_id: str):
+    """Serve generated GLB file."""
+    if session_id not in _ai3d_sessions:
+        raise HTTPException(status_code=404, detail=f"AI 3D session not found: {session_id}")
+    derived = _ai3d_session_dir(session_id) / "derived"
+    # Try manifest-reported path first, then fallback scan
+    info = _ai3d_sessions[session_id]
+    glb_path = None
+    if info.get("manifest_path"):
+        try:
+            m = json.loads(Path(info["manifest_path"]).read_text(encoding="utf-8"))
+            glb_path = m.get("output_glb_path")
+        except Exception:
+            pass
+    if not glb_path or not Path(glb_path).exists():
+        candidates = list(derived.glob("*.glb"))
+        glb_path = str(candidates[0]) if candidates else None
+    if glb_path and Path(glb_path).exists():
+        return FileResponse(str(glb_path), media_type="model/gltf-binary",
+                            filename="output.glb")
+    raise _ai3d_artifact_404(session_id, "output_glb")
+
+
+@app.get("/api/ai-3d/prepared-input/{session_id}", dependencies=[Depends(verify_api_key)])
+async def ai3d_prepared_input(session_id: str):
+    """Serve prepared input image (ai3d_input.png)."""
+    if session_id not in _ai3d_sessions:
+        raise HTTPException(status_code=404, detail=f"AI 3D session not found: {session_id}")
+    p = _ai3d_session_dir(session_id) / "derived" / "ai3d_input.png"
+    if p.exists():
+        return FileResponse(str(p), media_type="image/png")
+    raise _ai3d_artifact_404(session_id, "prepared_input")
+
+
 # Asset Blobs (GLB Files)
 blobs_dir = Path(settings.data_root) / "registry" / "blobs"
 blobs_dir.mkdir(parents=True, exist_ok=True)

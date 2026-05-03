@@ -334,6 +334,31 @@ class Settings(BaseSettings):
     # --- AI 3D GENERATION (Phase B/C Scaffolds) ---
     ai_3d_provider: str = Field("none", validation_alias="AI_3D_PROVIDER")
     ai_3d_preview_enabled: bool = Field(False, validation_alias="AI_3D_PREVIEW_ENABLED")
+
+    # --- AI 3D GENERATION — SF3D integration (all default false) ---
+    ai_3d_generation_enabled: bool = Field(False, validation_alias="AI_3D_GENERATION_ENABLED")
+    ai_3d_default_provider: str = Field("sf3d", validation_alias="AI_3D_DEFAULT_PROVIDER")
+    ai_3d_output_format: str = Field("glb", validation_alias="AI_3D_OUTPUT_FORMAT")
+    ai_3d_require_review: bool = Field(True, validation_alias="AI_3D_REQUIRE_REVIEW")
+    ai_3d_preprocess_enabled: bool = Field(True, validation_alias="AI_3D_PREPROCESS_ENABLED")
+    ai_3d_postprocess_enabled: bool = Field(True, validation_alias="AI_3D_POSTPROCESS_ENABLED")
+
+    sf3d_enabled: bool = Field(False, validation_alias="SF3D_ENABLED")
+    sf3d_python_path: str = Field(
+        "external/stable-fast-3d/.venv_sf3d/Scripts/python.exe",
+        validation_alias="SF3D_PYTHON_PATH",
+    )
+    sf3d_worker_script: str = Field(
+        "scripts/sf3d_worker.py",
+        validation_alias="SF3D_WORKER_SCRIPT",
+    )
+    sf3d_device: str = Field("auto", validation_alias="SF3D_DEVICE")
+    sf3d_timeout_sec: int = Field(300, validation_alias="SF3D_TIMEOUT_SEC")
+    sf3d_input_size: int = Field(512, validation_alias="SF3D_INPUT_SIZE")
+    sf3d_texture_resolution: int = Field(1024, validation_alias="SF3D_TEXTURE_RESOLUTION")
+    sf3d_remesh: str = Field("none", validation_alias="SF3D_REMESH")
+    sf3d_output_format: str = Field("glb", validation_alias="SF3D_OUTPUT_FORMAT")
+    sf3d_require_review: bool = Field(True, validation_alias="SF3D_REQUIRE_REVIEW")
     
     sam3d_enabled: bool = Field(False, validation_alias="SAM3D_ENABLED")
     sam3d_output_format: str = Field("glb", validation_alias="SAM3D_OUTPUT_FORMAT")

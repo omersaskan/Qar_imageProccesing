@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI 3D Studio — SF3D Generated 3D</title>
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    .ai3d-root { max-width: 860px; margin: 0 auto; padding: 24px 16px; font-family: sans-serif; }
+    .ai3d-header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+    .ai3d-header h1 { font-size: 1.4rem; margin: 0; }
+    .ai3d-badge { background: #7c3aed; color: #fff; border-radius: 4px; padding: 2px 8px; font-size: 0.75rem; font-weight: 700; }
+    .ai3d-notice { background: #fef3c7; border: 1px solid #f59e0b; border-radius: 6px; padding: 12px 16px; margin-bottom: 16px; font-size: 0.88rem; color: #92400e; }
+    .ai3d-notice strong { display: block; margin-bottom: 4px; }
+    .ai3d-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin-bottom: 14px; }
+    .ai3d-card h2 { font-size: 1rem; margin: 0 0 12px; color: #374151; }
+    .ai3d-provider-row { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: #f5f3ff; border: 1px solid #ddd6fe; border-radius: 6px; }
+    .ai3d-provider-name { font-weight: 700; color: #5b21b6; font-size: .95rem; }
+    .ai3d-provider-note { font-size: .78rem; color: #6b7280; }
+    .ai3d-drop { border: 2px dashed #d1d5db; border-radius: 8px; padding: 36px; text-align: center; cursor: pointer; color: #6b7280; transition: border-color .2s; }
+    .ai3d-drop:hover, .ai3d-drop.dragover { border-color: #7c3aed; color: #5b21b6; }
+    .ai3d-drop input { display: none; }
+    .ai3d-preview-img { max-width: 100%; border-radius: 6px; margin-top: 10px; display: none; }
+    .ai3d-btn { display: inline-block; padding: 10px 24px; background: #7c3aed; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: .95rem; font-weight: 600; }
+    .ai3d-btn:disabled { background: #c4b5fd; cursor: not-allowed; }
+    .ai3d-status { padding: 10px 14px; border-radius: 6px; font-size: .88rem; margin-top: 10px; display: none; }
+    .ai3d-status.info  { background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; }
+    .ai3d-status.ok    { background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534; }
+    .ai3d-status.warn  { background: #fef3c7; border: 1px solid #f59e0b; color: #92400e; }
+    .ai3d-status.error { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
+    .ai3d-error-box { display:none; background:#fef2f2; border:1px solid #fecaca; border-radius:6px; padding:12px 16px; margin-bottom:12px; font-size:.88rem; color:#991b1b; }
+    .ai3d-outputs { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+    .ai3d-out-box { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 12px; }
+    .ai3d-out-box h3 { font-size: .8rem; font-weight: 600; color: #6b7280; text-transform: uppercase; margin: 0 0 6px; letter-spacing:.05em; }
+    .ai3d-out-box p { margin: 0; font-size: .88rem; color: #111827; word-break: break-all; }
+    .ai3d-warn-tag { display: inline-block; background: #fef3c7; color: #92400e; border-radius: 4px; padding: 2px 7px; font-size: .78rem; margin: 2px 3px 2px 0; }
+    .ai3d-preview-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+    .ai3d-preview-pair figure { margin: 0; }
+    .ai3d-preview-pair figcaption { font-size: .75rem; color: #6b7280; text-align: center; margin-top: 4px; }
+    .ai3d-preview-pair img { width: 100%; border-radius: 4px; display: none; }
+    .nav-link { display: inline-block; margin-bottom: 12px; color: #7c3aed; text-decoration: none; font-size: .88rem; }
+    .nav-link:hover { text-decoration: underline; }
+    .ai3d-download { display: none; margin-top: 12px; }
+    .ai3d-download a { display: inline-block; padding: 9px 20px; background: #059669; color: #fff; border-radius: 6px; text-decoration: none; font-size: .9rem; font-weight: 600; }
+    .ai3d-download a:hover { background: #047857; }
+  </style>
+</head>
+<body>
+<div class="ai3d-root">
+  <a href="index.html" class="nav-link">← Back to Photogrammetry</a>
+
+  <div class="ai3d-header">
+    <h1>AI 3D Studio</h1>
+    <span class="ai3d-badge">AI GENERATED</span>
+  </div>
+
+  <div class="ai3d-notice">
+    <strong>⚠ AI Generated 3D is estimated geometry, not a true scan.</strong>
+    This pipeline uses Stable Fast 3D to generate a 3D mesh from a single image or video frame.
+    The output is AI-estimated, not photogrammetry-reconstructed.
+    For production-quality real 3D, use the
+    <a href="index.html">Photogrammetry pipeline</a>.
+  </div>
+
+  <!-- Provider -->
+  <div class="ai3d-card">
+    <h2>Provider</h2>
+    <div class="ai3d-provider-row">
+      <div>
+        <div class="ai3d-provider-name">Stable Fast 3D (SF3D)</div>
+        <div class="ai3d-provider-note">
+          Stability AI Community License — check before commercial use.
+          Runs in isolated venv: <code>external/stable-fast-3d/.venv_sf3d</code>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Upload -->
+  <div class="ai3d-card">
+    <h2>Upload Image or Video</h2>
+    <div class="ai3d-drop" id="drop-zone"
+         onclick="document.getElementById('file-input').click()"
+         ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event)">
+      <input type="file" id="file-input" accept="image/*,video/*" onchange="onFileSelected(event)" />
+      <div id="drop-label">
+        Drop image or video here, or click to browse<br/>
+        <small style="color:#9ca3af">JPG, PNG, WebP, MP4, MOV</small>
+      </div>
+    </div>
+    <img id="image-preview" class="ai3d-preview-img" alt="Preview" />
+    <div style="margin-top:12px">
+      <button class="ai3d-btn" id="process-btn" disabled onclick="startProcess()">
+        Generate 3D
+      </button>
+    </div>
+    <div class="ai3d-status info" id="status-box"></div>
+  </div>
+
+  <!-- Provider error banner -->
+  <div id="provider-error-box" class="ai3d-error-box"></div>
+
+  <!-- Results -->
+  <div class="ai3d-card" id="results-card" style="display:none">
+    <h2>Results</h2>
+
+    <div class="ai3d-preview-pair">
+      <figure>
+        <img id="prepared-input-img" alt="Prepared input" />
+        <figcaption>Prepared input (ai3d_input.png)</figcaption>
+      </figure>
+      <figure>
+        <img id="preview-img" alt="Output preview" />
+        <figcaption>Output preview</figcaption>
+      </figure>
+    </div>
+
+    <div class="ai3d-download" id="download-row">
+      <a id="download-link" href="#" download="output.glb">⬇ Download GLB</a>
+    </div>
+
+    <div class="ai3d-outputs" id="outputs-grid"></div>
+    <div id="warnings-box" style="margin-top:8px"></div>
+    <div id="errors-box" style="margin-top:6px"></div>
+  </div>
+</div>
+
+<script>
+  const API = '';
+  let selectedFile = null;
+  let currentSessionId = null;
+
+  function onDragOver(e) { e.preventDefault(); document.getElementById('drop-zone').classList.add('dragover'); }
+  function onDragLeave()  { document.getElementById('drop-zone').classList.remove('dragover'); }
+  function onDrop(e) {
+    e.preventDefault();
+    document.getElementById('drop-zone').classList.remove('dragover');
+    const f = e.dataTransfer.files[0]; if (f) setFile(f);
+  }
+  function onFileSelected(e) { const f = e.target.files[0]; if (f) setFile(f); }
+
+  function setFile(f) {
+    selectedFile = f;
+    document.getElementById('drop-label').textContent = f.name;
+    document.getElementById('process-btn').disabled = false;
+    const p = document.getElementById('image-preview');
+    if (f.type.startsWith('image/')) { p.src = URL.createObjectURL(f); p.style.display = 'block'; }
+    else { p.style.display = 'none'; }
+  }
+
+  function setStatus(msg, type = 'info') {
+    const b = document.getElementById('status-box');
+    b.textContent = msg; b.className = `ai3d-status ${type}`; b.style.display = 'block';
+  }
+
+  async function startProcess() {
+    if (!selectedFile) return;
+    document.getElementById('process-btn').disabled = true;
+    document.getElementById('provider-error-box').style.display = 'none';
+    setStatus('Uploading…', 'info');
+
+    try {
+      const fd = new FormData();
+      fd.append('file', selectedFile, selectedFile.name);
+      fd.append('provider', 'sf3d');
+      const ur = await fetch(`${API}/api/ai-3d/upload`, { method: 'POST', body: fd });
+      if (!ur.ok) { const e = await ur.json(); throw new Error(e.detail || ur.statusText); }
+      const udata = await ur.json();
+      currentSessionId = udata.session_id;
+      setStatus(`Uploaded (${currentSessionId}). Generating 3D…`, 'info');
+      await processSession();
+    } catch (e) {
+      setStatus(`Upload failed: ${e.message}`, 'error');
+      document.getElementById('process-btn').disabled = false;
+    }
+  }
+
+  async function processSession() {
+    try {
+      const r = await fetch(`${API}/api/ai-3d/process/${currentSessionId}`, { method: 'POST' });
+      if (!r.ok) { const e = await r.json(); throw new Error(e.detail || r.statusText); }
+      const data = await r.json();
+
+      if (data.provider_failure_reason) {
+        const eb = document.getElementById('provider-error-box');
+        eb.innerHTML = `<strong>⚠ Provider failure:</strong> ${data.provider_failure_reason}`;
+        if (data.warnings && data.warnings.length) {
+          eb.innerHTML += `<br/><small>${data.warnings.join(' · ')}</small>`;
+        }
+        eb.style.display = 'block';
+      }
+
+      const s = data.status;
+      if (s === 'ok') {
+        setStatus('Generation complete.', 'ok');
+      } else if (s === 'review') {
+        setStatus('Generation complete — review required before use.', 'warn');
+      } else if (s === 'unavailable') {
+        setStatus('Provider unavailable — SF3D not installed/enabled.', 'warn');
+      } else {
+        const errText = (data.errors || []).join(', ') || s;
+        setStatus(`Generation failed: ${errText}`, 'error');
+      }
+      showResults(data.manifest, data.missing_outputs || []);
+    } catch (e) {
+      setStatus(`Processing failed: ${e.message}`, 'error');
+    }
+    document.getElementById('process-btn').disabled = false;
+  }
+
+  function showResults(manifest, missingOutputs) {
+    if (!manifest) return;
+    document.getElementById('results-card').style.display = 'block';
+
+    const t = Date.now();
+    const tryImg = (imgId, endpoint, missing) => {
+      const img = document.getElementById(imgId);
+      if (missing) { img.style.display = 'none'; return; }
+      img.src = `/api/ai-3d/${endpoint}/${currentSessionId}?t=${t}`;
+      img.style.display = 'block';
+      img.onerror = () => { img.style.display = 'none'; };
+    };
+    tryImg('prepared-input-img', 'prepared-input', missingOutputs.includes('prepared_input'));
+    tryImg('preview-img', 'prepared-input', true);   // preview not yet generated
+
+    // Download link
+    if (!missingOutputs.includes('output_glb')) {
+      const dl = document.getElementById('download-row');
+      document.getElementById('download-link').href =
+        `/api/ai-3d/output/${currentSessionId}`;
+      dl.style.display = 'block';
+    }
+
+    // Output grid
+    const grid = document.getElementById('outputs-grid');
+    grid.innerHTML = '';
+    const fields = [
+      ['Provider',    manifest.provider || '—'],
+      ['Model',       manifest.model_name || '—'],
+      ['Status',      manifest.status || '—'],
+      ['Is True Scan', manifest.is_true_scan ? 'Yes' : 'No'],
+      ['Geo Confidence', manifest.geometry_confidence || '—'],
+      ['Review Required', manifest.review_required ? 'Yes' : 'No'],
+    ];
+    fields.forEach(([l, v]) => {
+      grid.innerHTML += `<div class="ai3d-out-box"><h3>${l}</h3><p>${v}</p></div>`;
+    });
+
+    // Warnings
+    const wb = document.getElementById('warnings-box');
+    wb.innerHTML = '';
+    (manifest.warnings || []).forEach(w => {
+      wb.innerHTML += `<span class="ai3d-warn-tag">${w}</span>`;
+    });
+
+    // Errors
+    const eb = document.getElementById('errors-box');
+    eb.innerHTML = '';
+    (manifest.errors || []).forEach(e => {
+      eb.innerHTML += `<span class="ai3d-warn-tag" style="background:#fee2e2;color:#991b1b">${e}</span>`;
+    });
+  }
+</script>
+</body>
+</html>
