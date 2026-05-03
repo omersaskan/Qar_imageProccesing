@@ -1497,13 +1497,19 @@ async def ai3d_process(session_id: str, body: Optional[_AI3DProcessRequest] = No
                         f"SF3D provider unavailable: {err_str}"
                     )
 
+        _worker_meta = manifest.get("worker_metadata") or {}
         response: Dict[str, Any] = {
             "session_id": session_id,
             "status": info["status"],
+            "execution_mode": manifest.get("execution_mode",
+                                           getattr(settings, "sf3d_execution_mode", "disabled")),
             "provider_status": provider_status,
+            "output_glb_path": manifest.get("output_glb_path"),
+            "missing_outputs": missing_outputs,
+            "peak_mem_mb": manifest.get("peak_mem_mb") or _worker_meta.get("peak_mem_mb"),
+            "worker_metadata": _worker_meta,
             "warnings": manifest.get("warnings", []),
             "errors": manifest.get("errors", []),
-            "missing_outputs": missing_outputs,
             "manifest": manifest,
         }
         if provider_failure_reason:

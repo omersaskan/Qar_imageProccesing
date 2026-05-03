@@ -359,7 +359,22 @@ class Settings(BaseSettings):
     sf3d_remesh: str = Field("none", validation_alias="SF3D_REMESH")
     sf3d_output_format: str = Field("glb", validation_alias="SF3D_OUTPUT_FORMAT")
     sf3d_require_review: bool = Field(True, validation_alias="SF3D_REQUIRE_REVIEW")
-    
+
+    # --- SF3D execution mode (Phase 4D) ---
+    # disabled | local_windows | wsl_subprocess | remote_http  (default: disabled)
+    sf3d_execution_mode: str = Field("disabled", validation_alias="SF3D_EXECUTION_MODE")
+    sf3d_wsl_distro: str = Field("Ubuntu-24.04", validation_alias="SF3D_WSL_DISTRO")
+    sf3d_wsl_python_path: str = Field(
+        "/home/lenovo/sf3d_venv/bin/python",
+        validation_alias="SF3D_WSL_PYTHON_PATH",
+    )
+    sf3d_wsl_repo_root: str = Field(
+        "/mnt/c/Users/Lenovo/.gemini/antigravity/scratch/Qar_imageProccesing",
+        validation_alias="SF3D_WSL_REPO_ROOT",
+    )
+    sf3d_wsl_timeout_sec: int = Field(600, validation_alias="SF3D_WSL_TIMEOUT_SEC")
+    sf3d_wsl_output_copy_enabled: bool = Field(True, validation_alias="SF3D_WSL_OUTPUT_COPY_ENABLED")
+
     sam3d_enabled: bool = Field(False, validation_alias="SAM3D_ENABLED")
     sam3d_output_format: str = Field("glb", validation_alias="SAM3D_OUTPUT_FORMAT")
     sam3d_require_review: bool = Field(True, validation_alias="SAM3D_REQUIRE_REVIEW")

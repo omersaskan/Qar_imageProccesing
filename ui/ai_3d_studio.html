@@ -66,13 +66,14 @@
   <div class="ai3d-card">
     <h2>Provider</h2>
     <div class="ai3d-provider-row">
-      <div>
+      <div style="flex:1">
         <div class="ai3d-provider-name">Stable Fast 3D (SF3D)</div>
         <div class="ai3d-provider-note">
           Stability AI Community License — check before commercial use.
-          Runs in isolated venv: <code>external/stable-fast-3d/.venv_sf3d</code>
+          Isolated subprocess worker · <span id="exec-mode-label">mode: —</span>
         </div>
       </div>
+      <span id="exec-mode-badge" style="display:none;background:#1e3a5f;color:#93c5fd;border-radius:4px;padding:2px 8px;font-size:.75rem;font-weight:700;letter-spacing:.04em"></span>
     </div>
   </div>
 
@@ -231,15 +232,30 @@
       dl.style.display = 'block';
     }
 
+    // Execution mode badge + label
+    const execMode = manifest.execution_mode || '—';
+    document.getElementById('exec-mode-label').textContent = `mode: ${execMode}`;
+    const badge = document.getElementById('exec-mode-badge');
+    if (execMode !== 'disabled' && execMode !== '—') {
+      badge.textContent = execMode.toUpperCase().replace('_', ' ');
+      badge.style.display = 'inline-block';
+    }
+
     // Output grid
+    const _wm = manifest.worker_metadata || {};
+    const _sizeFmt = (b) => b ? `${(b/1024).toFixed(0)} KB (${b.toLocaleString()} bytes)` : '—';
     const grid = document.getElementById('outputs-grid');
     grid.innerHTML = '';
     const fields = [
-      ['Provider',    manifest.provider || '—'],
-      ['Model',       manifest.model_name || '—'],
-      ['Status',      manifest.status || '—'],
-      ['Is True Scan', manifest.is_true_scan ? 'Yes' : 'No'],
+      ['Provider',       manifest.provider || '—'],
+      ['Execution Mode', execMode],
+      ['Model',          manifest.model_name || '—'],
+      ['Device',         _wm.device || '—'],
+      ['Status',         manifest.status || '—'],
+      ['Is True Scan',   manifest.is_true_scan ? 'Yes' : 'No'],
       ['Geo Confidence', manifest.geometry_confidence || '—'],
+      ['Peak GPU Mem',   manifest.peak_mem_mb ? `${manifest.peak_mem_mb} MB` : '—'],
+      ['Output Size',    _sizeFmt(_wm.output_size_bytes)],
       ['Review Required', manifest.review_required ? 'Yes' : 'No'],
     ];
     fields.forEach(([l, v]) => {

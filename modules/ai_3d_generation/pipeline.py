@@ -151,12 +151,13 @@ def generate_ai_3d(
     final_status = gate["verdict"]
 
     # ── 7. Manifest ───────────────────────────────────────────────────────────
+    _prov_status = provider_result.get("status", "failed")
     manifest = build_manifest(
         session_id=session_id,
         source_input_path=input_file_path,
         input_type=input_type,
         provider=provider.name,
-        provider_status=provider_result.get("status", "failed"),
+        provider_status=_prov_status,
         model_name=provider_result.get("model_name"),
         license_note=provider.license_note,
         selected_frame_path=selected_frame_path,
@@ -171,6 +172,13 @@ def generate_ai_3d(
         warnings=list(dict.fromkeys(warnings)),
         errors=errors,
         review_required=review_required,
+        # Phase 4D
+        execution_mode=getattr(settings, "sf3d_execution_mode", "disabled"),
+        worker_metadata=provider_result.get("metadata", {}),
+        provider_failure_reason=(
+            provider_result.get("error")
+            if _prov_status != "ok" else None
+        ),
     )
     write_manifest(manifest, str(manifests_dir))
 

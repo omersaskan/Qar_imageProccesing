@@ -102,3 +102,8 @@ external/
 *.pt
 *.pth
 *.ckpt
+
+# Phase 4D — AI 3D generated artifacts (never commit model weights or GLB outputs)
+data/ai_3d/
+*.safetensors
+# HuggingFace token is in ~/.cache/huggingface/token (outside repo) — never commit it

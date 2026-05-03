@@ -83,6 +83,7 @@ class TestSF3DProviderAvailability(unittest.TestCase):
         from modules.ai_3d_generation.sf3d_provider import SF3DProvider
         defaults = {
             "sf3d_enabled": True,
+            "sf3d_execution_mode": "local_windows",   # Phase 4D: must be explicit
             "sf3d_python_path": "/fake/python.exe",
             "sf3d_worker_script": "/fake/sf3d_worker.py",
         }
@@ -144,6 +145,7 @@ class TestSF3DProviderGenerate(unittest.TestCase):
         from modules.ai_3d_generation.sf3d_provider import SF3DProvider
         mock_settings = MagicMock(
             sf3d_enabled=True,
+            sf3d_execution_mode="local_windows",   # Phase 4D: explicit mode
             sf3d_python_path=tmp_py,
             sf3d_worker_script=tmp_worker,
             sf3d_device="auto",
@@ -649,6 +651,279 @@ class TestSF3DWorkerDryRun(unittest.TestCase):
         data = json.loads(result.stdout.strip())
         self.assertEqual(data["status"], "unavailable")
         self.assertEqual(data["error_code"], "sf3d_package_missing")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 4D — WSL2 path mapping
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestSF3DWSLPathMapping(unittest.TestCase):
+
+    def _w2w(self, p): from modules.ai_3d_generation.sf3d_provider import _windows_to_wsl_path; return _windows_to_wsl_path(p)
+    def _w2n(self, p): from modules.ai_3d_generation.sf3d_provider import _wsl_to_windows_path; return _wsl_to_windows_path(p)
+
+    def test_c_drive_to_wsl(self):
+        result = self._w2w(r"C:\Users\Lenovo\input.png")
+        self.assertEqual(result, "/mnt/c/Users/Lenovo/input.png")
+
+    def test_spaces_in_path(self):
+        result = self._w2w(r"C:\My Files\output dir\out.glb")
+        self.assertEqual(result, "/mnt/c/My Files/output dir/out.glb")
+
+    def test_wsl_to_windows(self):
+        result = self._w2n("/mnt/c/Users/Lenovo/scratch/output.glb")
+        self.assertEqual(result, r"C:\Users\Lenovo\scratch\output.glb")
+
+    def test_already_posix_unchanged(self):
+        result = self._w2w("/tmp/sf3d_smoke/output.glb")
+        self.assertEqual(result, "/tmp/sf3d_smoke/output.glb")
+
+    def test_non_mnt_wsl_path_unchanged(self):
+        result = self._w2n("/tmp/sf3d/output.glb")
+        self.assertEqual(result, "/tmp/sf3d/output.glb")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 4D — WSL2 provider mode
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestSF3DProviderWSLMode(unittest.TestCase):
+
+    def _wsl_provider(self, worker_exists=True, **overrides):
+        """Build an SF3DProvider with wsl_subprocess mode settings."""
+        import os
+        from modules.ai_3d_generation.sf3d_provider import SF3DProvider
+
+        # Create a real worker file on disk so availability check passes
+        if worker_exists:
+            wf = tempfile.NamedTemporaryFile(suffix=".py", delete=False)
+            wf.close()
+            worker_win = wf.name
+        else:
+            worker_win = r"C:\nonexistent\sf3d_worker.py"
+
+        # The wsl_repo_root is set to a path that maps to worker_win's location.
+        # worker_wsl = f"{repo_root}/scripts/sf3d_worker.py"
+        # worker_win = _wsl_to_windows_path(worker_wsl)
+        # We mock _wsl_to_windows_path by providing a repo_root that maps correctly.
+        # For simplicity, set worker via direct mock.
+        defaults = dict(
+            sf3d_enabled=True,
+            sf3d_execution_mode="wsl_subprocess",
+            sf3d_wsl_python_path="/home/lenovo/sf3d_venv/bin/python",
+            sf3d_wsl_distro="Ubuntu-24.04",
+            sf3d_wsl_repo_root="/mnt/c/fake/repo",
+            sf3d_wsl_timeout_sec=60,
+            sf3d_device="cuda",
+            sf3d_input_size=512,
+            sf3d_texture_resolution=512,
+            sf3d_remesh="none",
+            sf3d_output_format="glb",
+        )
+        defaults.update(overrides)
+        mock_settings = MagicMock(**defaults)
+        p = SF3DProvider.__new__(SF3DProvider)
+        p._settings = mock_settings
+        # Patch the availability worker-path check to avoid FS dependency
+        p._test_worker_exists = worker_exists
+        return p
+
+    def _make_wsl_provider_available(self):
+        """Return a provider whose is_available() returns (True, '') via mock."""
+        from modules.ai_3d_generation.sf3d_provider import SF3DProvider
+        mock_settings = MagicMock(
+            sf3d_enabled=True,
+            sf3d_execution_mode="wsl_subprocess",
+            sf3d_wsl_python_path="/home/lenovo/sf3d_venv/bin/python",
+            sf3d_wsl_distro="Ubuntu-24.04",
+            sf3d_wsl_repo_root="/mnt/c/fake/repo",
+            sf3d_wsl_timeout_sec=60,
+            sf3d_device="cuda",
+            sf3d_input_size=512,
+            sf3d_texture_resolution=512,
+            sf3d_remesh="none",
+            sf3d_output_format="glb",
+        )
+        p = SF3DProvider.__new__(SF3DProvider)
+        p._settings = mock_settings
+        return p
+
+    def _run_wsl(self, stdout="", stderr="", returncode=0, timeout=False):
+        p = self._make_wsl_provider_available()
+        with patch("modules.ai_3d_generation.sf3d_provider.SF3DProvider.is_available",
+                   return_value=(True, "")):
+            with patch("subprocess.run") as mock_run:
+                if timeout:
+                    import subprocess as sp
+                    mock_run.side_effect = sp.TimeoutExpired(cmd="wsl.exe", timeout=60)
+                else:
+                    mock_run.return_value = MagicMock(
+                        stdout=stdout, stderr=stderr, returncode=returncode
+                    )
+                return p.generate("C:\\input\\img.png", "C:\\output\\dir")
+
+    def test_execution_mode_disabled_unavailable(self):
+        from modules.ai_3d_generation.sf3d_provider import SF3DProvider
+        mock_s = MagicMock(sf3d_enabled=True, sf3d_execution_mode="disabled")
+        p = SF3DProvider.__new__(SF3DProvider)
+        p._settings = mock_s
+        avail, reason = p.is_available()
+        self.assertFalse(avail)
+        self.assertEqual(reason, "sf3d_execution_mode_disabled")
+
+    def test_wsl_missing_python_unavailable(self):
+        from modules.ai_3d_generation.sf3d_provider import SF3DProvider
+        mock_s = MagicMock(
+            sf3d_enabled=True,
+            sf3d_execution_mode="wsl_subprocess",
+            sf3d_wsl_python_path="",
+        )
+        p = SF3DProvider.__new__(SF3DProvider)
+        p._settings = mock_s
+        avail, reason = p.is_available()
+        self.assertFalse(avail)
+        self.assertEqual(reason, "sf3d_wsl_python_missing")
+
+    def test_wsl_missing_distro_unavailable(self):
+        from modules.ai_3d_generation.sf3d_provider import SF3DProvider
+        mock_s = MagicMock(
+            sf3d_enabled=True,
+            sf3d_execution_mode="wsl_subprocess",
+            sf3d_wsl_python_path="/home/lenovo/sf3d_venv/bin/python",
+            sf3d_wsl_distro="",
+        )
+        p = SF3DProvider.__new__(SF3DProvider)
+        p._settings = mock_s
+        avail, reason = p.is_available()
+        self.assertFalse(avail)
+        self.assertEqual(reason, "sf3d_wsl_distro_missing")
+
+    def test_wsl_command_construction(self):
+        """_generate_wsl_subprocess builds correct wsl.exe command."""
+        p = self._make_wsl_provider_available()
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(stdout="", stderr="", returncode=1)
+            with patch("modules.ai_3d_generation.sf3d_provider.SF3DProvider.is_available",
+                       return_value=(True, "")):
+                p.generate("C:\\Users\\foo\\img.png", "C:\\Users\\foo\\out")
+        cmd = mock_run.call_args[0][0]
+        self.assertEqual(cmd[0], "wsl.exe")
+        self.assertIn("-d", cmd)
+        self.assertIn("Ubuntu-24.04", cmd)
+        self.assertIn("--", cmd)
+        self.assertIn("/home/lenovo/sf3d_venv/bin/python", cmd)
+        # WSL-converted input path
+        self.assertIn("/mnt/c/Users/foo/img.png", cmd)
+
+    def test_wsl_worker_ok_json(self):
+        with tempfile.NamedTemporaryFile(suffix=".glb", delete=False) as glb:
+            glb_win_path = glb.name
+        # Simulate worker returning a /mnt/c/ path (convert back from Windows temp)
+        from modules.ai_3d_generation.sf3d_provider import _windows_to_wsl_path
+        glb_wsl_path = _windows_to_wsl_path(glb_win_path)
+        payload = json.dumps({
+            "status": "ok",
+            "output_path": glb_wsl_path,
+            "model_name": "stable-fast-3d",
+            "preview_image_path": None,
+            "warnings": ["ai_generated_not_true_scan"],
+            "metadata": {"device": "cuda", "peak_mem_mb": 6173.5, "output_size_bytes": 1346664},
+        })
+        r = self._run_wsl(stdout=payload)
+        self.assertEqual(r["status"], "ok")
+        self.assertIsNotNone(r["output_path"])
+        self.assertIn("ai_generated_not_true_scan", r["warnings"])
+        self.assertEqual(r["metadata"].get("device"), "cuda")
+        self.assertEqual(r["metadata"].get("execution_mode"), "wsl_subprocess")
+
+    def test_wsl_worker_failed_json(self):
+        payload = json.dumps({
+            "status": "failed",
+            "error_code": "sf3d_inference_error",
+            "message": "CUDA OOM",
+        })
+        r = self._run_wsl(stdout=payload)
+        self.assertEqual(r["status"], "failed")
+        self.assertEqual(r["error_code"], "sf3d_inference_error")
+
+    def test_wsl_worker_invalid_json(self):
+        r = self._run_wsl(stdout="not-valid-json")
+        self.assertEqual(r["status"], "failed")
+        self.assertEqual(r["error_code"], "sf3d_worker_invalid_json")
+
+    def test_wsl_worker_unavailable(self):
+        payload = json.dumps({
+            "status": "unavailable",
+            "error_code": "sf3d_model_auth_required",
+            "message": "HF token required",
+        })
+        r = self._run_wsl(stdout=payload)
+        self.assertEqual(r["status"], "unavailable")
+
+    def test_wsl_output_path_normalization(self):
+        """WSL path /mnt/c/... in worker JSON is converted to Windows C:\\..."""
+        with tempfile.NamedTemporaryFile(suffix=".glb", delete=False) as glb:
+            glb_win = glb.name
+        from modules.ai_3d_generation.sf3d_provider import _windows_to_wsl_path
+        glb_wsl = _windows_to_wsl_path(glb_win)
+        payload = json.dumps({
+            "status": "ok",
+            "output_path": glb_wsl,
+            "model_name": "stable-fast-3d",
+            "warnings": [],
+            "metadata": {},
+        })
+        r = self._run_wsl(stdout=payload)
+        if r["status"] == "ok":
+            # output_path should be the Windows form
+            self.assertNotIn("/mnt/", r["output_path"])
+            self.assertIn(":\\", r["output_path"])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 4D — Manifest execution_mode + worker_metadata
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestManifestExecutionMode(unittest.TestCase):
+
+    def _build(self, **kw):
+        from modules.ai_3d_generation.manifest import build_manifest
+        base = dict(
+            session_id="s1", source_input_path="/in/img.jpg", input_type="image",
+            provider="sf3d", provider_status="ok", model_name="stable-fast-3d",
+            license_note="test", selected_frame_path=None, prepared_image_path=None,
+            preprocessing={}, postprocessing={},
+            quality_gate={"verdict": "ok", "output_exists": True, "warnings": [], "reason": None},
+            output_glb_path="/out/output.glb", output_format="glb",
+            preview_image_path=None, status="ok",
+            warnings=[], errors=[],
+        )
+        base.update(kw)
+        return build_manifest(**base)
+
+    def test_execution_mode_field_present(self):
+        m = self._build(execution_mode="wsl_subprocess")
+        self.assertEqual(m["execution_mode"], "wsl_subprocess")
+
+    def test_worker_metadata_peak_mem_propagated(self):
+        m = self._build(
+            worker_metadata={"device": "cuda", "peak_mem_mb": 6173.5, "output_size_bytes": 1346664},
+        )
+        self.assertEqual(m["peak_mem_mb"], 6173.5)
+        self.assertEqual(m["worker_metadata"]["device"], "cuda")
+        self.assertEqual(m["worker_metadata"]["output_size_bytes"], 1346664)
+
+    def test_provider_failure_reason_present(self):
+        m = self._build(
+            provider_status="unavailable",
+            status="unavailable",
+            provider_failure_reason="sf3d_execution_mode_disabled",
+        )
+        self.assertEqual(m["provider_failure_reason"], "sf3d_execution_mode_disabled")
+
+    def test_missing_outputs_default_empty(self):
+        m = self._build()
+        self.assertEqual(m["missing_outputs"], [])
 
 
 if __name__ == "__main__":

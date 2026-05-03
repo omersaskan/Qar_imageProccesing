@@ -28,7 +28,13 @@ def build_manifest(
     errors: List[str],
     review_required: bool = True,
     enabled: bool = True,
+    # ── Phase 4D additions (all optional for backward compat) ─────────────────
+    execution_mode: str = "disabled",
+    worker_metadata: Optional[Dict[str, Any]] = None,
+    provider_failure_reason: Optional[str] = None,
+    missing_outputs: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
+    _worker_meta = worker_metadata or {}
     return {
         "enabled": enabled,
         "mode": "ai_generated_3d",
@@ -46,6 +52,7 @@ def build_manifest(
         "provider_status": provider_status,
         "model_name": model_name,
         "license_note": license_note,
+        "execution_mode": execution_mode,
 
         # Input
         "source_input_path": source_input_path,
@@ -62,12 +69,18 @@ def build_manifest(
         "output_glb_path": output_glb_path,
         "output_format": output_format,
         "preview_image_path": preview_image_path,
+        "missing_outputs": missing_outputs or [],
+
+        # Worker runtime metadata
+        "worker_metadata": _worker_meta,
+        "peak_mem_mb": _worker_meta.get("peak_mem_mb"),
 
         # Status
         "status": status,
         "review_required": review_required,
         "warnings": warnings,
         "errors": errors,
+        "provider_failure_reason": provider_failure_reason,
     }
 
 
