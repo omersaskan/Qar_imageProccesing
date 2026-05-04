@@ -25,6 +25,7 @@ from typing import Dict, Any, List, Optional
 
 from .input_preprocessor import preprocess_input
 from .candidate_selector import score_candidate
+from .sanitization import sanitize_json_like
 
 logger = logging.getLogger("ai_3d_generation.candidate_runner")
 
@@ -181,11 +182,12 @@ def run_candidates_sequential(
         cand_meta["score"] = score
         cand_meta["score_breakdown"] = breakdown
 
-        # 5. Write per-candidate manifest
+        # 5. Write per-candidate manifest (sanitized)
         try:
             cand_manifest_path = cand_dir / "candidate_manifest.json"
+            sanitized_cand_meta = sanitize_json_like(cand_meta)
             cand_manifest_path.write_text(
-                json.dumps(cand_meta, indent=2, default=str),
+                json.dumps(sanitized_cand_meta, indent=2, default=str),
                 encoding="utf-8",
             )
         except Exception as exc:

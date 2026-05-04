@@ -64,6 +64,15 @@ def preprocess_input(
     alpha_bbox = None
     foreground_ratio_estimate = None
 
+    # ── 0. Harden input_size ──────────────────────────────────────────────────
+    original_input_size = input_size
+    if input_size < 64:
+        input_size = 64
+        warnings.append(f"input_size_clamped:{original_input_size}->{input_size}")
+    elif input_size > 1024:
+        input_size = 1024
+        warnings.append(f"input_size_clamped:{original_input_size}->{input_size}")
+
     img = cv2.imread(source_image_path)
     if img is None:
         return _preprocess_error(source_image_path, output_dir, "Cannot load source image")
@@ -73,6 +82,7 @@ def preprocess_input(
 
     # ── 1. Determine crop region & method ─────────────────────────────────────
     crop_method = "center_square_crop"
+    bbox_source = "fallback_center_crop"
     
     if bbox is not None:
         x0, y0, x1, y1 = bbox
@@ -80,29 +90,40 @@ def preprocess_input(
         y0 = max(0, y0)
         x1 = min(w, x1)
         y1 = min(h, y1)
-        actual_bbox = [x0, y0, x1, y1]
-        crop_method = "center_square_crop"
-    elif mask is not None:
-        actual_bbox = _bbox_from_mask(mask, h, w)
-        if actual_bbox is None:
-            warnings.append("mask_empty_using_full_image")
-            # fallback to full image
-            actual_bbox = [0, 0, w, h]
-            crop_method = "resize_square_pad"
-        else:
+        
+        # Validate bbox
+        if x1 > x0 and y1 > y0 and (x1 - x0) >= 4 and (y1 - y0) >= 4:
+            actual_bbox = [x0, y0, x1, y1]
             crop_method = "center_square_crop"
-    else:
-        # Safe center crop: 80% of shorter dimension
-        side = int(min(h, w) * 0.80)
-        cx, cy = w // 2, h // 2
-        actual_bbox = [cx - side // 2, cy - side // 2,
-                       cx + side // 2, cy + side // 2]
-        crop_method = "fallback_center_crop"
-        warnings.append("no_mask_or_bbox_using_center_crop")
+            bbox_source = "provided_bbox"
+        else:
+            warnings.append(f"invalid_bbox_using_center_crop:{bbox}")
+            bbox = None # Fallback to center crop below
+
+    if bbox is None:
+        if mask is not None:
+            actual_bbox = _bbox_from_mask(mask, h, w)
+            if actual_bbox is None:
+                warnings.append("mask_empty_using_full_image")
+                actual_bbox = [0, 0, w, h]
+                crop_method = "resize_square_pad"
+                bbox_source = "full_image_fallback"
+            else:
+                crop_method = "center_square_crop"
+                bbox_source = "provided_mask"
+        else:
+            # Safe center crop: 80% of shorter dimension
+            side = int(min(h, w) * 0.80)
+            cx, cy = w // 2, h // 2
+            actual_bbox = [cx - side // 2, cy - side // 2,
+                           cx + side // 2, cy + side // 2]
+            crop_method = "fallback_center_crop"
+            bbox_source = "fallback_center_crop"
+            warnings.append("no_mask_or_bbox_using_center_crop")
 
     # ── 2. Crop ───────────────────────────────────────────────────────────────
     x0, y0, x1, y1 = actual_bbox
-    # Add padding around the bbox
+    # Add padding around the bbox to get crop_bbox
     pad_x = max(4, int((x1 - x0) * bbox_padding_ratio))
     pad_y = max(4, int((y1 - y0) * bbox_padding_ratio))
     
@@ -110,6 +131,10 @@ def preprocess_input(
     crop_y0 = max(0, y0 - pad_y)
     crop_x1 = min(w, x1 + pad_x)
     crop_y1 = min(h, y1 + pad_y)
+    
+    final_crop_bbox = [crop_x0, crop_y0, crop_x1, crop_y1]
+    crop_width = crop_x1 - crop_x0
+    crop_height = crop_y1 - crop_y0
     
     cropped = img[crop_y0:crop_y1, crop_x0:crop_x1]
 
@@ -124,7 +149,8 @@ def preprocess_input(
     out_path = str(out_dir / "ai3d_input.png")
     cv2.imwrite(out_path, resized)
 
-    logger.debug("Preprocessed input → %s  bbox=%s  size=%d", out_path, actual_bbox, input_size)
+    logger.debug("Preprocessed input → %s  bbox=%s  crop=%s  size=%d", 
+                 out_path, actual_bbox, final_crop_bbox, input_size)
 
     return {
         "enabled": True,
@@ -136,9 +162,12 @@ def preprocess_input(
         "original_height": original_height,
         "output_width": output_width,
         "output_height": output_height,
+        "crop_width": crop_width,
+        "crop_height": crop_height,
         "crop_method": crop_method,
+        "bbox_source": bbox_source,
         "bbox": actual_bbox,
-        "crop_bbox": actual_bbox,  # Backward compatibility
+        "crop_bbox": final_crop_bbox,
         "bbox_padding_ratio": bbox_padding_ratio,
         "background_removed": background_removed,
         "mask_source": mask_source,
