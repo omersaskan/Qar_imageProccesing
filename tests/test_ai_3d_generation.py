@@ -1772,14 +1772,14 @@ class TestPipelinePolish(unittest.TestCase):
             provider.output_format = "glb"
             
             with patch("shutil.copy2") as mock_copy:
-                generate_ai_3d("sess1", "/fake.mp4", d, provider, {})
-                
+                generate_ai_3d("sess1", "/fake.mp4", d, "sf3d", {})
+
                 # Verify source frame was copied to selected_frame.jpg
                 mock_copy.assert_any_call(str(src_path), str(Path(d) / "derived" / "selected_frame.jpg"))
-                
+
                 # Verify manifest gets correct path
                 args, kwargs = mock_build.call_args
-                self.assertTrue(kwargs["selected_frame_path"].endswith("derived\\selected_frame.jpg") or 
+                self.assertTrue(kwargs["selected_frame_path"].endswith("derived\\selected_frame.jpg") or
                                 kwargs["selected_frame_path"].endswith("derived/selected_frame.jpg"))
 
 if __name__ == "__main__":

@@ -13,24 +13,38 @@ class RodinProvider(AI3DRemoteAsyncProviderBase):
     is_experimental: bool = True
 
     def is_available(self) -> Tuple[bool, str]:
-        """Check if Rodin is enabled and correctly configured."""
+        """Check if Rodin is enabled and correctly configured.
+
+        Gate order (all must pass):
+          1. Global remote provider switch (ai_3d_remote_providers_enabled)
+          2. Provider-level switch (rodin_enabled)
+          3. Mock mode must be local_dev only
+          4. API key must be present
+          5. Real API not implemented guard
+        """
+        # Gate 1: global remote provider master switch
+        if not getattr(settings, "ai_3d_remote_providers_enabled", False):
+            return False, "remote_providers_disabled_globally"
+
+        # Gate 2: provider-level switch
         if not getattr(settings, "rodin_enabled", False):
             return False, "Rodin provider is disabled in settings (RODIN_ENABLED=false)"
-        
-        # Production guard for mock mode
+
+        # Gate 3: Production guard for mock mode
         env_value = getattr(settings.env, "value", settings.env)
         if getattr(settings, "rodin_mock_mode", False) and env_value != "local_dev":
             return False, "Rodin mock mode is prohibited in non-local_dev environment"
 
+        # Gate 4: API key must exist
         if not getattr(settings, "rodin_api_key", ""):
             return False, "Rodin API key is missing (RODIN_API_KEY)"
-        
-        # Real API not implemented check
+
+        # Gate 5: Real API not implemented
         if not getattr(settings, "rodin_mock_mode", False):
-             # When mock is false, we'd normally check if the real client is initialized.
-             # Since it's not implemented yet, we fail fast.
-             return False, "rodin_real_api_not_implemented"
-             
+            # When mock is false, we'd normally check if the real client is initialized.
+            # Since it's not implemented yet, we fail fast.
+            return False, "rodin_real_api_not_implemented"
+
         return True, ""
 
     def create_task(

@@ -405,6 +405,12 @@ class Settings(BaseSettings):
     rodin_mock_mode: bool = Field(False, validation_alias="RODIN_MOCK_MODE")
     rodin_timeout_sec: int = Field(900, validation_alias="RODIN_TIMEOUT_SEC")
 
+    # --- Global remote provider safety switches (Phase 1 stabilization) ---
+    # Master kill-switch for ALL external/remote AI 3D providers.
+    # Must be explicitly set to True in .env before any remote provider can activate.
+    ai_3d_remote_providers_enabled: bool = Field(False, validation_alias="AI_3D_REMOTE_PROVIDERS_ENABLED")
+    # Require explicit user consent for external providers. Must not be disabled.
+    ai_3d_require_external_consent: bool = Field(True, validation_alias="AI_3D_REQUIRE_EXTERNAL_CONSENT")
 
     tripo_enabled: bool = Field(False, validation_alias="TRIPO_ENABLED")
     tripo_api_key: str = Field("", validation_alias="TRIPO_API_KEY")

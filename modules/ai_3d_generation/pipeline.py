@@ -32,15 +32,18 @@ logger = logging.getLogger("ai_3d_generation.pipeline")
 
 
 def _get_provider(provider_name: str):
+    """Resolve the provider by name.
+
+    Accepted providers: sf3d, rodin.
+    Unknown names raise ValueError — no silent fallback.
+    """
     if provider_name == "sf3d":
         from .sf3d_provider import SF3DProvider
         return SF3DProvider()
     if provider_name == "rodin":
         from .rodin_provider import RodinProvider
         return RodinProvider()
-    # Fallback
-    from .sf3d_provider import SF3DProvider
-    return SF3DProvider()
+    raise ValueError(f"unknown_ai3d_provider:{provider_name}")
 
 
 def generate_ai_3d(

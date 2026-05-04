@@ -1655,6 +1655,23 @@ async def ai3d_process(session_id: str, body: Optional[_AI3DProcessRequest] = No
         if provider_failure_reason:
             response["provider_failure_reason"] = provider_failure_reason
         return response
+    except HTTPException:
+        raise
+    except ValueError as e:
+        info["status"] = "failed"
+        err_str = str(e)
+        if err_str.startswith("unknown_ai3d_provider:"):
+            provider_name_bad = err_str.split(":", 1)[1]
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "unknown_ai3d_provider",
+                    "provider": provider_name_bad,
+                },
+            )
+        from modules.ai_3d_generation.sanitization import sanitize_external_provider_error
+        err_msg = sanitize_external_provider_error(err_str)
+        raise HTTPException(status_code=400, detail=f"Invalid request: {err_msg}")
     except Exception as e:
         info["status"] = "failed"
         from modules.ai_3d_generation.sanitization import sanitize_external_provider_error
