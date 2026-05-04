@@ -72,3 +72,38 @@ def test_rodin_mock_mode_prohibited_in_production(monkeypatch):
     avail, reason = provider.is_available()
     assert avail is False
     assert "prohibited" in reason.lower()
+
+def test_rodin_unavailable_metadata(monkeypatch):
+    """Verify that unavailable results contain required Phase 1.5 metadata."""
+    monkeypatch.setattr(settings, "rodin_enabled", False)
+    provider = RodinProvider()
+    
+    # We must use safe_generate to get the normalised unavailable result with metadata
+    result = provider.safe_generate("input.jpg", "output_dir")
+    
+    assert result["status"] == "unavailable"
+    assert result["metadata"]["external_provider"] is True
+    assert result["metadata"]["external_provider_name"] == "rodin"
+    assert result["metadata"]["external_status"] == "unavailable"
+    assert result["metadata"]["provider_poll_count"] == 0
+    assert "provider_latency_sec" in result["metadata"]
+    assert "privacy_notice" in result["metadata"]
+    assert "sanitized_error" in result["metadata"]
+    assert result["metadata"]["sanitized_error"] == result["error"]
+
+def test_rodin_unavailable_no_secret_leak(monkeypatch):
+    """Verify that unavailable reason does not leak secret in metadata."""
+    monkeypatch.setattr(settings, "rodin_enabled", True)
+    monkeypatch.setattr(settings, "rodin_api_key", "MY_SECRET_KEY")
+    monkeypatch.setattr(settings, "rodin_mock_mode", False) # Force unavailable if real API not implemented
+    
+    provider = RodinProvider()
+    # Mock is_available to return a reason with a secret
+    monkeypatch.setattr(provider, "is_available", lambda: (False, "Failed with MY_SECRET_KEY"))
+    
+    result = provider.safe_generate("input.jpg", "output_dir")
+    
+    assert "MY_SECRET_KEY" not in result["error"]
+    assert "MY_SECRET_KEY" not in result["metadata"]["sanitized_error"]
+    assert "[REDACTED]" in result["error"]
+

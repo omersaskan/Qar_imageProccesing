@@ -99,6 +99,40 @@ class AI3DRemoteAsyncProviderBase(AI3DProviderBase):
         Returns (local_path: str | None, error: str | None).
         """
 
+    def safe_generate(
+        self,
+        input_image_path: str,
+        output_dir: str,
+        options: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Override to ensure external provider metadata is included even on unavailability.
+        """
+        import time
+        _t_start = time.monotonic()
+
+        avail, reason = self.is_available()
+        if not avail:
+            res = _unavailable_result(self.name, self.output_format, reason)
+            # Ensure sanitized_error is in metadata (Phase 1.5)
+            res["metadata"]["sanitized_error"] = res["error"]
+            res["metadata"].update({
+                "external_provider": True,
+                "external_provider_name": self.name,
+                "external_status": "unavailable",
+                "provider_latency_sec": round(time.monotonic() - _t_start, 2),
+                "provider_poll_count": 0,
+                "privacy_notice": getattr(self, "privacy_notice", None) or "External provider terms of service apply.",
+            })
+            return res
+
+        try:
+            result = self.generate(input_image_path, output_dir, options)
+            return _normalise_status(result, self.name, self.output_format)
+        except Exception as exc:
+            return _failed_result(self.name, self.output_format, str(exc))
+
+
     def generate(
         self,
         input_image_path: str,

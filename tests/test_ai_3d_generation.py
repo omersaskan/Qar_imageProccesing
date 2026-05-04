@@ -17,6 +17,7 @@ import unittest
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 from unittest.mock import MagicMock, patch
+from PIL import Image
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -622,8 +623,9 @@ class TestSF3DWorkerDryRun(unittest.TestCase):
     def test_dry_run_existing_image(self):
         import subprocess, sys
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
-            f.write(b"\x89PNG\r\n")
+            Image.new("RGB", (1, 1)).save(f.name, "PNG")
             img_path = f.name
+
         worker = self._worker_path()
         result = subprocess.run(
             [sys.executable, worker, "--image", img_path,
@@ -638,8 +640,9 @@ class TestSF3DWorkerDryRun(unittest.TestCase):
         """When sf3d package is absent, worker exits 0 with status=unavailable."""
         import subprocess, sys
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
-            f.write(b"\x89PNG\r\n")
+            Image.new("RGB", (1, 1)).save(f.name, "PNG")
             img_path = f.name
+
         worker = self._worker_path()
         result = subprocess.run(
             [sys.executable, worker, "--image", img_path, "--output-dir", "/tmp/out"],

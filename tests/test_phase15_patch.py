@@ -6,6 +6,7 @@ from modules.ai_3d_generation.manifest import build_manifest
 from modules.ai_3d_generation.sanitization import sanitize_text
 from modules.ai_3d_generation.multi_input import load_session_inputs, write_session_inputs
 from modules.ai_3d_generation.provider_base import _normalise_status
+from unittest.mock import patch
 
 def test_sanitization_direct_replacement(monkeypatch):
     """Verify that actual configured secrets are redacted regardless of prefix."""
@@ -91,11 +92,10 @@ def test_input_mode_normalization_in_manifest():
     provider.output_format = "glb"
     
     # Mocking build_manifest to see what it receives
-    with MagicMock() as mock_build:
-        import modules.ai_3d_generation.pipeline as pipeline
-        pipeline.build_manifest = mock_build
-        
+    # Use patch to avoid direct assignment contamination
+    with patch("modules.ai_3d_generation.pipeline.build_manifest") as mock_build:
         _build_failed_manifest("s1", "i.jpg", "image", provider, [], [], None)
+
         
         # Check first call args
         args, kwargs = mock_build.call_args

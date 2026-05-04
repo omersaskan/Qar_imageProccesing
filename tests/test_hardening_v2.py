@@ -9,6 +9,7 @@ from modules.shared_contracts.models import CaptureSession, ReconstructionJobDra
 from modules.shared_contracts.lifecycle import AssetStatus, ReconstructionStatus
 from modules.reconstruction_engine.output_manifest import OutputManifest
 from modules.reconstruction_engine.job_manager import JobManager
+from PIL import Image
 
 def test_output_manifest_safety_defaults():
     # Verify that the new safety fields have the correct defaults
@@ -151,7 +152,7 @@ def test_unique_job_ids_no_collision(tmp_path):
     session_dir.mkdir()
     frames_dir = session_dir / "frames"
     frames_dir.mkdir()
-    (frames_dir / "f1.jpg").write_text("d")
+    Image.new("RGB", (1, 1)).save(frames_dir / "f1.jpg", "JPEG")
     
     session = CaptureSession(
         session_id=session_id,
@@ -197,7 +198,7 @@ def test_coverage_recapture_reasons(tmp_path):
     frames_dir = session_dir / "frames"
     frames_dir.mkdir()
     f1 = frames_dir / "f1.jpg"
-    f1.write_text("d")
+    Image.new("RGB", (1, 1)).save(f1, "JPEG")
     
     session = CaptureSession(
         session_id=session_id,
@@ -308,9 +309,9 @@ def test_handle_reconstruction_unique_job_id(tmp_path):
     session_dir.mkdir()
     frames_dir = session_dir / "frames"
     frames_dir.mkdir()
-    (frames_dir / "f1.jpg").write_text("d")
-    (frames_dir / "f2.jpg").write_text("d")
-    (frames_dir / "f3.jpg").write_text("d")
+    for f_name in ["f1.jpg", "f2.jpg", "f3.jpg"]:
+        Image.new("RGB", (1, 1)).save(frames_dir / f_name, "JPEG")
+
     
     session = CaptureSession(
         session_id=session_id,
@@ -370,9 +371,9 @@ def test_runner_failure_marks_job_failed(tmp_path):
     session_dir.mkdir()
     frames_dir = session_dir / "frames"
     frames_dir.mkdir()
-    (frames_dir / "f1.jpg").write_text("d")
-    (frames_dir / "f2.jpg").write_text("d")
-    (frames_dir / "f3.jpg").write_text("d")
+    for f_name in ["f1.jpg", "f2.jpg", "f3.jpg"]:
+        Image.new("RGB", (1, 1)).save(frames_dir / f_name, "JPEG")
+
     
     session = CaptureSession(
         session_id=session_id,
