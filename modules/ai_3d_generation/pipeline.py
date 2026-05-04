@@ -192,6 +192,7 @@ def generate_ai_3d(
             max_candidates=resolved_quality["max_candidates"],
             input_size=resolved_quality["input_size"],
             input_mode=input_type,
+            bbox_padding_ratio=resolved_quality.get("bbox_padding_ratio", 0.12),
         )
         
         _t1 = time.monotonic()
@@ -248,7 +249,7 @@ def generate_ai_3d(
                 errors.extend(best["errors"])
                 
             generation_input = best.get("prepared_image_path") or best.get("source_path")
-            preprocessing_meta = {"enabled": True}
+            preprocessing_meta = best.get("preprocessing") or {"enabled": True}
 
     else:
         logger.info("Using single-candidate flow for session %s", session_id)
@@ -286,6 +287,7 @@ def generate_ai_3d(
                 source_image_path=image_path_for_gen,
                 output_dir=str(derived_dir),
                 input_size=resolved_quality["input_size"],
+                bbox_padding_ratio=resolved_quality.get("bbox_padding_ratio", 0.12),
             )
             prepared_image_path = preprocessing_meta.get("prepared_image_path")
             warnings.extend(preprocessing_meta.get("warnings", []))

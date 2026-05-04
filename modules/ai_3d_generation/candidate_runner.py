@@ -45,6 +45,7 @@ def run_candidates_sequential(
     max_candidates: int = 5,
     input_size: int = 512,
     input_mode: str = "single_image",
+    bbox_padding_ratio: float = 0.12,
 ) -> List[Dict[str, Any]]:
     """
     Process each candidate source image sequentially.
@@ -115,8 +116,10 @@ def run_candidates_sequential(
                 source_image_path=str(dest_source),
                 output_dir=str(cand_dir),
                 input_size=input_size,
+                bbox_padding_ratio=bbox_padding_ratio,
             )
             cand_meta["prepared_image_path"] = prep_result.get("prepared_image_path")
+            cand_meta["preprocessing"] = prep_result
             cand_meta["warnings"].extend(prep_result.get("warnings", []))
 
             generation_input = prep_result.get("prepared_image_path") or str(dest_source)
