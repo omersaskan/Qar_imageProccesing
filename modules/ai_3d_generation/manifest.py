@@ -5,7 +5,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Any, List, Optional
-from .sanitization import sanitize_text
+from .sanitization import sanitize_text, sanitize_json_like
 
 
 def build_manifest(
@@ -63,7 +63,21 @@ def build_manifest(
     provider_poll_count: Optional[int] = None,
     sanitized_error: Optional[str] = None,
 ) -> Dict[str, Any]:
-    _worker_meta = worker_metadata or {}
+    # ── Recursive sanitization of all provider/user-derived fields ──────────
+    # These fields may carry provider error strings, user-supplied metadata, or
+    # worker output that could contain token-like patterns.  sanitize_json_like
+    # walks dicts/lists/strings and delegates to sanitize_text for each string.
+    # Plain paths and numeric values are passed through unchanged.
+    _worker_meta      = sanitize_json_like(worker_metadata or {})
+    _warnings         = sanitize_json_like(warnings or [])
+    _errors           = sanitize_json_like(errors or [])
+    _preprocessing    = sanitize_json_like(preprocessing or {})
+    _postprocessing   = sanitize_json_like(postprocessing or {})
+    _quality_gate     = sanitize_json_like(quality_gate or {})
+    _path_diagnostics = sanitize_json_like(path_diagnostics or {})
+    _candidates       = sanitize_json_like(candidates or [])
+    _candidate_ranking = sanitize_json_like(candidate_ranking or [])
+
     return {
         "enabled": enabled,
         "mode": "ai_generated_3d",
@@ -95,6 +109,7 @@ def build_manifest(
         "external_provider_consent": external_provider_consent,
         "provider_latency_sec": provider_latency_sec,
         "provider_poll_count": provider_poll_count,
+        # sanitized_error is already a string — pass through sanitize_text directly
         "sanitized_error": sanitize_text(sanitized_error),
 
         # Input
@@ -103,10 +118,10 @@ def build_manifest(
         "selected_frame_path": selected_frame_path,
         "prepared_image_path": prepared_image_path,
 
-        # Preprocessing / postprocessing / QA
-        "preprocessing": preprocessing,
-        "postprocessing": postprocessing,
-        "quality_gate": quality_gate,
+        # Preprocessing / postprocessing / QA — sanitized
+        "preprocessing": _preprocessing,
+        "postprocessing": _postprocessing,
+        "quality_gate": _quality_gate,
 
         # Output
         "output_glb_path": output_glb_path,
@@ -115,7 +130,7 @@ def build_manifest(
         "missing_outputs": missing_outputs or [],
         "output_size_bytes": output_size_bytes,
 
-        # Worker runtime metadata
+        # Worker runtime metadata — sanitized
         "worker_metadata": _worker_meta,
         "peak_mem_mb": _worker_meta.get("peak_mem_mb"),
 
@@ -124,24 +139,24 @@ def build_manifest(
         "generation_finished_at": generation_finished_at,
         "duration_sec": duration_sec,
 
-        # Path diagnostics (Phase 4E)
-        "path_diagnostics": path_diagnostics or {},
+        # Path diagnostics (Phase 4E) — sanitized
+        "path_diagnostics": _path_diagnostics,
 
         # Status
         "status": status,
         "review_required": review_required,
-        "warnings": warnings,
-        "errors": errors,
+        "warnings": _warnings,
+        "errors": _errors,
         "provider_failure_reason": sanitize_text(provider_failure_reason),
 
-        # Phase 1 — multi-candidate orchestration
+        # Phase 1 — multi-candidate orchestration — sanitized
         "input_mode": input_mode,
         "uploaded_files_count": uploaded_files_count,
         "candidate_count": candidate_count,
         "selected_candidate_id": selected_candidate_id,
         "selected_candidate_reason": selected_candidate_reason,
-        "candidate_ranking": candidate_ranking or [],
-        "candidates": candidates or [],
+        "candidate_ranking": _candidate_ranking,
+        "candidates": _candidates,
         "quality_mode": quality_mode,
     }
 

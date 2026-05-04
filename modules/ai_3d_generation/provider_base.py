@@ -130,7 +130,21 @@ class AI3DRemoteAsyncProviderBase(AI3DProviderBase):
             result = self.generate(input_image_path, output_dir, options)
             return _normalise_status(result, self.name, self.output_format)
         except Exception as exc:
-            return _failed_result(self.name, self.output_format, str(exc))
+            from .sanitization import sanitize_external_provider_error
+            safe_err = sanitize_external_provider_error(str(exc))
+            res = _failed_result(self.name, self.output_format, safe_err,
+                                 error_code="provider_exception")
+            res["metadata"].update({
+                "external_provider": True,
+                "external_provider_name": self.name,
+                "external_status": "exception",
+                "provider_latency_sec": round(time.monotonic() - _t_start, 2),
+                "provider_poll_count": 0,
+                "privacy_notice": getattr(self, "privacy_notice", None)
+                    or "External provider terms of service apply.",
+                "sanitized_error": safe_err,
+            })
+            return res
 
 
     def generate(

@@ -252,3 +252,173 @@ def test_rodin_unavailable_metadata(monkeypatch):
     assert "privacy_notice" in result["metadata"]
     assert "sanitized_error" in result["metadata"]
     assert result["metadata"]["sanitized_error"] == result["error"]
+
+
+# ── E) Manifest recursive sanitization ──────────────────────────────────────
+
+def _base_manifest_kwargs(**overrides):
+    """Minimal valid kwargs for build_manifest() for test convenience."""
+    from modules.ai_3d_generation.manifest import build_manifest
+    defaults = dict(
+        session_id="s1",
+        source_input_path="/in/img.jpg",
+        input_type="image",
+        provider="rodin",
+        provider_status="ok",
+        model_name="gen-2",
+        license_note="test",
+        selected_frame_path=None,
+        prepared_image_path=None,
+        preprocessing={},
+        postprocessing={},
+        quality_gate={},
+        output_glb_path="out.glb",
+        output_format="glb",
+        preview_image_path=None,
+        status="ok",
+        warnings=[],
+        errors=[],
+    )
+    defaults.update(overrides)
+    return build_manifest(**defaults)
+
+
+def test_manifest_sanitizes_warnings():
+    """Bearer token in warnings[] is redacted in manifest."""
+    import json
+    m = _base_manifest_kwargs(warnings=["Authorization: Bearer SECRET_WARN"])
+    assert "SECRET_WARN" not in json.dumps(m)
+    assert "[REDACTED]" in json.dumps(m["warnings"])
+
+
+def test_manifest_sanitizes_errors():
+    """api_key in errors[] is redacted in manifest."""
+    import json
+    m = _base_manifest_kwargs(errors=["api_key=SECRET_ERR"])
+    assert "SECRET_ERR" not in json.dumps(m)
+
+
+def test_manifest_sanitizes_worker_metadata():
+    """Bearer token in worker_metadata is redacted in manifest."""
+    import json
+    m = _base_manifest_kwargs(
+        worker_metadata={"log": "Authorization: Bearer SECRET_WORKER"}
+    )
+    assert "SECRET_WORKER" not in json.dumps(m)
+
+
+def test_manifest_sanitizes_candidates():
+    """Bearer token nested inside candidates[] is redacted in manifest."""
+    import json
+    m = _base_manifest_kwargs(candidates=[
+        {"candidate_id": "cand_001", "error": "token=SECRET_CAND"}
+    ])
+    assert "SECRET_CAND" not in json.dumps(m)
+
+
+def test_manifest_sanitizes_candidate_ranking():
+    """Bearer token in candidate_ranking[] is redacted in manifest."""
+    import json
+    m = _base_manifest_kwargs(candidate_ranking=[
+        {"candidate_id": "cand_001", "note": "Bearer SECRET_RANK"}
+    ])
+    assert "SECRET_RANK" not in json.dumps(m)
+
+
+def test_manifest_sanitizes_path_diagnostics():
+    """token= in path_diagnostics is redacted in manifest."""
+    import json
+    m = _base_manifest_kwargs(
+        path_diagnostics={"debug": "token=SECRET_DIAG"}
+    )
+    assert "SECRET_DIAG" not in json.dumps(m)
+
+
+def test_manifest_sanitizes_provider_failure_reason():
+    """api_key in provider_failure_reason is redacted in manifest."""
+    import json
+    m = _base_manifest_kwargs(
+        provider_failure_reason="api_key=SECRET_FAIL",
+        status="failed",
+        provider_status="failed",
+    )
+    assert "SECRET_FAIL" not in json.dumps(m)
+
+
+# ── F) Remote provider exception metadata ───────────────────────────────────
+
+def test_safe_generate_exception_has_external_metadata(monkeypatch):
+    """When generate() raises, safe_generate must still include external metadata."""
+    from modules.operations.settings import AppEnvironment
+    monkeypatch.setattr(settings, "ai_3d_remote_providers_enabled", True)
+    monkeypatch.setattr(settings, "env", AppEnvironment.LOCAL_DEV)
+    monkeypatch.setattr(settings, "rodin_enabled", True)
+    monkeypatch.setattr(settings, "rodin_api_key", "mock_key")
+    monkeypatch.setattr(settings, "rodin_mock_mode", True)
+
+    provider = RodinProvider()
+
+    # Override generate() to raise with a leaky message
+    def _raise(*a, **kw):
+        raise RuntimeError("Auth failed: Bearer SECRET_EXCEPTION_TOKEN")
+
+    monkeypatch.setattr(provider, "generate", _raise)
+
+    result = provider.safe_generate("input.jpg", "out_dir")
+
+    assert result["status"] == "failed"
+    assert result["metadata"]["external_provider"] is True
+    assert result["metadata"]["external_provider_name"] == "rodin"
+    assert result["metadata"]["external_status"] == "exception"
+    assert "provider_latency_sec" in result["metadata"]
+    assert "provider_poll_count" in result["metadata"]
+    assert "privacy_notice" in result["metadata"]
+    assert "sanitized_error" in result["metadata"]
+
+
+def test_safe_generate_exception_no_secret_leak(monkeypatch):
+    """Exception text containing a secret must be sanitized in safe_generate result."""
+    import json
+    from modules.operations.settings import AppEnvironment
+    monkeypatch.setattr(settings, "ai_3d_remote_providers_enabled", True)
+    monkeypatch.setattr(settings, "env", AppEnvironment.LOCAL_DEV)
+    monkeypatch.setattr(settings, "rodin_enabled", True)
+    monkeypatch.setattr(settings, "rodin_api_key", "mock_key")
+    monkeypatch.setattr(settings, "rodin_mock_mode", True)
+
+    provider = RodinProvider()
+
+    def _raise(*a, **kw):
+        raise RuntimeError("api_key=MY_SUPER_SECRET_KEY")
+
+    monkeypatch.setattr(provider, "generate", _raise)
+
+    result = provider.safe_generate("input.jpg", "out_dir")
+    serialized = json.dumps(result)
+
+    assert "MY_SUPER_SECRET_KEY" not in serialized
+    assert "[REDACTED]" in serialized
+
+
+def test_safe_generate_create_task_exception_metadata(monkeypatch):
+    """When create_task raises inside generate(), safe_generate catches it with full metadata."""
+    from modules.operations.settings import AppEnvironment
+    monkeypatch.setattr(settings, "ai_3d_remote_providers_enabled", True)
+    monkeypatch.setattr(settings, "env", AppEnvironment.LOCAL_DEV)
+    monkeypatch.setattr(settings, "rodin_enabled", True)
+    monkeypatch.setattr(settings, "rodin_api_key", "mock_key")
+    monkeypatch.setattr(settings, "rodin_mock_mode", True)
+
+    provider = RodinProvider()
+
+    def _bad_create(*a, **kw):
+        raise ConnectionError("Bearer SECRET_CONN_TOKEN network failed")
+
+    monkeypatch.setattr(provider, "create_task", _bad_create)
+
+    result = provider.safe_generate("input.jpg", "out_dir")
+
+    assert result["status"] == "failed"
+    assert result["metadata"].get("external_provider") is True
+    assert result["metadata"].get("external_status") == "exception"
+    assert "SECRET_CONN_TOKEN" not in str(result)

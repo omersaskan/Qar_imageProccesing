@@ -15,12 +15,12 @@ The pipeline generates multiple 3D candidates from a single image (or from multi
 ## Commit at Closure
 
 ```
-HEAD: 0567ccc — test: add comprehensive test suite for AI 3D generation pipeline and provider base classes
+HEAD: cc69d7c — fix: stabilize AI 3D provider safety and close SF3D phase 1 truthfully
 ```
 
-Additional stabilization commit applied in this session:
+Stabilization patch applied in this session:
 ```
-fix: stabilize AI 3D provider safety and close SF3D phase 1 truthfully
+fix: sanitize AI 3D manifests and finalize phase 1 report
 ```
 
 ---
@@ -33,13 +33,14 @@ fix: stabilize AI 3D provider safety and close SF3D phase 1 truthfully
 > 1. **SF3D Phase 1 multi-candidate closure** — fully implemented, tested, and stable.
 > 2. **External provider / Rodin scaffold** — present but **disabled by default** and **not part of SF3D Phase 1**.
 >
-> External provider scaffold exists but remains disabled by default and is not part of SF3D Phase 1 closure.
+> Rodin scaffold exists only as a disabled-by-default external provider foundation.
+> It is **not production-ready** and the real Rodin API is **not implemented**.
 
 ---
 
 ## Test Results
 
-### Targeted AI 3D Suite
+### AI 3D Generation Suite
 
 - **Command**: `py -m pytest tests/test_ai_3d_generation.py -q`
 - **Result**: **122 passed** ✅
@@ -47,23 +48,23 @@ fix: stabilize AI 3D provider safety and close SF3D phase 1 truthfully
 ### External Provider / Security Suite
 
 - **Command**: `py -m pytest tests/test_external_consent_gate.py tests/test_remote_provider_mock.py tests/test_ai_provider_security.py -q`
-- **Result**: **14 passed** ✅
+- **Result**: **35 passed** ✅
+
+> Note: Includes 10 new tests added in the final stabilization patch for:
+> manifest recursive sanitization (7 tests) and remote provider exception metadata (3 tests).
 
 ### Full Suite
 
 > [!WARNING]
-> Full pytest was not completed at original Phase 1 closure time. The statement is therefore:
-> **"Full suite not completed; targeted AI 3D suite passed (122 tests)."**
->
-> Some unrelated legacy / workflow tests may fail due to missing binaries (COLMAP, OpenMVS, ffmpeg)
-> in the local dev environment. These failures are environment-specific and unrelated to the
-> AI 3D generation logic.
+> Full pytest was not completed — local binary environment is missing COLMAP, OpenMVS, and ffmpeg.
+> Statement: **"Full suite not completed due to local binary environment;
+> targeted AI 3D suites (122 + 35) passed."**
 
 ---
 
 ## Security / Stability Guarantees (Stabilization Patch)
 
-The following safety invariants are enforced as of the stabilization patch:
+The following safety invariants are enforced:
 
 | Invariant | Status |
 |---|---|
@@ -73,7 +74,8 @@ The following safety invariants are enforced as of the stabilization patch:
 | Unknown provider raises `ValueError("unknown_ai3d_provider:<name>")` | ✅ |
 | API maps unknown provider to HTTP 400 `{"error": "unknown_ai3d_provider"}` | ✅ |
 | No silent SF3D fallback for unknown providers | ✅ |
-| `sanitize_json_like()` available for recursive manifest sanitization | ✅ |
+| `sanitize_json_like()` applied to all manifest fields (warnings, errors, worker_metadata, candidates, candidate_ranking, path_diagnostics, preprocessing, postprocessing, quality_gate) | ✅ |
+| Remote provider exception path includes full external metadata block | ✅ |
 | Error messages / manifests do not expose API keys / Bearer tokens | ✅ |
 | Rodin mock mode prohibited outside `local_dev` | ✅ |
 
@@ -116,23 +118,41 @@ The following safety invariants are enforced as of the stabilization patch:
 - Rodin requires: `AI_3D_REMOTE_PROVIDERS_ENABLED=true`, `RODIN_ENABLED=true`, valid `RODIN_API_KEY`
 - Mock mode is restricted to `local_dev` environment only
 - External providers require explicit `external_provider_consent=true` in every request
+- **Rodin scaffold is not production-ready. The real Rodin HTTP API is not implemented.**
+- External providers remain paused and disabled by default. No work on external providers
+  is scheduled or approved.
 
 ---
 
 ## Known Limitations
 
-1. **No Background Removal**: Image subjects must be relatively isolated; automatic rembg is deferred to Phase 2.
-2. **Quality Ceilings**: Input resolution remains capped by the default pipeline variables (512px). Escalation algorithms are scheduled for later phases.
-3. **Sequential Execution Limitation**: SF3D jobs are executed serially to prevent GPU Out-of-Memory exceptions, resulting in longer processing times when submitting multiple inputs.
+1. **No Background Removal**: Image subjects must be relatively isolated; automatic rembg is deferred.
+2. **Quality Ceilings**: Input resolution remains capped by the default pipeline variables (512px).
+   Escalation algorithms are scheduled for later phases.
+3. **Sequential Execution Limitation**: SF3D jobs are executed serially to prevent GPU
+   Out-of-Memory exceptions, resulting in longer processing times when submitting multiple inputs.
 
 ---
+
+## Phase 2 Scope (Not Yet Started)
+
+> [!IMPORTANT]
+> **Phase 2 is NOT about adding external providers.**
+>
+> Phase 2 scope:
+> - **Background removal / object isolation** (rembg or equivalent)
+> - **Quality profiles** (resolution escalation, input preprocessing tiers)
+> - **Higher input quality** (better frame selection heuristics, sharpness-aware preprocessing)
+>
+> External providers (Rodin, Meshy, Tripo, Hunyuan, TRELLIS, etc.) remain **paused and
+> disabled by default**. No external provider work is approved for Phase 2.
 
 ## Phase 2 Gate
 
 > [!IMPORTANT]
-> **Phase 2 (rembg/background removal, additional providers) CANNOT begin** until:
-> 1. This stabilization commit is merged.
+> **Phase 2 CANNOT begin** until:
+> 1. This stabilization commit is merged and reviewed.
 > 2. The targeted AI 3D test suite (122 tests) continues to pass.
-> 3. The security/consent suite (14+ tests) continues to pass.
+> 3. The security/consent suite (35 tests) continues to pass.
 >
 > Phase 2 status: **NOT STARTED. Gate open pending commit merge.**
