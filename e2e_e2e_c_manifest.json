@@ -1,0 +1,275 @@
+{
+  "session_id": "ai3d_1a0f2052255b",
+  "status": "review",
+  "execution_mode": "wsl_subprocess",
+  "provider_status": "ok",
+  "output_glb_path": "data\\ai_3d\\ai3d_1a0f2052255b\\derived\\output.glb",
+  "missing_outputs": [],
+  "peak_mem_mb": 8370.5,
+  "worker_metadata": {
+    "device": "cuda",
+    "input_size": 512,
+    "texture_resolution": 2048,
+    "remesh": "none",
+    "pretrained_model": "stabilityai/stable-fast-3d",
+    "foreground_ratio": 0.85,
+    "peak_mem_mb": 8370.5,
+    "output_size_bytes": 1765676,
+    "execution_mode": "wsl_subprocess"
+  },
+  "warnings": [
+    "ai_generated_not_true_scan",
+    "generated_geometry_estimated",
+    "review_required"
+  ],
+  "errors": [],
+  "manifest": {
+    "enabled": true,
+    "mode": "ai_generated_3d",
+    "asset_type": "ai_generated",
+    "session_id": "ai3d_1a0f2052255b",
+    "created_at": "2026-05-04T20:02:05.451591+00:00",
+    "is_true_scan": false,
+    "geometry_confidence": "estimated",
+    "source": "single_image_or_best_frame",
+    "provider": "sf3d",
+    "provider_status": "ok",
+    "model_name": "stable-fast-3d",
+    "license_note": "Stable Fast 3D \u2014 Stability AI Community License. Check https://stability.ai/license before commercial use.",
+    "execution_mode": "wsl_subprocess",
+    "external_provider": false,
+    "external_provider_name": null,
+    "external_task_id": null,
+    "external_status": null,
+    "external_model_urls": [],
+    "downloaded_output_glb_path": null,
+    "cost_credits": null,
+    "privacy_notice": null,
+    "external_provider_consent": false,
+    "provider_latency_sec": null,
+    "provider_poll_count": null,
+    "sanitized_error": "",
+    "source_input_path": "data\\ai_3d\\ai3d_1a0f2052255b\\input\\upload.jpg",
+    "input_type": "single_image",
+    "selected_frame_path": null,
+    "prepared_image_path": "data\\ai_3d\\ai3d_1a0f2052255b\\derived\\ai3d_input.png",
+    "preprocessing": {
+      "enabled": true,
+      "input_type": "image",
+      "source_image_path": "data\\ai_3d\\ai3d_1a0f2052255b\\derived\\candidates\\cand_001\\source.jpg",
+      "prepared_image_path": "data\\ai_3d\\ai3d_1a0f2052255b\\derived\\candidates\\cand_001\\ai3d_input.png",
+      "input_size": 1024,
+      "original_width": 512,
+      "original_height": 512,
+      "output_width": 1024,
+      "output_height": 1024,
+      "crop_width": 394,
+      "crop_height": 394,
+      "crop_method": "center_square_crop",
+      "bbox_source": "rembg_alpha",
+      "bbox": [
+        96,
+        96,
+        404,
+        404
+      ],
+      "crop_bbox": [
+        53,
+        53,
+        447,
+        447
+      ],
+      "bbox_padding_ratio": 0.14,
+      "background_removed": true,
+      "mask_source": "rembg",
+      "alpha_bbox": [
+        96,
+        96,
+        404,
+        404
+      ],
+      "foreground_ratio_estimate": 0.2842,
+      "warnings": []
+    },
+    "postprocessing": {
+      "enabled": true,
+      "normalize": {
+        "applied": false,
+        "reason": "not_implemented_yet"
+      },
+      "optimize": {
+        "applied": false,
+        "reason": "cannot import name 'GltfTransformOptimizer' from 'modules.export_pipeline.gltf_transform_optimizer' (C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\modules\\export_pipeline\\gltf_transform_optimizer.py)"
+      },
+      "validate": {
+        "applied": false,
+        "reason": "cannot import name 'GltfValidator' from 'modules.qa_validation.gltf_validator' (C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\modules\\qa_validation\\gltf_validator.py)"
+      }
+    },
+    "quality_gate": {
+      "verdict": "review",
+      "output_exists": true,
+      "warnings": [
+        "ai_generated_not_true_scan",
+        "generated_geometry_estimated",
+        "review_required"
+      ],
+      "reason": "ai_generated_asset_requires_review"
+    },
+    "output_glb_path": "data\\ai_3d\\ai3d_1a0f2052255b\\derived\\output.glb",
+    "output_format": "glb",
+    "preview_image_path": null,
+    "missing_outputs": [],
+    "output_size_bytes": 1765676,
+    "worker_metadata": {
+      "device": "cuda",
+      "input_size": 512,
+      "texture_resolution": 2048,
+      "remesh": "none",
+      "pretrained_model": "stabilityai/stable-fast-3d",
+      "foreground_ratio": 0.85,
+      "peak_mem_mb": 8370.5,
+      "output_size_bytes": 1765676,
+      "execution_mode": "wsl_subprocess"
+    },
+    "peak_mem_mb": 8370.5,
+    "generation_started_at": "2026-05-04T20:01:38.072436+00:00",
+    "generation_finished_at": "2026-05-04T20:02:05.446009+00:00",
+    "duration_sec": 27.38,
+    "path_diagnostics": {
+      "source_input_path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\ai_3d\\ai3d_1a0f2052255b\\input\\upload.jpg",
+      "generation_input": "data\\ai_3d\\ai3d_1a0f2052255b\\derived\\candidates\\cand_001\\ai3d_input.png",
+      "output_dir": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\ai_3d\\ai3d_1a0f2052255b\\derived",
+      "output_glb_path": "data\\ai_3d\\ai3d_1a0f2052255b\\derived\\output.glb",
+      "generation_input_wsl": "/mnt/c/Users/Lenovo/.gemini/antigravity/scratch/Qar_imageProccesing/data/ai_3d/ai3d_1a0f2052255b/derived/candidates/cand_001/ai3d_input.png",
+      "output_dir_wsl": "/mnt/c/Users/Lenovo/.gemini/antigravity/scratch/Qar_imageProccesing/data/ai_3d/ai3d_1a0f2052255b/derived"
+    },
+    "status": "review",
+    "review_required": true,
+    "warnings": [
+      "ai_generated_not_true_scan",
+      "generated_geometry_estimated",
+      "review_required"
+    ],
+    "errors": [],
+    "provider_failure_reason": "",
+    "input_mode": "single_image",
+    "uploaded_files_count": 1,
+    "candidate_count": 1,
+    "selected_candidate_id": "cand_001",
+    "selected_candidate_reason": "highest_score (90.0)",
+    "candidate_ranking": [
+      {
+        "candidate_id": "cand_001",
+        "score": 90.0,
+        "status": "ok",
+        "provider_status": "ok",
+        "selected": true
+      }
+    ],
+    "candidates": [
+      {
+        "candidate_id": "cand_001",
+        "source_path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\ai_3d\\ai3d_1a0f2052255b\\input\\upload.jpg",
+        "source_type": "single_image",
+        "prepared_image_path": "data\\ai_3d\\ai3d_1a0f2052255b\\derived\\candidates\\cand_001\\ai3d_input.png",
+        "output_glb_path": "C:\\Users\\Lenovo\\.gemini\\antigravity\\scratch\\Qar_imageProccesing\\data\\ai_3d\\ai3d_1a0f2052255b\\derived\\candidates\\cand_001\\output.glb",
+        "provider_status": "ok",
+        "status": "ok",
+        "score": 90.0,
+        "score_breakdown": {
+          "provider_ok": 50.0,
+          "glb_exists": 20.0,
+          "glb_size_kb": 1724.3,
+          "glb_size_bonus": 15.0,
+          "prepared_exists": 5.0,
+          "total": 90.0
+        },
+        "duration_sec": 27.38,
+        "peak_mem_mb": 8370.5,
+        "warnings": [
+          "ai_generated_not_true_scan",
+          "ai_generated_not_true_scan"
+        ],
+        "errors": [],
+        "selected": true,
+        "preprocessing": {
+          "enabled": true,
+          "input_type": "image",
+          "source_image_path": "data\\ai_3d\\ai3d_1a0f2052255b\\derived\\candidates\\cand_001\\source.jpg",
+          "prepared_image_path": "data\\ai_3d\\ai3d_1a0f2052255b\\derived\\candidates\\cand_001\\ai3d_input.png",
+          "input_size": 1024,
+          "original_width": 512,
+          "original_height": 512,
+          "output_width": 1024,
+          "output_height": 1024,
+          "crop_width": 394,
+          "crop_height": 394,
+          "crop_method": "center_square_crop",
+          "bbox_source": "rembg_alpha",
+          "bbox": [
+            96,
+            96,
+            404,
+            404
+          ],
+          "crop_bbox": [
+            53,
+            53,
+            447,
+            447
+          ],
+          "bbox_padding_ratio": 0.14,
+          "background_removed": true,
+          "mask_source": "rembg",
+          "alpha_bbox": [
+            96,
+            96,
+            404,
+            404
+          ],
+          "foreground_ratio_estimate": 0.2842,
+          "warnings": []
+        },
+        "worker_metadata": {
+          "device": "cuda",
+          "input_size": 512,
+          "texture_resolution": 2048,
+          "remesh": "none",
+          "pretrained_model": "stabilityai/stable-fast-3d",
+          "foreground_ratio": 0.85,
+          "peak_mem_mb": 8370.5,
+          "output_size_bytes": 1765676,
+          "execution_mode": "wsl_subprocess"
+        },
+        "model_name": "stable-fast-3d",
+        "output_size_bytes": 1765676
+      }
+    ],
+    "quality_mode": "ultra",
+    "resolved_quality": {
+      "input_size": 1024,
+      "texture_resolution": 2048,
+      "max_candidates": 5,
+      "video_topk_frames": 8,
+      "bbox_padding_ratio": 0.14,
+      "foreground_ratio_target": 0.95,
+      "remesh": "none",
+      "quality_mode": "ultra",
+      "warnings": []
+    }
+  },
+  "input_mode": "single_image",
+  "uploaded_files_count": 1,
+  "candidate_count": 1,
+  "selected_candidate_id": "cand_001",
+  "candidate_summary": [
+    {
+      "candidate_id": "cand_001",
+      "score": 90.0,
+      "status": "ok",
+      "provider_status": "ok",
+      "selected": true
+    }
+  ]
+}
