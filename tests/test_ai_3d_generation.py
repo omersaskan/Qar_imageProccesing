@@ -1437,7 +1437,7 @@ class TestCandidateSelector(unittest.TestCase):
         score, breakdown = score_candidate(self._make_candidate(glb_path=glb))
         self.assertGreater(score, 50)  # provider_ok + glb_exists + size
         self.assertEqual(breakdown["provider_ok"], 50.0)
-        self.assertEqual(breakdown["glb_exists"], 20.0)
+        self.assertEqual(breakdown["output_exists"], 20.0)
 
     def test_score_failed_provider(self):
         from modules.ai_3d_generation.candidate_selector import score_candidate
@@ -1453,7 +1453,7 @@ class TestCandidateSelector(unittest.TestCase):
             warnings=["no_mask_or_bbox_using_center_crop"]
         ))
         self.assertLess(score_penalty, score_no_penalty)
-        self.assertIn("center_crop_penalty", bd)
+        self.assertIn("warning_penalty", bd)
 
     def test_select_best_picks_highest_score(self):
         from modules.ai_3d_generation.candidate_selector import select_best

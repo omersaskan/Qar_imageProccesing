@@ -29,21 +29,20 @@ _PENALTY_FRAME_SELECTION = -2.0  # Frame selection warning present
 
 def score_candidate(meta: Dict[str, Any]) -> Tuple[float, Dict[str, Any]]:
     """
-    Compute a deterministic score for a single candidate.
-
-    Parameters
-    ----------
-    meta : dict
-        Candidate metadata as returned by candidate_runner.
-        Expected keys: provider_status, output_glb_path, prepared_image_path,
-        warnings, status.
-
-    Returns
-    -------
-    (score, breakdown) : (float, dict)
-        The numeric score and a dict explaining each component.
+    Compute a deterministic score for a single candidate, including preprocessing quality.
     """
-    breakdown: Dict[str, Any] = {}
+    breakdown: Dict[str, Any] = {
+        "provider_ok": 0.0,
+        "output_exists": 0.0,
+        "output_size": 0.0,
+        "warning_penalty": 0.0,
+        "error_penalty": 0.0,
+        "background_removed_bonus": 0.0,
+        "rembg_bonus": 0.0,
+        "foreground_ratio_score": 0.0,
+        "fallback_penalty": 0.0,
+        "bbox_sanity_score": 0.0,
+    }
     score = 0.0
 
     # 1. Provider status
@@ -51,48 +50,119 @@ def score_candidate(meta: Dict[str, Any]) -> Tuple[float, Dict[str, Any]]:
     if provider_status == "ok":
         score += _SCORE_PROVIDER_OK
         breakdown["provider_ok"] = _SCORE_PROVIDER_OK
-    else:
-        breakdown["provider_ok"] = 0.0
 
     # 2. GLB file existence & size
     glb_path = meta.get("output_glb_path")
     if glb_path and Path(glb_path).exists():
         score += _SCORE_GLB_EXISTS
-        breakdown["glb_exists"] = _SCORE_GLB_EXISTS
+        breakdown["output_exists"] = _SCORE_GLB_EXISTS
         try:
             size_kb = Path(glb_path).stat().st_size / 1024
             size_bonus = min(size_kb * _SCORE_GLB_SIZE_PER_KB, _SCORE_GLB_SIZE_MAX)
             score += size_bonus
-            breakdown["glb_size_kb"] = round(size_kb, 1)
-            breakdown["glb_size_bonus"] = round(size_bonus, 2)
+            breakdown["output_size"] = round(size_bonus, 2)
         except Exception:
-            breakdown["glb_size_bonus"] = 0.0
-    else:
-        breakdown["glb_exists"] = 0.0
-        breakdown["glb_size_bonus"] = 0.0
+            pass
 
-    # 3. Prepared image exists
+    # 3. Prepared image existence
     prep_path = meta.get("prepared_image_path")
     if prep_path and Path(prep_path).exists():
         score += _SCORE_PREPARED_EXISTS
-        breakdown["prepared_exists"] = _SCORE_PREPARED_EXISTS
-    else:
-        breakdown["prepared_exists"] = 0.0
+        # Note: no specific breakdown key for this, usually combined in provider/output
 
-    # 4. Penalties
+    # 4. Preprocessing Quality
+    pre = meta.get("preprocessing", {})
+    
+    # Background Removal Bonus
+    if pre.get("background_removed"):
+        score += 8.0
+        breakdown["background_removed_bonus"] += 8.0
+        
+    if pre.get("mask_source") == "rembg":
+        score += 5.0
+        breakdown["rembg_bonus"] += 5.0
+        
+    if pre.get("bbox_source") == "rembg_alpha":
+        score += 4.0
+        breakdown["rembg_bonus"] += 4.0 # Combine rembg-specific metrics
+
+    # Foreground Ratio
+    ratio = pre.get("foreground_ratio_estimate")
+    if ratio is not None:
+        if 0.15 <= ratio <= 0.70:
+            score += 6.0
+            breakdown["foreground_ratio_score"] += 6.0
+        elif 0.05 <= ratio < 0.15 or 0.70 < ratio <= 0.85:
+            score += 3.0
+            breakdown["foreground_ratio_score"] += 3.0
+        elif ratio < 0.03:
+            score -= 8.0
+            breakdown["foreground_ratio_score"] -= 8.0
+        elif ratio > 0.90:
+            score -= 6.0
+            breakdown["foreground_ratio_score"] -= 6.0
+
+    # Fallback Penalties
     warnings = meta.get("warnings", [])
+    if pre.get("crop_method") == "fallback_center_crop":
+        score -= 5.0
+        breakdown["fallback_penalty"] -= 5.0
+    
+    if any("rembg_unavailable" in w for w in warnings):
+        score -= 4.0
+        breakdown["fallback_penalty"] -= 4.0
+    elif any("rembg_failed" in w for w in warnings):
+        score -= 6.0
+        breakdown["fallback_penalty"] -= 6.0
+    elif any("rembg_empty_alpha" in w for w in warnings):
+        score -= 8.0
+        breakdown["fallback_penalty"] -= 8.0
+
+    # BBox Sanity
+    bbox = pre.get("bbox")
+    crop_bbox = pre.get("crop_bbox")
+    cw = pre.get("crop_width", 0)
+    ch = pre.get("crop_height", 0)
+    
+    if isinstance(bbox, (list, tuple)) and len(bbox) == 4 and \
+       isinstance(crop_bbox, (list, tuple)) and len(crop_bbox) == 4:
+        score += 3.0
+        breakdown["bbox_sanity_score"] += 3.0
+    else:
+        score -= 5.0
+        breakdown["bbox_sanity_score"] -= 5.0
+
+    if cw <= 0 or ch <= 0:
+        score -= 5.0
+        breakdown["bbox_sanity_score"] -= 5.0
+    else:
+        # Check for extremely small crop relative to original (proxy for noise/error)
+        orig_w = pre.get("original_width", 1)
+        orig_h = pre.get("original_height", 1)
+        crop_area = cw * ch
+        orig_area = orig_w * orig_h
+        if crop_area < orig_area * 0.02:
+            score -= 4.0
+            breakdown["bbox_sanity_score"] -= 4.0
+
+    # General Warning/Error penalties
     if "no_mask_or_bbox_using_center_crop" in warnings:
+        # Already penalized via crop_method, but add small additional penalty for manifest consistency
         score += _PENALTY_CENTER_CROP
-        breakdown["center_crop_penalty"] = _PENALTY_CENTER_CROP
+        breakdown["warning_penalty"] += _PENALTY_CENTER_CROP
 
-    if "input_video_best_frame_used" in warnings or "frame_selection_failed" in [
-        w.split(":")[0] for w in warnings
-    ]:
+    if any(k in [w.split(":")[0] for w in warnings] for k in ("input_video_best_frame_used", "frame_selection_failed")):
         score += _PENALTY_FRAME_SELECTION
-        breakdown["frame_selection_penalty"] = _PENALTY_FRAME_SELECTION
+        breakdown["warning_penalty"] += _PENALTY_FRAME_SELECTION
 
-    breakdown["total"] = round(score, 2)
-    return round(score, 2), breakdown
+    if meta.get("errors"):
+        score -= 20.0
+        breakdown["error_penalty"] -= 20.0
+
+    # Final clamp and output
+    final_score = max(0.0, round(score, 2))
+    breakdown["final_score"] = final_score
+    return final_score, breakdown
 
 
 def select_best(
@@ -100,18 +170,6 @@ def select_best(
 ) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], str]:
     """
     Pick the best successful candidate from a scored list.
-
-    Parameters
-    ----------
-    candidates : list[dict]
-        Each dict must have at least: candidate_id, status, score, score_breakdown.
-
-    Returns
-    -------
-    (best, ranking, reason) : (dict | None, list[dict], str)
-        - best: the winning candidate metadata, or None if all failed.
-        - ranking: all candidates sorted by score descending.
-        - reason: human-readable selection reason.
     """
     if not candidates:
         return None, [], "no_candidates"
@@ -126,17 +184,21 @@ def select_best(
     # Sort all by score descending for ranking
     candidates_sorted = sorted(candidates, key=lambda c: c.get("score", 0), reverse=True)
 
+    def _compact(c, selected):
+        pre = c.get("preprocessing", {})
+        return {
+            "candidate_id": c.get("candidate_id"),
+            "score": c.get("score"),
+            "status": c.get("status"),
+            "provider_status": c.get("provider_status"),
+            "selected": selected,
+            "background_removed": pre.get("background_removed", False),
+            "mask_source": pre.get("mask_source", "none"),
+            "foreground_ratio_estimate": pre.get("foreground_ratio_estimate"),
+        }
+
     if not successful:
-        compact_ranking = [
-            {
-                "candidate_id": c.get("candidate_id"),
-                "score": c.get("score"),
-                "status": c.get("status"),
-                "provider_status": c.get("provider_status"),
-                "selected": False,
-            }
-            for c in candidates_sorted
-        ]
+        compact_ranking = [_compact(c, False) for c in candidates_sorted]
         return None, compact_ranking, "all_candidates_failed"
 
     # Among successful, pick highest score
@@ -145,13 +207,7 @@ def select_best(
     reason = f"highest_score ({best.get('score', 0)})"
 
     compact_ranking = [
-        {
-            "candidate_id": c.get("candidate_id"),
-            "score": c.get("score"),
-            "status": c.get("status"),
-            "provider_status": c.get("provider_status"),
-            "selected": c.get("candidate_id") == best.get("candidate_id"),
-        }
+        _compact(c, c.get("candidate_id") == best.get("candidate_id"))
         for c in candidates_sorted
     ]
 
