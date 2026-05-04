@@ -29,9 +29,10 @@ def preprocess_input(
     mask: "Optional[np.ndarray]" = None,                 # uint8 H×W 255=subject
     pad_color: Tuple[int, int, int] = _NEUTRAL_BG,
     bbox_padding_ratio: float = 0.12,
+    background_removal_enabled: bool = False,
 ) -> Dict[str, Any]:
     """
-    Prepare canonical SF3D input image with rich metadata.
+    Prepare canonical SF3D input image with rich metadata and optional background removal.
 
     Returns:
         enabled: true
@@ -42,13 +43,17 @@ def preprocess_input(
         original_height: int
         output_width: int
         output_height: int
+        crop_width: int
+        crop_height: int
         crop_method: str
+        bbox_source: str
         bbox: list[int]
+        crop_bbox: list[int]
         bbox_padding_ratio: float
-        background_removed: false
+        background_removed: bool
         mask_source: str
-        alpha_bbox: null
-        foreground_ratio_estimate: null
+        alpha_bbox: list[int] | null
+        foreground_ratio_estimate: float | null
         warnings: list[str]
     """
     import cv2
@@ -58,9 +63,9 @@ def preprocess_input(
     out_dir.mkdir(parents=True, exist_ok=True)
     warnings: list[str] = []
     
-    # Phase 2B invariants
+    # Phase 2C initial state
     background_removed = False
-    mask_source = "fallback_center_crop"
+    mask_source = "none"
     alpha_bbox = None
     foreground_ratio_estimate = None
 
@@ -79,10 +84,49 @@ def preprocess_input(
 
     h, w = img.shape[:2]
     original_width, original_height = w, h
+    
+    # ── 0.1 Optional Background Removal (rembg) ───────────────────────────────
+    if background_removal_enabled:
+        try:
+            import rembg
+            # Convert BGR to RGB for rembg
+            img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            # Remove background
+            rgba = rembg.remove(img_rgb)
+            # rgba is (H, W, 4) numpy array
+            alpha = rgba[:, :, 3]
+            
+            # Derive alpha_bbox
+            derived_bbox = _bbox_from_mask(alpha, h, w)
+            if derived_bbox:
+                # Success
+                background_removed = True
+                mask_source = "rembg"
+                alpha_bbox = derived_bbox
+                # Use alpha_bbox as the primary object bbox for cropping
+                bbox = derived_bbox
+                bbox_source = "rembg_alpha"
+                
+                # Estimate foreground ratio
+                nonzero = np.count_nonzero(alpha)
+                foreground_ratio_estimate = round(float(nonzero) / (h * w), 4)
+                
+                # Use RGBA image for further processing
+                # Convert back to BGRA for cv2 compatibility
+                img = cv2.cvtColor(rgba, cv2.COLOR_RGBA2BGRA)
+            else:
+                warnings.append("rembg_empty_alpha_fallback_center_crop")
+                background_removal_enabled = False # Force fallback
+        except ImportError:
+            warnings.append("rembg_unavailable_fallback_center_crop")
+            background_removal_enabled = False
+        except Exception as e:
+            warnings.append(f"rembg_failed_fallback_center_crop:{str(e)}")
+            background_removal_enabled = False
 
     # ── 1. Determine crop region & method ─────────────────────────────────────
     crop_method = "center_square_crop"
-    bbox_source = "fallback_center_crop"
+    bbox_source_out = "fallback_center_crop"
     
     if bbox is not None:
         x0, y0, x1, y1 = bbox
@@ -95,7 +139,11 @@ def preprocess_input(
         if x1 > x0 and y1 > y0 and (x1 - x0) >= 4 and (y1 - y0) >= 4:
             actual_bbox = [x0, y0, x1, y1]
             crop_method = "center_square_crop"
-            bbox_source = "provided_bbox"
+            # If background removal set it, keep it
+            if background_removed and mask_source == "rembg":
+                bbox_source_out = "rembg_alpha"
+            else:
+                bbox_source_out = "provided_bbox"
         else:
             warnings.append(f"invalid_bbox_using_center_crop:{bbox}")
             bbox = None # Fallback to center crop below
@@ -107,10 +155,10 @@ def preprocess_input(
                 warnings.append("mask_empty_using_full_image")
                 actual_bbox = [0, 0, w, h]
                 crop_method = "resize_square_pad"
-                bbox_source = "full_image_fallback"
+                bbox_source_out = "full_image_fallback"
             else:
                 crop_method = "center_square_crop"
-                bbox_source = "provided_mask"
+                bbox_source_out = "provided_mask"
         else:
             # Safe center crop: 80% of shorter dimension
             side = int(min(h, w) * 0.80)
@@ -118,7 +166,8 @@ def preprocess_input(
             actual_bbox = [cx - side // 2, cy - side // 2,
                            cx + side // 2, cy + side // 2]
             crop_method = "fallback_center_crop"
-            bbox_source = "fallback_center_crop"
+            bbox_source_out = "fallback_center_crop"
+            mask_source = "fallback_center_crop"
             warnings.append("no_mask_or_bbox_using_center_crop")
 
     # ── 2. Crop ───────────────────────────────────────────────────────────────
@@ -139,7 +188,7 @@ def preprocess_input(
     cropped = img[crop_y0:crop_y1, crop_x0:crop_x1]
 
     # ── 3. Square pad ─────────────────────────────────────────────────────────
-    squared = _square_pad(cropped, pad_color)
+    squared = _square_pad(cropped, pad_color if not background_removed else None)
 
     # ── 4. Resize ─────────────────────────────────────────────────────────────
     resized = cv2.resize(squared, (input_size, input_size), interpolation=cv2.INTER_LANCZOS4)
@@ -147,10 +196,11 @@ def preprocess_input(
 
     # ── 5. Save ───────────────────────────────────────────────────────────────
     out_path = str(out_dir / "ai3d_input.png")
+    # Save as RGBA if background removed, else RGB (handled by imwrite based on channels)
     cv2.imwrite(out_path, resized)
 
-    logger.debug("Preprocessed input → %s  bbox=%s  crop=%s  size=%d", 
-                 out_path, actual_bbox, final_crop_bbox, input_size)
+    logger.debug("Preprocessed input → %s  bg_removed=%s  bbox=%s  size=%d", 
+                 out_path, background_removed, actual_bbox, input_size)
 
     return {
         "enabled": True,
@@ -165,7 +215,7 @@ def preprocess_input(
         "crop_width": crop_width,
         "crop_height": crop_height,
         "crop_method": crop_method,
-        "bbox_source": bbox_source,
+        "bbox_source": bbox_source_out,
         "bbox": actual_bbox,
         "crop_bbox": final_crop_bbox,
         "bbox_padding_ratio": bbox_padding_ratio,
@@ -177,13 +227,27 @@ def preprocess_input(
     }
 
 
-def _square_pad(img: "np.ndarray", color: Tuple[int, int, int]) -> "np.ndarray":
+def _square_pad(img: "np.ndarray", color: Optional[Tuple[int, int, int]]) -> "np.ndarray":
     import numpy as np
     h, w = img.shape[:2]
+    channels = img.shape[2] if len(img.shape) > 2 else 1
+    
     if h == w:
         return img
+    
     side = max(h, w)
-    out = np.full((side, side, 3), color, dtype=np.uint8)
+    
+    if channels == 4 and color is None:
+        # Transparent padding
+        out = np.zeros((side, side, 4), dtype=np.uint8)
+    else:
+        # Solid padding
+        fill_color = color or (127, 127, 127)
+        if channels == 4:
+            # Add full alpha to the fill color
+            fill_color = (*fill_color, 255)
+        out = np.full((side, side, channels), fill_color, dtype=np.uint8)
+        
     y_off = (side - h) // 2
     x_off = (side - w) // 2
     out[y_off:y_off + h, x_off:x_off + w] = img

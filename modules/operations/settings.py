@@ -385,6 +385,7 @@ class Settings(BaseSettings):
     ai_3d_multi_candidate_enabled: bool = Field(True, validation_alias="AI_3D_MULTI_CANDIDATE_ENABLED")
     ai_3d_max_candidates: int = Field(5, validation_alias="AI_3D_MAX_CANDIDATES")
     ai_3d_quality_mode: str = Field("balanced", validation_alias="AI_3D_QUALITY_MODE")
+    ai_3d_background_removal_enabled: bool = Field(False, validation_alias="AI_3D_BACKGROUND_REMOVAL_ENABLED")
 
     sam3d_enabled: bool = Field(False, validation_alias="SAM3D_ENABLED")
     sam3d_output_format: str = Field("glb", validation_alias="SAM3D_OUTPUT_FORMAT")

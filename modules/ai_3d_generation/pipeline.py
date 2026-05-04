@@ -84,6 +84,11 @@ def generate_ai_3d(
     opts["texture_resolution"] = resolved_quality["texture_resolution"]
     opts["remesh"] = resolved_quality["remesh"]
 
+    # Resolve background removal toggle
+    bg_removal = opts.get("background_removal_enabled")
+    if bg_removal is None:
+        bg_removal = getattr(settings, "ai_3d_background_removal_enabled", False)
+
     # Consent check for external providers
     external_providers = ("rodin", "meshy", "tripo")
     if provider.name in external_providers:
@@ -193,6 +198,7 @@ def generate_ai_3d(
             input_size=resolved_quality["input_size"],
             input_mode=input_type,
             bbox_padding_ratio=resolved_quality.get("bbox_padding_ratio", 0.12),
+            background_removal_enabled=bg_removal,
         )
         
         _t1 = time.monotonic()
@@ -288,6 +294,7 @@ def generate_ai_3d(
                 output_dir=str(derived_dir),
                 input_size=resolved_quality["input_size"],
                 bbox_padding_ratio=resolved_quality.get("bbox_padding_ratio", 0.12),
+                background_removal_enabled=bg_removal,
             )
             prepared_image_path = preprocessing_meta.get("prepared_image_path")
             warnings.extend(preprocessing_meta.get("warnings", []))
