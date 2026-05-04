@@ -204,7 +204,6 @@ def generate_ai_3d(
             if best.get("errors"):
                 errors.extend(best["errors"])
                 
-            selected_frame_path = best.get("source_path") if input_type == "video" else None
             generation_input = best.get("prepared_image_path") or best.get("source_path")
             preprocessing_meta = {"enabled": True}
 
@@ -340,10 +339,13 @@ def generate_ai_3d(
         except Exception:
             pass
 
+    def _normalize_input_mode(t: str) -> str:
+        return "single_image" if t == "image" else t
+
     manifest = build_manifest(
         session_id=session_id,
         source_input_path=input_file_path,
-        input_type=input_type,
+        input_type=_normalize_input_mode(input_type),
         provider=provider.name,
         provider_status=_prov_status,
         model_name=provider_result.get("model_name"),
@@ -397,10 +399,14 @@ def _build_failed_manifest(
     errors, warnings, selected_frame_path,
 ) -> Dict[str, Any]:
     from .quality_gate import _gate
+    
+    def _normalize_input_mode(t: str) -> str:
+        return "single_image" if t == "image" else t
+        
     return build_manifest(
         session_id=session_id,
         source_input_path=input_file_path,
-        input_type=input_type,
+        input_type=_normalize_input_mode(input_type),
         provider=provider.name,
         provider_status="failed",
         model_name=None,

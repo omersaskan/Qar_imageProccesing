@@ -66,6 +66,14 @@ def load_session_inputs(session_dir: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
 def resolve_candidate_sources(
     session_dir: str,
     input_file_path: str,
@@ -101,7 +109,7 @@ def resolve_candidate_sources(
             # Path traversal guard
             try:
                 resolved_p = p.resolve(strict=False)
-                if not str(resolved_p).startswith(str(input_dir.resolve())):
+                if not _is_relative_to(resolved_p, input_dir.resolve()):
                     logger.warning("Path traversal attempt in multi_input: %s", fname)
                     continue
             except Exception:
@@ -137,6 +145,11 @@ def write_session_inputs(
     Write session_inputs.json to ``<session_dir>/input/session_inputs.json``.
     Returns the path to the written file.
     """
+    if input_mode not in _VALID_INPUT_MODES:
+        raise ValueError(f"Invalid input_mode: {input_mode}")
+    if input_mode == "multi_image" and not input_files:
+        raise ValueError("multi_image mode requires at least one input file")
+
     input_dir = Path(session_dir) / "input"
     input_dir.mkdir(parents=True, exist_ok=True)
     input_files_basenames = [Path(f).name for f in input_files]

@@ -178,6 +178,17 @@
 
   async function startProcess() {
     if (!selectedFile || !selectedFile.length) return;
+    
+    // UI guard for mixed files
+    if (selectedFile.length > 1) {
+      for (let i = 0; i < selectedFile.length; i++) {
+        if (!selectedFile[i].type.startsWith('image/')) {
+          setStatus("Multi-file upload supports images only. Upload one video or multiple images.", "error");
+          return;
+        }
+      }
+    }
+
     document.getElementById('process-btn').disabled = true;
     document.getElementById('provider-error-box').style.display = 'none';
     setStatus('Uploading…', 'info');

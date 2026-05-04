@@ -1343,6 +1343,36 @@ class TestMultiInput(unittest.TestCase):
             self.assertEqual(len(result["sources"]), 1)
             self.assertTrue(result["sources"][0].endswith("upload_001.jpg"))
 
+    def test_write_session_inputs_invalid_mode(self):
+        from modules.ai_3d_generation.multi_input import write_session_inputs
+        with tempfile.TemporaryDirectory() as sd:
+            with self.assertRaises(ValueError):
+                write_session_inputs(sd, "invalid_mode", ["test.jpg"])
+
+    def test_write_session_inputs_empty_multi(self):
+        from modules.ai_3d_generation.multi_input import write_session_inputs
+        with tempfile.TemporaryDirectory() as sd:
+            with self.assertRaises(ValueError):
+                write_session_inputs(sd, "multi_image", [])
+
+    def test_resolve_multi_image_path_traversal_prefix(self):
+        from modules.ai_3d_generation.multi_input import write_session_inputs, load_session_inputs, resolve_candidate_sources
+        with tempfile.TemporaryDirectory() as sd:
+            input_dir = Path(sd) / "input"
+            input_dir.mkdir()
+            (input_dir / "upload_001.jpg").write_text("fake")
+            
+            evil_dir = Path(sd) / "input_evil"
+            evil_dir.mkdir()
+            (evil_dir / "upload_002.jpg").write_text("fake")
+            
+            write_session_inputs(sd, "multi_image", ["upload_001.jpg", "../input_evil/upload_002.jpg"])
+            si = load_session_inputs(sd)
+            result = resolve_candidate_sources(sd, str(input_dir / "upload_001.jpg"), si)
+            
+            self.assertEqual(len(result["sources"]), 1)
+            self.assertTrue(result["sources"][0].endswith("upload_001.jpg"))
+
     def test_resolve_multi_image_sources(self):
         import cv2, numpy as np
         from modules.ai_3d_generation.multi_input import (
@@ -1691,6 +1721,63 @@ class TestCandidateRunner(unittest.TestCase):
             self.assertEqual(results[0]["source_type"], "video_frame")
             self.assertGreater(results[0]["output_size_bytes"], 0)
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 1 — Pipeline Polish (selected_frame_path, input_mode)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestPipelinePolish(unittest.TestCase):
+
+    @patch("modules.ai_3d_generation.pipeline.build_manifest")
+    def test_normalize_input_mode_legacy(self, mock_build):
+        from modules.ai_3d_generation.pipeline import _build_failed_manifest
+        mock_provider = MagicMock()
+        mock_provider.name = "sf3d"
+        mock_provider.output_format = "glb"
+        _build_failed_manifest("sess1", "/test.jpg", "image", mock_provider, [], [], None)
+        
+        args, kwargs = mock_build.call_args
+        self.assertEqual(kwargs["input_type"], "single_image")
+
+    @patch("modules.ai_3d_generation.pipeline.build_manifest")
+    @patch("modules.ai_3d_generation.candidate_selector.select_best")
+    @patch("modules.ai_3d_generation.candidate_runner.run_candidates_sequential")
+    @patch("modules.ai_3d_generation.multi_input.resolve_candidate_sources")
+    @patch("modules.ai_3d_generation.video_candidates.select_top_k_frames")
+    def test_pipeline_selected_frame_path_video_multi(
+        self, mock_top_k, mock_resolve, mock_run, mock_select, mock_build
+    ):
+        from modules.ai_3d_generation.pipeline import generate_ai_3d
+        import modules.operations.settings as settings
+        
+        settings.ai_3d_multi_candidate_enabled = True
+        mock_resolve.return_value = {"input_mode": "video", "sources": ["/fake.mp4"], "uploaded_files_count": 1}
+        mock_top_k.return_value = ["/fake.mp4"]
+        
+        with tempfile.TemporaryDirectory() as d:
+            src_path = Path(d) / "fake_src.jpg"
+            src_path.write_text("fake")
+            
+            mock_run.return_value = [{"candidate_id": "cand_001"}]
+            mock_select.return_value = (
+                {"candidate_id": "cand_001", "source_path": str(src_path), "provider_status": "ok"}, 
+                [], 
+                "test"
+            )
+            
+            provider = MagicMock()
+            provider.name = "sf3d"
+            provider.output_format = "glb"
+            
+            with patch("shutil.copy2") as mock_copy:
+                generate_ai_3d("sess1", "/fake.mp4", d, provider, {})
+                
+                # Verify source frame was copied to selected_frame.jpg
+                mock_copy.assert_any_call(str(src_path), str(Path(d) / "derived" / "selected_frame.jpg"))
+                
+                # Verify manifest gets correct path
+                args, kwargs = mock_build.call_args
+                self.assertTrue(kwargs["selected_frame_path"].endswith("derived\\selected_frame.jpg") or 
+                                kwargs["selected_frame_path"].endswith("derived/selected_frame.jpg"))
 
 if __name__ == "__main__":
     unittest.main()
