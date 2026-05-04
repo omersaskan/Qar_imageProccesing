@@ -117,20 +117,42 @@ def select_best(
         return None, [], "no_candidates"
 
     # Filter to successful candidates
-    successful = [c for c in candidates if c.get("status") == "ok"]
+    successful = []
+    for c in candidates:
+        has_glb = bool(c.get("output_glb_path") and Path(c.get("output_glb_path")).exists())
+        if c.get("provider_status") == "ok" and has_glb:
+            successful.append(c)
 
     # Sort all by score descending for ranking
-    ranking = sorted(candidates, key=lambda c: c.get("score", 0), reverse=True)
+    candidates_sorted = sorted(candidates, key=lambda c: c.get("score", 0), reverse=True)
 
     if not successful:
-        return None, ranking, "all_candidates_failed"
+        compact_ranking = [
+            {
+                "candidate_id": c.get("candidate_id"),
+                "score": c.get("score"),
+                "status": c.get("status"),
+                "provider_status": c.get("provider_status"),
+                "selected": False,
+            }
+            for c in candidates_sorted
+        ]
+        return None, compact_ranking, "all_candidates_failed"
 
     # Among successful, pick highest score
     successful.sort(key=lambda c: c.get("score", 0), reverse=True)
     best = successful[0]
-    reason = (
-        f"candidate_{best.get('candidate_id', '?')} selected: "
-        f"score={best.get('score', 0)}, "
-        f"provider_status={best.get('provider_status', '?')}"
-    )
-    return best, ranking, reason
+    reason = f"highest_score ({best.get('score', 0)})"
+
+    compact_ranking = [
+        {
+            "candidate_id": c.get("candidate_id"),
+            "score": c.get("score"),
+            "status": c.get("status"),
+            "provider_status": c.get("provider_status"),
+            "selected": c.get("candidate_id") == best.get("candidate_id"),
+        }
+        for c in candidates_sorted
+    ]
+
+    return best, compact_ranking, reason

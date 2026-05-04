@@ -1310,6 +1310,39 @@ class TestMultiInput(unittest.TestCase):
         with tempfile.TemporaryDirectory() as sd:
             self.assertIsNone(load_session_inputs(sd))
 
+    def test_write_session_inputs_basenames_only(self):
+        from modules.ai_3d_generation.multi_input import write_session_inputs, load_session_inputs
+        with tempfile.TemporaryDirectory() as sd:
+            write_session_inputs(sd, "multi_image", ["/absolute/path/to/upload_001.jpg", "upload_002.png"])
+            data = load_session_inputs(sd)
+            self.assertEqual(data["input_files"], ["upload_001.jpg", "upload_002.png"])
+
+    def test_resolve_multi_image_skips_non_images(self):
+        from modules.ai_3d_generation.multi_input import write_session_inputs, load_session_inputs, resolve_candidate_sources
+        with tempfile.TemporaryDirectory() as sd:
+            input_dir = Path(sd) / "input"
+            input_dir.mkdir()
+            for name in ["upload_001.jpg", "upload_002.txt"]:
+                (input_dir / name).write_text("fake")
+            write_session_inputs(sd, "multi_image", ["upload_001.jpg", "upload_002.txt"])
+            si = load_session_inputs(sd)
+            result = resolve_candidate_sources(sd, str(input_dir / "upload_001.jpg"), si)
+            # Only the image should be resolved
+            self.assertEqual(len(result["sources"]), 1)
+            self.assertTrue(result["sources"][0].endswith("upload_001.jpg"))
+
+    def test_resolve_multi_image_path_traversal_guard(self):
+        from modules.ai_3d_generation.multi_input import write_session_inputs, load_session_inputs, resolve_candidate_sources
+        with tempfile.TemporaryDirectory() as sd:
+            input_dir = Path(sd) / "input"
+            input_dir.mkdir()
+            (input_dir / "upload_001.jpg").write_text("fake")
+            write_session_inputs(sd, "multi_image", ["upload_001.jpg", "../../../../windows/system32/cmd.exe"])
+            si = load_session_inputs(sd)
+            result = resolve_candidate_sources(sd, str(input_dir / "upload_001.jpg"), si)
+            self.assertEqual(len(result["sources"]), 1)
+            self.assertTrue(result["sources"][0].endswith("upload_001.jpg"))
+
     def test_resolve_multi_image_sources(self):
         import cv2, numpy as np
         from modules.ai_3d_generation.multi_input import (
@@ -1392,15 +1425,16 @@ class TestCandidateSelector(unittest.TestCase):
     def test_select_best_picks_highest_score(self):
         from modules.ai_3d_generation.candidate_selector import select_best
         candidates = [
-            self._make_candidate("cand_001", status="ok", score=60),
-            self._make_candidate("cand_002", status="ok", score=80),
+            self._make_candidate("cand_001", status="ok", glb_path="/fake.glb", score=60),
+            self._make_candidate("cand_002", status="ok", glb_path="/fake.glb", score=80),
             self._make_candidate("cand_003", status="failed", score=0),
         ]
-        best, ranking, reason = select_best(candidates)
-        self.assertIsNotNone(best)
-        self.assertEqual(best["candidate_id"], "cand_002")
-        self.assertIn("cand_002", reason)
-        self.assertEqual(ranking[0]["candidate_id"], "cand_002")
+        with patch("pathlib.Path.exists", return_value=True):
+            best, ranking, reason = select_best(candidates)
+            self.assertIsNotNone(best)
+            self.assertEqual(best["candidate_id"], "cand_002")
+            self.assertIn("80", reason)
+            self.assertEqual(ranking[0]["candidate_id"], "cand_002")
 
     def test_select_best_all_failed(self):
         from modules.ai_3d_generation.candidate_selector import select_best
@@ -1423,11 +1457,31 @@ class TestCandidateSelector(unittest.TestCase):
         from modules.ai_3d_generation.candidate_selector import select_best
         candidates = [
             self._make_candidate("cand_001", status="failed", score=0),
-            self._make_candidate("cand_002", status="ok", score=70),
+            self._make_candidate("cand_002", status="ok", provider_status="ok", glb_path="/fake.glb", score=70),
         ]
-        best, _, reason = select_best(candidates)
-        self.assertIsNotNone(best)
-        self.assertEqual(best["candidate_id"], "cand_002")
+        with patch("pathlib.Path.exists", return_value=True):
+            best, _, reason = select_best(candidates)
+            self.assertIsNotNone(best)
+            self.assertEqual(best["candidate_id"], "cand_002")
+
+    def test_candidate_ranking_compact(self):
+        from modules.ai_3d_generation.candidate_selector import select_best
+        candidates = [
+            self._make_candidate("cand_001", status="ok", provider_status="ok", glb_path="/fake.glb", score=60),
+            self._make_candidate("cand_002", status="ok", provider_status="ok", glb_path="/fake.glb", score=80),
+        ]
+        with patch("pathlib.Path.exists", return_value=True):
+            best, ranking, reason = select_best(candidates)
+            self.assertEqual(len(ranking), 2)
+            for r in ranking:
+                self.assertIn("candidate_id", r)
+                self.assertIn("selected", r)
+                self.assertNotIn("warnings", r)  # Only compact fields
+            
+            # The highest score should be first in ranking
+            self.assertEqual(ranking[0]["candidate_id"], "cand_002")
+            self.assertTrue(ranking[0]["selected"])
+            self.assertFalse(ranking[1]["selected"])
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1603,6 +1657,39 @@ class TestCandidateRunner(unittest.TestCase):
         # Should only process 3, not 5
         self.assertEqual(len(results), 3)
         self.assertEqual(prov.safe_generate.call_count, 3)
+
+    def test_worker_metadata_preserved(self):
+        import cv2, numpy as np
+        from modules.ai_3d_generation.candidate_runner import run_candidates_sequential
+
+        with tempfile.TemporaryDirectory() as sd:
+            srcs = []
+            p = Path(sd) / "src_0.jpg"
+            cv2.imwrite(str(p), np.zeros((64, 64, 3), dtype=np.uint8))
+            srcs.append(str(p))
+
+            glb = Path(sd) / "derived" / "candidates" / "cand_001" / "output.glb"
+            glb.parent.mkdir(parents=True, exist_ok=True)
+            glb.write_bytes(b"GLBFAKE" * 100)
+
+            worker_meta = {"peak_mem_mb": 4000, "device": "cuda:0"}
+            result_payload = {
+                "status": "ok",
+                "output_path": str(glb),
+                "model_name": "sf3d",
+                "warnings": [],
+                "error": None,
+                "metadata": worker_meta,
+                "preview_image_path": None,
+            }
+
+            prov = self._mock_provider([result_payload])
+            results = run_candidates_sequential(sd, srcs, prov, input_size=64, input_mode="video")
+            
+            self.assertEqual(results[0]["worker_metadata"], worker_meta)
+            self.assertEqual(results[0]["model_name"], "sf3d")
+            self.assertEqual(results[0]["source_type"], "video_frame")
+            self.assertGreater(results[0]["output_size_bytes"], 0)
 
 
 if __name__ == "__main__":

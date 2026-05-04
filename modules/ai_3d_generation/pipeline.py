@@ -117,6 +117,7 @@ def generate_ai_3d(
         res = resolve_candidate_sources(output_base_dir, str(dest_input), session_inputs)
         input_type = res["input_mode"]
         sources = res["sources"]
+        uploaded_files_count = res.get("uploaded_files_count", 1)
         
         if input_type == "video":
             from .video_candidates import select_top_k_frames
@@ -147,6 +148,7 @@ def generate_ai_3d(
             options=opts,
             max_candidates=settings.ai_3d_max_candidates,
             input_size=opts.get("input_size", settings.sf3d_input_size),
+            input_mode=input_type,
         )
         
         _t1 = time.monotonic()
@@ -185,14 +187,18 @@ def generate_ai_3d(
             else:
                 prepared_image_path = None
                 
+            if input_type == "video" and best.get("source_path") and Path(best["source_path"]).exists():
+                shutil.copy2(best["source_path"], str(derived_dir / "selected_frame.jpg"))
+                selected_frame_path = str(derived_dir / "selected_frame.jpg")
+
             provider_result = {
                 "status": best.get("provider_status", "failed"),
                 "output_path": output_glb_path,
                 "preview_image_path": None,
                 "warnings": best.get("warnings", []),
                 "error": None,
-                "metadata": {"peak_mem_mb": best.get("peak_mem_mb")},
-                "model_name": provider.name,
+                "metadata": best.get("worker_metadata", {}),
+                "model_name": best.get("model_name") or provider.name,
             }
             warnings.extend(best.get("warnings", []))
             if best.get("errors"):

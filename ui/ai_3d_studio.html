@@ -284,14 +284,14 @@
       ['Provider',       manifest.provider || '—'],
       ['Execution Mode', execMode],
       ['Input Mode',     manifest.input_mode || '—'],
-      ['Candidates',     manifest.candidate_count ? `${manifest.candidate_count} (Selected: ${manifest.selected_candidate_id || '—'})` : '—'],
+      ['Candidates',     manifest.candidate_count != null ? `${manifest.candidate_count} (Selected: ${manifest.selected_candidate_id || '—'})` : '—'],
       ['Model',          manifest.model_name || '—'],
       ['Device',         _wm.device || '—'],
       ['Status',         manifest.status || '—'],
       ['Is True Scan',   manifest.is_true_scan ? 'Yes' : 'No'],
       ['Geo Confidence', manifest.geometry_confidence || '—'],
       ['Peak GPU Mem',   manifest.peak_mem_mb ? `${manifest.peak_mem_mb} MB` : '—'],
-      ['Output Size',    _sizeFmt(_wm.output_size_bytes)],
+      ['Output Size',    _sizeFmt(manifest.output_size_bytes || _wm.output_size_bytes)],
       ['Review Required', manifest.review_required ? 'Yes' : 'No'],
     ];
     fields.forEach(([l, v]) => {

@@ -1476,6 +1476,11 @@ async def ai3d_upload_multi(
     input_dir.mkdir(parents=True, exist_ok=True)
 
     input_files = []
+    
+    for f in files:
+        if not f.content_type or not f.content_type.startswith("image/"):
+            raise HTTPException(status_code=400, detail="upload-multi accepts image files only")
+
     # Save the first file to upload.ext for backward compatibility of process endpoint
     first_suffix = Path(files[0].filename or "upload.jpg").suffix or ".jpg"
     dest_first = input_dir / f"upload{first_suffix}"
@@ -1608,6 +1613,7 @@ async def ai3d_process(session_id: str, body: Optional[_AI3DProcessRequest] = No
             "uploaded_files_count": manifest.get("uploaded_files_count"),
             "candidate_count": manifest.get("candidate_count"),
             "selected_candidate_id": manifest.get("selected_candidate_id"),
+            "candidate_summary": manifest.get("candidate_ranking"),
         }
         if provider_failure_reason:
             response["provider_failure_reason"] = provider_failure_reason

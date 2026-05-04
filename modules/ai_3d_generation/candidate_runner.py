@@ -44,6 +44,7 @@ def run_candidates_sequential(
     options: Optional[Dict[str, Any]] = None,
     max_candidates: int = 5,
     input_size: int = 512,
+    input_mode: str = "single_image",
 ) -> List[Dict[str, Any]]:
     """
     Process each candidate source image sequentially.
@@ -77,9 +78,16 @@ def run_candidates_sequential(
     for i, src_path in enumerate(source_paths[:max_candidates], start=1):
         cand_id = f"cand_{i:03d}"
         cand_dir = _ensure_candidate_dir(session_dir, i)
+        source_type = "single_image"
+        if input_mode == "video":
+            source_type = "video_frame"
+        elif input_mode == "multi_image":
+            source_type = "uploaded_image"
+
         cand_meta: Dict[str, Any] = {
             "candidate_id": cand_id,
             "source_path": src_path,
+            "source_type": source_type,
             "prepared_image_path": None,
             "output_glb_path": None,
             "provider_status": "failed",
@@ -140,9 +148,16 @@ def run_candidates_sequential(
                     pass
             cand_meta["output_glb_path"] = output_path
 
-            # Extract peak memory if available
+            # Extract peak memory and metadata
             worker_meta = prov_result.get("metadata", {})
+            cand_meta["worker_metadata"] = worker_meta
+            cand_meta["model_name"] = prov_result.get("model_name")
             cand_meta["peak_mem_mb"] = worker_meta.get("peak_mem_mb")
+            
+            output_size_bytes = worker_meta.get("output_size_bytes")
+            if not output_size_bytes and output_path and Path(output_path).exists():
+                output_size_bytes = Path(output_path).stat().st_size
+            cand_meta["output_size_bytes"] = output_size_bytes
 
             # Determine candidate status
             if prov_result.get("status") == "ok" and output_path and Path(output_path).exists():

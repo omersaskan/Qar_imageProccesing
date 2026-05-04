@@ -19,6 +19,8 @@ logger = logging.getLogger("ai_3d_generation.multi_input")
 
 # File extensions recognised as video
 _VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".webm", ".mkv"}
+_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+_VALID_INPUT_MODES = {"single_image", "video", "multi_image"}
 
 
 def detect_input_mode(file_path: str) -> str:
@@ -47,6 +49,15 @@ def load_session_inputs(session_dir: str) -> Optional[Dict[str, Any]]:
         return None
     try:
         data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            logger.warning("session_inputs.json is not a dict")
+            return None
+        if data.get("input_mode") not in _VALID_INPUT_MODES:
+            logger.warning("Invalid input_mode in session_inputs.json")
+            return None
+        if not isinstance(data.get("input_files"), list):
+            logger.warning("input_files is not a list")
+            return None
         logger.debug("Loaded session_inputs.json from %s: mode=%s count=%s",
                       session_dir, data.get("input_mode"), data.get("uploaded_files_count"))
         return data
@@ -82,21 +93,39 @@ def resolve_candidate_sources(
     if session_inputs and session_inputs.get("input_mode") == "multi_image":
         files = session_inputs.get("input_files", [])
         sources = []
+        uploaded_files_count = session_inputs.get("uploaded_files_count", len(files))
+        
         for fname in files:
             p = input_dir / fname
-            if p.exists():
-                sources.append(str(p.resolve()))
+            
+            # Path traversal guard
+            try:
+                resolved_p = p.resolve(strict=False)
+                if not str(resolved_p).startswith(str(input_dir.resolve())):
+                    logger.warning("Path traversal attempt in multi_input: %s", fname)
+                    continue
+            except Exception:
+                continue
+                
+            # Skip non-images in multi_image mode
+            if resolved_p.suffix.lower() not in _IMAGE_EXTENSIONS:
+                logger.warning("Skipping non-image file in multi_image mode: %s", fname)
+                continue
+                
+            if resolved_p.exists():
+                sources.append(str(resolved_p))
             else:
-                logger.warning("multi_input source file missing: %s", p)
+                logger.warning("multi_input source file missing: %s", resolved_p)
+                
         if not sources:
             # Fallback to the provided input path
             logger.warning("No multi-image sources resolved; falling back to input_file_path")
-            return {"input_mode": "single_image", "sources": [str(Path(input_file_path).resolve())]}
-        return {"input_mode": "multi_image", "sources": sources}
+            return {"input_mode": "single_image", "sources": [str(Path(input_file_path).resolve())], "uploaded_files_count": 1}
+        return {"input_mode": "multi_image", "sources": sources, "uploaded_files_count": uploaded_files_count}
 
     # Single file — detect video vs image
     mode = detect_input_mode(input_file_path)
-    return {"input_mode": mode, "sources": [str(Path(input_file_path).resolve())]}
+    return {"input_mode": mode, "sources": [str(Path(input_file_path).resolve())], "uploaded_files_count": 1}
 
 
 def write_session_inputs(
@@ -110,10 +139,11 @@ def write_session_inputs(
     """
     input_dir = Path(session_dir) / "input"
     input_dir.mkdir(parents=True, exist_ok=True)
+    input_files_basenames = [Path(f).name for f in input_files]
     manifest = {
         "input_mode": input_mode,
-        "uploaded_files_count": len(input_files),
-        "input_files": input_files,
+        "uploaded_files_count": len(input_files_basenames),
+        "input_files": input_files_basenames,
     }
     out_path = input_dir / "session_inputs.json"
     out_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
