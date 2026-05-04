@@ -21,6 +21,8 @@ logger = logging.getLogger("ai_3d_generation.multi_input")
 _VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".webm", ".mkv"}
 _IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 _VALID_INPUT_MODES = {"single_image", "video", "multi_image"}
+_VALID_PROVIDERS = {"sf3d", "rodin", "meshy", "tripo"}
+
 
 
 def detect_input_mode(file_path: str) -> str:
@@ -58,9 +60,14 @@ def load_session_inputs(session_dir: str) -> Optional[Dict[str, Any]]:
         if not isinstance(data.get("input_files"), list):
             logger.warning("input_files is not a list")
             return None
-        logger.debug("Loaded session_inputs.json from %s: mode=%s count=%s",
-                      session_dir, data.get("input_mode"), data.get("uploaded_files_count"))
+        if data.get("provider") and data.get("provider") not in _VALID_PROVIDERS:
+            logger.warning("Invalid provider in session_inputs.json: %s", data.get("provider"))
+            # We don't fail here, but we might ignore it in the caller
+        
+        logger.debug("Loaded session_inputs.json from %s: mode=%s count=%s provider=%s",
+                      session_dir, data.get("input_mode"), data.get("uploaded_files_count"), data.get("provider"))
         return data
+
     except Exception as exc:
         logger.warning("Failed to parse session_inputs.json at %s: %s", manifest_path, exc)
         return None
@@ -140,6 +147,7 @@ def write_session_inputs(
     session_dir: str,
     input_mode: str,
     input_files: List[str],
+    provider: Optional[str] = None,
 ) -> str:
     """
     Write session_inputs.json to ``<session_dir>/input/session_inputs.json``.
@@ -149,6 +157,8 @@ def write_session_inputs(
         raise ValueError(f"Invalid input_mode: {input_mode}")
     if input_mode == "multi_image" and not input_files:
         raise ValueError("multi_image mode requires at least one input file")
+    if provider and provider not in _VALID_PROVIDERS:
+        raise ValueError(f"Invalid provider: {provider}")
 
     input_dir = Path(session_dir) / "input"
     input_dir.mkdir(parents=True, exist_ok=True)
@@ -157,7 +167,9 @@ def write_session_inputs(
         "input_mode": input_mode,
         "uploaded_files_count": len(input_files_basenames),
         "input_files": input_files_basenames,
+        "provider": provider,
     }
     out_path = input_dir / "session_inputs.json"
     out_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     return str(out_path)
+

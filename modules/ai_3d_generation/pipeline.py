@@ -394,8 +394,22 @@ def generate_ai_3d(
         duration_sec=_duration_sec,
         output_size_bytes=_output_size_bytes,
         path_diagnostics=_path_diag,
+
+        # Phase 1.5 External Provider
+        external_provider=provider_result.get("metadata", {}).get("external_provider", False),
+        external_provider_name=provider_result.get("metadata", {}).get("external_provider_name"),
+        external_task_id=provider_result.get("metadata", {}).get("external_task_id"),
+        external_status=provider_result.get("metadata", {}).get("external_status"),
+        downloaded_output_glb_path=provider_result.get("metadata", {}).get("downloaded_output_glb_path"),
+        privacy_notice=provider_result.get("metadata", {}).get("privacy_notice"),
+        provider_latency_sec=provider_result.get("metadata", {}).get("provider_latency_sec"),
+        provider_poll_count=provider_result.get("metadata", {}).get("provider_poll_count"),
+        sanitized_error=provider_result.get("metadata", {}).get("sanitized_error"),
+        external_provider_consent=opts.get("external_provider_consent") is True,
+
         # Phase 1 multi-candidate
         input_mode=input_type,
+
         uploaded_files_count=uploaded_files_count,
         candidate_count=len(candidates),
         selected_candidate_id=selected_candidate_id,

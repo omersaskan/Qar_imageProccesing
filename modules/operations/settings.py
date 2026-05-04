@@ -336,14 +336,15 @@ class Settings(BaseSettings):
     ai_3d_preview_enabled: bool = Field(False, validation_alias="AI_3D_PREVIEW_ENABLED")
 
     # --- AI 3D GENERATION — SF3D integration (all default false) ---
-    ai_3d_generation_enabled: bool = Field(True, validation_alias="AI_3D_GENERATION_ENABLED")
+    ai_3d_generation_enabled: bool = Field(False, validation_alias="AI_3D_GENERATION_ENABLED")
     ai_3d_default_provider: str = Field("sf3d", validation_alias="AI_3D_DEFAULT_PROVIDER")
     ai_3d_output_format: str = Field("glb", validation_alias="AI_3D_OUTPUT_FORMAT")
     ai_3d_require_review: bool = Field(True, validation_alias="AI_3D_REQUIRE_REVIEW")
     ai_3d_preprocess_enabled: bool = Field(True, validation_alias="AI_3D_PREPROCESS_ENABLED")
     ai_3d_postprocess_enabled: bool = Field(True, validation_alias="AI_3D_POSTPROCESS_ENABLED")
 
-    sf3d_enabled: bool = Field(True, validation_alias="SF3D_ENABLED")
+    sf3d_enabled: bool = Field(False, validation_alias="SF3D_ENABLED")
+
     sf3d_python_path: str = Field(
         "external/stable-fast-3d/.venv_sf3d/Scripts/python.exe",
         validation_alias="SF3D_PYTHON_PATH",
@@ -362,7 +363,8 @@ class Settings(BaseSettings):
 
     # --- SF3D execution mode (Phase 4D) ---
     # disabled | local_windows | wsl_subprocess | remote_http  (default: disabled)
-    sf3d_execution_mode: str = Field("wsl_subprocess", validation_alias="SF3D_EXECUTION_MODE")
+    sf3d_execution_mode: str = Field("disabled", validation_alias="SF3D_EXECUTION_MODE")
+
     sf3d_wsl_distro: str = Field("Ubuntu-24.04", validation_alias="SF3D_WSL_DISTRO")
     sf3d_wsl_python_path: str = Field(
         "/home/lenovo/sf3d_venv/bin/python",
@@ -400,7 +402,9 @@ class Settings(BaseSettings):
     rodin_enabled: bool = Field(False, validation_alias="RODIN_ENABLED")
     rodin_api_key: str = Field("", validation_alias="RODIN_API_KEY")
     rodin_api_base_url: str = Field("https://api.hyper3d.ai/v1", validation_alias="RODIN_API_BASE_URL")
+    rodin_mock_mode: bool = Field(False, validation_alias="RODIN_MOCK_MODE")
     rodin_timeout_sec: int = Field(900, validation_alias="RODIN_TIMEOUT_SEC")
+
 
     tripo_enabled: bool = Field(False, validation_alias="TRIPO_ENABLED")
     tripo_api_key: str = Field("", validation_alias="TRIPO_API_KEY")

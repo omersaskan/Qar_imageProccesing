@@ -108,6 +108,8 @@ class AI3DRemoteAsyncProviderBase(AI3DProviderBase):
         import time
         from pathlib import Path
 
+        _t_start = time.monotonic()
+
         # 1. Create Task
         task_id, err = self.create_task(input_image_path, options)
         if err or not task_id:
@@ -144,12 +146,21 @@ class AI3DRemoteAsyncProviderBase(AI3DProviderBase):
         res["status"] = "ok"
         res["input_image_path"] = input_image_path
         res["output_path"] = local_path
+        
+        # Strengthened metadata (Phase 1.5)
         res["metadata"] = {
+            "external_provider": True,
+            "external_provider_name": self.name,
             "external_task_id": task_id,
-            "poll_attempts": attempts,
             "external_status": status,
+            "provider_latency_sec": round(time.monotonic() - _t_start, 2),
+            "provider_poll_count": attempts,
+            "downloaded_output_glb_path": local_path,
+            "privacy_notice": getattr(self, "privacy_notice", None) or "External provider terms of service apply.",
         }
         return res
+
+
 
 
 # ── result helpers ────────────────────────────────────────────────────────────
@@ -171,20 +182,26 @@ def _base_result(provider: str, output_format: str) -> Dict[str, Any]:
 
 
 def _unavailable_result(provider: str, output_format: str, reason: str) -> Dict[str, Any]:
+    from .sanitization import sanitize_external_provider_error
     r = _base_result(provider, output_format)
     r["status"] = "unavailable"
-    r["error"] = reason
+    r["error"] = sanitize_external_provider_error(reason)
     r["error_code"] = "provider_unavailable"
     return r
 
 
 def _failed_result(provider: str, output_format: str, reason: str,
                    error_code: str = "provider_exception") -> Dict[str, Any]:
+    from .sanitization import sanitize_external_provider_error
     r = _base_result(provider, output_format)
     r["status"] = "failed"
-    r["error"] = reason
+    r["error"] = sanitize_external_provider_error(reason)
     r["error_code"] = error_code
+    
+    # Ensure sanitized_error is in metadata for Phase 1.5
+    r["metadata"]["sanitized_error"] = r["error"]
     return r
+
 
 
 _KNOWN_STATUSES = ("ok", "unavailable", "failed", "disabled", "busy")

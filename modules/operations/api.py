@@ -1423,11 +1423,7 @@ async def ai3d_upload(
     provider: str = Form(default="sf3d"),
 ):
     """Accept an image or video, create an AI 3D session."""
-    if not settings.ai_3d_generation_enabled:
-        raise HTTPException(
-            status_code=503,
-            detail="AI 3D Generation is disabled (AI_3D_GENERATION_ENABLED=false)",
-        )
+
     session_id = f"ai3d_{uuid.uuid4().hex[:12]}"
     session_dir = _ai3d_session_dir(session_id)
     input_dir = session_dir / "input"
@@ -1445,7 +1441,12 @@ async def ai3d_upload(
         "provider": provider,
         "manifest_path": None,
     }
+
+    from modules.ai_3d_generation.multi_input import write_session_inputs
+    write_session_inputs(str(session_dir), "single_image", [dest.name], provider=provider)
+
     return {
+
         "session_id": session_id,
         "status": "uploaded",
         "provider": provider,
@@ -1459,11 +1460,7 @@ async def ai3d_upload_multi(
     provider: str = Form(default="sf3d"),
 ):
     """Accept multiple images or videos, create an AI 3D session."""
-    if not settings.ai_3d_generation_enabled:
-        raise HTTPException(
-            status_code=503,
-            detail="AI 3D Generation is disabled (AI_3D_GENERATION_ENABLED=false)",
-        )
+
     if not settings.ai_3d_multi_input_enabled:
         raise HTTPException(status_code=400, detail="Multi-input is disabled")
         
@@ -1496,7 +1493,7 @@ async def ai3d_upload_multi(
             shutil.copy2(str(dest), str(dest_first))
 
     from modules.ai_3d_generation.multi_input import write_session_inputs
-    write_session_inputs(str(session_dir), "multi_image", input_files)
+    write_session_inputs(str(session_dir), "multi_image", input_files, provider=provider)
 
     _ai3d_sessions[session_id] = {
         "session_id": session_id,
@@ -1505,6 +1502,7 @@ async def ai3d_upload_multi(
         "provider": provider,
         "manifest_path": None,
     }
+
     return {
         "session_id": session_id,
         "status": "uploaded",
@@ -1521,6 +1519,12 @@ class _AI3DProcessRequest(BaseModel):
 @app.post("/api/ai-3d/process/{session_id}", dependencies=[Depends(verify_api_key)])
 async def ai3d_process(session_id: str, body: Optional[_AI3DProcessRequest] = None):
     """Run AI 3D generation for the uploaded file."""
+    if not settings.ai_3d_generation_enabled:
+        raise HTTPException(
+            status_code=503,
+            detail="AI 3D Generation is disabled (AI_3D_GENERATION_ENABLED=false)",
+        )
+
     if session_id not in _ai3d_sessions:
         raise HTTPException(status_code=404, detail=f"AI 3D session not found: {session_id}")
 
@@ -1529,26 +1533,43 @@ async def ai3d_process(session_id: str, body: Optional[_AI3DProcessRequest] = No
         return {"session_id": session_id, "status": info["status"],
                 "detail": "Already processed or processing"}
 
-    info["status"] = "processing"
     session_dir = _ai3d_session_dir(session_id)
     opts = (body.options if body and body.options else {}) or {}
 
-    provider_name = info.get("provider") or settings.ai_3d_default_provider
+    # Resolve provider
+    from modules.ai_3d_generation.multi_input import load_session_inputs
+    session_inputs = load_session_inputs(str(session_dir))
+    session_provider = session_inputs.get("provider") if session_inputs else None
+    request_provider = opts.get("provider")
+    
+    resolved_provider = session_provider
+    if not resolved_provider:
+        resolved_provider = request_provider or info.get("provider") or settings.ai_3d_default_provider
 
-    # Server-side consent enforcement for external providers
-    external_providers = ("rodin", "meshy", "tripo")
-    if provider_name in external_providers:
+    # Mismatch check
+    if request_provider and session_provider and request_provider != session_provider:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "provider_mismatch",
+                "message": f"Requested provider '{request_provider}' does not match session provider '{session_provider}'.",
+                "session_id": session_id,
+            }
+        )
+
+    # Authoritative consent enforcement for external providers
+    external_providers = {"rodin", "meshy", "tripo"}
+    if resolved_provider in external_providers:
         consent = opts.get("external_provider_consent")
-        if not consent:
-            logger.warning(f"[API] Denying external provider '{provider_name}' for session {session_id}: consent missing")
+        if consent is not True:
+            logger.warning(f"[API] Denying external provider '{resolved_provider}' for session {session_id}: consent missing")
             raise HTTPException(
                 status_code=400,
-                detail={
-                    "error": "external_provider_consent_required",
-                    "message": f"Explicit consent is required to use external provider '{provider_name}'.",
-                    "session_id": session_id,
-                }
+                detail={"error": "external_provider_consent_required"}
             )
+
+    info["status"] = "processing"
+
 
     try:
         from modules.ai_3d_generation.pipeline import generate_ai_3d
@@ -1556,9 +1577,10 @@ async def ai3d_process(session_id: str, body: Optional[_AI3DProcessRequest] = No
             session_id=session_id,
             input_file_path=info["input_path"],
             output_base_dir=str(session_dir),
-            provider_name=provider_name,
+            provider_name=resolved_provider,
             options=opts,
         )
+
         info["status"] = manifest.get("status", "failed")
         info["manifest_path"] = str(session_dir / "manifests" / "ai3d_manifest.json")
 
@@ -1635,11 +1657,10 @@ async def ai3d_process(session_id: str, body: Optional[_AI3DProcessRequest] = No
         return response
     except Exception as e:
         info["status"] = "failed"
-        # Sanitize: never include raw exception that might contain auth headers/keys
-        err_msg = str(e)
-        if "Authorization" in err_msg or "Bearer" in err_msg or "key" in err_msg.lower():
-             err_msg = "An error occurred with a remote provider (sensitive details redacted)"
+        from modules.ai_3d_generation.sanitization import sanitize_external_provider_error
+        err_msg = sanitize_external_provider_error(str(e))
         raise HTTPException(status_code=500, detail=f"AI 3D processing failed: {err_msg}")
+
 
 
 @app.get("/api/ai-3d/status/{session_id}", dependencies=[Depends(verify_api_key)])
