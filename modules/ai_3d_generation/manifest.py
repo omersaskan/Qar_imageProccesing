@@ -49,6 +49,7 @@ def build_manifest(
     candidate_ranking: Optional[List[Dict[str, Any]]] = None,
     candidates: Optional[List[Dict[str, Any]]] = None,
     quality_mode: Optional[str] = None,
+    resolved_quality: Optional[Dict[str, Any]] = None,
     # ── Phase 1.5 External Provider additions ─────────────────────────────────
     external_provider: bool = False,
     external_provider_name: Optional[str] = None,
@@ -77,6 +78,7 @@ def build_manifest(
     _path_diagnostics = sanitize_json_like(path_diagnostics or {})
     _candidates       = sanitize_json_like(candidates or [])
     _candidate_ranking = sanitize_json_like(candidate_ranking or [])
+    _resolved_quality = sanitize_json_like(resolved_quality or {})
 
     return {
         "enabled": enabled,
@@ -158,6 +160,7 @@ def build_manifest(
         "candidate_ranking": _candidate_ranking,
         "candidates": _candidates,
         "quality_mode": quality_mode,
+        "resolved_quality": _resolved_quality,
     }
 
 

@@ -27,6 +27,7 @@ from .manifest import build_manifest, write_manifest
 from .input_preprocessor import preprocess_input
 from .postprocess import run_postprocess
 from .quality_gate import evaluate as quality_evaluate
+from .quality_profiles import resolve_quality_profile
 
 logger = logging.getLogger("ai_3d_generation.pipeline")
 
@@ -62,6 +63,26 @@ def generate_ai_3d(
     provider_name = provider_name or settings.ai_3d_default_provider
     provider = _get_provider(provider_name)
     opts = options or {}
+
+    # Resolve quality profile
+    q_mode = opts.get("quality_mode") or settings.ai_3d_quality_mode
+    try:
+        resolved_quality = resolve_quality_profile(q_mode, settings, opts)
+    except Exception as exc:
+        logger.warning(f"Quality profile resolution failed: {exc}. Falling back to settings.")
+        resolved_quality = {
+            "input_size": opts.get("input_size", settings.sf3d_input_size),
+            "texture_resolution": opts.get("texture_resolution", settings.sf3d_texture_resolution),
+            "max_candidates": settings.ai_3d_max_candidates,
+            "video_topk_frames": settings.ai_3d_video_topk_frames,
+            "remesh": opts.get("remesh", settings.sf3d_remesh),
+            "quality_mode": "fallback",
+            "warnings": [f"resolution_error:{exc}"]
+        }
+    
+    # Inject resolved quality into options for provider
+    opts["texture_resolution"] = resolved_quality["texture_resolution"]
+    opts["remesh"] = resolved_quality["remesh"]
 
     # Consent check for external providers
     external_providers = ("rodin", "meshy", "tripo")
@@ -146,7 +167,7 @@ def generate_ai_3d(
             sources = select_top_k_frames(
                 video_path=sources[0],
                 out_dir=str(derived_dir / "extracted_frames"),
-                top_k=settings.ai_3d_video_topk_frames,
+                top_k=resolved_quality["video_topk_frames"],
                 min_spacing_sec=settings.ai_3d_video_frame_min_spacing_sec,
             )
             if not sources:
@@ -168,8 +189,8 @@ def generate_ai_3d(
             source_paths=sources,
             provider=provider,
             options=opts,
-            max_candidates=settings.ai_3d_max_candidates,
-            input_size=opts.get("input_size", settings.sf3d_input_size),
+            max_candidates=resolved_quality["max_candidates"],
+            input_size=resolved_quality["input_size"],
             input_mode=input_type,
         )
         
@@ -264,7 +285,7 @@ def generate_ai_3d(
             preprocessing_meta = preprocess_input(
                 source_image_path=image_path_for_gen,
                 output_dir=str(derived_dir),
-                input_size=opts.get("input_size", settings.sf3d_input_size),
+                input_size=resolved_quality["input_size"],
             )
             prepared_image_path = preprocessing_meta.get("prepared_image_path")
             warnings.extend(preprocessing_meta.get("warnings", []))
@@ -419,7 +440,8 @@ def generate_ai_3d(
         selected_candidate_reason=selected_candidate_reason,
         candidate_ranking=candidate_ranking,
         candidates=candidates,
-        quality_mode=settings.ai_3d_quality_mode,
+        quality_mode=resolved_quality["quality_mode"],
+        resolved_quality=resolved_quality,
     )
     write_manifest(manifest, str(manifests_dir))
 
