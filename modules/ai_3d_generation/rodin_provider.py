@@ -18,7 +18,8 @@ class RodinProvider(AI3DRemoteAsyncProviderBase):
             return False, "Rodin provider is disabled in settings (RODIN_ENABLED=false)"
         
         # Production guard for mock mode
-        if getattr(settings, "rodin_mock_mode", False) and settings.env != "local_dev":
+        env_value = getattr(settings.env, "value", settings.env)
+        if getattr(settings, "rodin_mock_mode", False) and env_value != "local_dev":
             return False, "Rodin mock mode is prohibited in non-local_dev environment"
 
         if not getattr(settings, "rodin_api_key", ""):

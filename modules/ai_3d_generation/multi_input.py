@@ -61,13 +61,15 @@ def load_session_inputs(session_dir: str) -> Optional[Dict[str, Any]]:
             logger.warning("input_files is not a list")
             return None
         if data.get("provider") and data.get("provider") not in _VALID_PROVIDERS:
-            logger.warning("Invalid provider in session_inputs.json: %s", data.get("provider"))
-            # We don't fail here, but we might ignore it in the caller
+            logger.error("Invalid provider in session_inputs.json: %s", data.get("provider"))
+            raise ValueError(f"Invalid provider in session_inputs.json: {data.get('provider')}")
         
         logger.debug("Loaded session_inputs.json from %s: mode=%s count=%s provider=%s",
                       session_dir, data.get("input_mode"), data.get("uploaded_files_count"), data.get("provider"))
         return data
 
+    except ValueError:
+        raise
     except Exception as exc:
         logger.warning("Failed to parse session_inputs.json at %s: %s", manifest_path, exc)
         return None

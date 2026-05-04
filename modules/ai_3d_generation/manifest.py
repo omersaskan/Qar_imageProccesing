@@ -5,6 +5,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Any, List, Optional
+from .sanitization import sanitize_text
 
 
 def build_manifest(
@@ -94,7 +95,7 @@ def build_manifest(
         "external_provider_consent": external_provider_consent,
         "provider_latency_sec": provider_latency_sec,
         "provider_poll_count": provider_poll_count,
-        "sanitized_error": sanitized_error,
+        "sanitized_error": sanitize_text(sanitized_error),
 
         # Input
         "source_input_path": source_input_path,
@@ -131,7 +132,7 @@ def build_manifest(
         "review_required": review_required,
         "warnings": warnings,
         "errors": errors,
-        "provider_failure_reason": provider_failure_reason,
+        "provider_failure_reason": sanitize_text(provider_failure_reason),
 
         # Phase 1 — multi-candidate orchestration
         "input_mode": input_mode,

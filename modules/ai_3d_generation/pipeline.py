@@ -408,7 +408,7 @@ def generate_ai_3d(
         external_provider_consent=opts.get("external_provider_consent") is True,
 
         # Phase 1 multi-candidate
-        input_mode=input_type,
+        input_mode=_normalize_input_mode(input_type),
 
         uploaded_files_count=uploaded_files_count,
         candidate_count=len(candidates),

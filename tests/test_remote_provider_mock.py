@@ -15,7 +15,8 @@ def test_rodin_provider_lifecycle_mocked(tmp_path, monkeypatch):
     
     # 2. Mock some inputs
     input_img = tmp_path / "input.jpg"
-    input_img.write_text("fake_data")
+    from PIL import Image
+    Image.new("RGB", (1, 1)).save(input_img, "JPEG")
     output_dir = tmp_path / "output"
     output_dir.mkdir()
     

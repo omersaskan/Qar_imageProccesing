@@ -3,9 +3,9 @@ import re
 from typing import Optional
 
 
-def sanitize_external_provider_error(text: Optional[str]) -> str:
+def sanitize_text(text: Optional[str]) -> str:
     """
-    Redact sensitive information from error messages or logs.
+    Redact sensitive information from text (logs, errors, manifests).
     Redacts:
     - Authorization headers (Bearer tokens)
     - api_key fields
@@ -15,22 +15,39 @@ def sanitize_external_provider_error(text: Optional[str]) -> str:
     if not text:
         return ""
 
-    # Redact Authorization: Bearer ...
+    # 1. Direct replacement of configured secrets (highest priority)
+    from modules.operations.settings import settings
+    secrets = [
+        getattr(settings, "rodin_api_key", ""),
+        getattr(settings, "meshy_api_key", ""),
+        getattr(settings, "tripo_api_key", ""),
+        getattr(settings, "pilot_api_key", ""),
+    ]
+    for s in secrets:
+        if s and isinstance(s, str):
+            text = text.replace(s, "[REDACTED]")
+
+    # 2. Redact Authorization: Bearer ...
     text = re.sub(r"(Authorization:\s*Bearer\s+)[^\s]+", r"\1[REDACTED]", text, flags=re.IGNORECASE)
     
-    # Redact Bearer ... (standalone)
+    # 3. Redact Bearer ... (standalone)
     text = re.sub(r"(Bearer\s+)[^\s]+", r"\1[REDACTED]", text, flags=re.IGNORECASE)
 
-    # Redact api_key=... or api_key: ...
+    # 4. Redact api_key=... or api_key: ...
     text = re.sub(r"(api_key\s*[=:]\s*)[^\s&,}\]]+", r"\1[REDACTED]", text, flags=re.IGNORECASE)
     
-    # Redact token=... or token: ...
+    # 5. Redact token=... or token: ...
     text = re.sub(r"(token\s*[=:]\s*)[^\s&,}\]]+", r"\1[REDACTED]", text, flags=re.IGNORECASE)
 
-    # Specific redaction for common key patterns
+    # 6. Specific redaction for common key patterns (heuristic)
     text = re.sub(r"([a-zA-Z0-9_-]{20,})", lambda m: "[REDACTED]" if _is_likely_key(m.group(1)) else m.group(1), text)
 
     return text
+
+
+def sanitize_external_provider_error(text: Optional[str]) -> str:
+    """Backwards-compatible wrapper around sanitize_text."""
+    return sanitize_text(text)
 
 
 def _is_likely_key(text: str) -> bool:
@@ -44,6 +61,6 @@ def _is_likely_key(text: str) -> bool:
         getattr(settings, "pilot_api_key", ""),
     ]
     for s in secrets:
-        if s and s in text:
+        if s and isinstance(s, str) and s in text:
             return True
     return False

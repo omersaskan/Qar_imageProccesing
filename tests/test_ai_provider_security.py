@@ -42,9 +42,9 @@ def test_api_keys_not_in_manifest():
     
     # The field names can exist, but NOT the secrets
     assert "rodin_api_key" not in m_str
-    # Note: If we passed it to build_manifest as a raw string, it would be there unless we sanitize it before.
-    # The requirement is that it is sanitized AT the source.
-    assert "SECRET_TOKEN_123" in m_str # This confirms the test itself can see what we passed.
+    # Phase 1.5 update: build_manifest NOW sanitizes, so the secret is GONE
+    assert "SECRET_TOKEN_123" not in m_str
+    assert "[REDACTED]" in m_str
     
     # Now test the ACTUAL sanitization utility
     sanitized = sanitize_external_provider_error("Authorization: Bearer SECRET_TOKEN_123")

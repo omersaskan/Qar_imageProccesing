@@ -109,11 +109,23 @@ class AI3DRemoteAsyncProviderBase(AI3DProviderBase):
         from pathlib import Path
 
         _t_start = time.monotonic()
+        
+        def _with_meta(res: Dict[str, Any], t_id: Optional[str] = None, st: Optional[str] = None, att: int = 0):
+            res["metadata"].update({
+                "external_provider": True,
+                "external_provider_name": self.name,
+                "external_task_id": t_id,
+                "external_status": st,
+                "provider_latency_sec": round(time.monotonic() - _t_start, 2),
+                "provider_poll_count": att,
+                "privacy_notice": getattr(self, "privacy_notice", None) or "External provider terms of service apply.",
+            })
+            return res
 
         # 1. Create Task
         task_id, err = self.create_task(input_image_path, options)
         if err or not task_id:
-            return _failed_result(self.name, self.output_format, err or "Task creation failed")
+            return _with_meta(_failed_result(self.name, self.output_format, err or "Task creation failed"))
 
         # 2. Poll
         status = "pending"
@@ -121,25 +133,25 @@ class AI3DRemoteAsyncProviderBase(AI3DProviderBase):
         error_msg = None
         
         while attempts < self.max_poll_attempts:
+            attempts += 1
             status, error_msg, progress = self.poll_status(task_id)
             if status == "succeeded":
                 break
             if status in ("failed", "cancelled"):
-                return _failed_result(
+                return _with_meta(_failed_result(
                     self.name, self.output_format, 
                     error_msg or f"Task {status}", 
                     error_code=f"provider_task_{status}"
-                )
+                ), task_id, status, attempts)
             
-            attempts += 1
             time.sleep(self.poll_interval_sec)
         else:
-            return _failed_result(self.name, self.output_format, "Polling timed out", error_code="provider_timeout")
+            return _with_meta(_failed_result(self.name, self.output_format, "Polling timed out", error_code="provider_timeout"), task_id, "timeout", attempts)
 
         # 3. Download
         local_path, err = self.download_result(task_id, output_dir)
         if err or not local_path:
-            return _failed_result(self.name, self.output_format, err or "Download failed")
+            return _with_meta(_failed_result(self.name, self.output_format, err or "Download failed"), task_id, status, attempts)
 
         # 4. Success result
         res = _base_result(self.name, self.output_format)
@@ -148,16 +160,8 @@ class AI3DRemoteAsyncProviderBase(AI3DProviderBase):
         res["output_path"] = local_path
         
         # Strengthened metadata (Phase 1.5)
-        res["metadata"] = {
-            "external_provider": True,
-            "external_provider_name": self.name,
-            "external_task_id": task_id,
-            "external_status": status,
-            "provider_latency_sec": round(time.monotonic() - _t_start, 2),
-            "provider_poll_count": attempts,
-            "downloaded_output_glb_path": local_path,
-            "privacy_notice": getattr(self, "privacy_notice", None) or "External provider terms of service apply.",
-        }
+        _with_meta(res, task_id, status, attempts)
+        res["metadata"]["downloaded_output_glb_path"] = local_path
         return res
 
 
@@ -213,6 +217,7 @@ def _normalise_status(result: Dict[str, Any], provider: str, output_format: str)
     if status not in _KNOWN_STATUSES:
         result = dict(result)
         original = result.get("error") or result.get("error_code") or status
-        result["error"] = original
+        from .sanitization import sanitize_text
+        result["error"] = sanitize_text(str(original))
         result["status"] = "failed"
     return result
