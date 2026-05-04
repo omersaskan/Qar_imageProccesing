@@ -67,18 +67,21 @@
     <a href="index.html">Photogrammetry pipeline</a>.
   </div>
 
-  <!-- Provider -->
+  <!-- Provider Selection -->
   <div class="ai3d-card">
-    <h2>Provider</h2>
-    <div class="ai3d-provider-row">
-      <div style="flex:1">
-        <div class="ai3d-provider-name">Stable Fast 3D (SF3D)</div>
-        <div class="ai3d-provider-note">
-          Stability AI Community License — check before commercial use.
-          Isolated subprocess worker · <span id="exec-mode-label">mode: —</span>
-        </div>
-      </div>
-      <span id="exec-mode-badge" style="display:none;background:#1e3a5f;color:#93c5fd;border-radius:4px;padding:2px 8px;font-size:.75rem;font-weight:700;letter-spacing:.04em"></span>
+    <h2>Select Provider</h2>
+    <div style="display:flex; gap:12px; align-items:center;">
+      <select id="provider-select" class="ai3d-btn" style="background:#fff; color:#374151; border:1px solid #d1d5db; padding:8px 12px; flex:1;" onchange="onProviderChange()">
+        <option value="sf3d" selected>Stable Fast 3D (Default Baseline)</option>
+        <option value="rodin">Rodin / Hyper3D Gen-2 (Premium Benchmark)</option>
+        <option value="meshy" disabled>Meshy (All-around Benchmark - Coming Soon)</option>
+        <option value="tripo" disabled>Tripo P1 (Multiview Benchmark - Coming Soon)</option>
+      </select>
+      <div id="exec-mode-badge" style="display:none;background:#1e3a5f;color:#93c5fd;border-radius:4px;padding:6px 10px;font-size:.75rem;font-weight:700;letter-spacing:.04em"></div>
+    </div>
+    <div id="provider-info" style="margin-top:12px; font-size:0.88rem; color:#6b7280;">
+      <span id="provider-license">Stability AI Community License — check before commercial use.</span>
+      <div id="provider-details" style="margin-top:4px;">Isolated subprocess worker · <span id="exec-mode-label">mode: —</span></div>
     </div>
   </div>
 
@@ -96,11 +99,30 @@
     </div>
     <img id="image-preview" class="ai3d-preview-img" alt="Preview" />
     <div style="margin-top:12px">
-      <button class="ai3d-btn" id="process-btn" disabled onclick="startProcess()">
+      <button class="ai3d-btn" id="process-btn" disabled onclick="handleGenerateClick()">
         Generate 3D
       </button>
     </div>
     <div class="ai3d-status info" id="status-box"></div>
+  </div>
+
+  <!-- Consent Modal -->
+  <div id="consent-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1000; align-items:center; justify-content:center;">
+    <div style="background:#fff; border-radius:12px; max-width:500px; padding:32px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1);">
+      <h3 style="margin-top:0; color:#111827; font-size:1.25rem;">External Provider Consent</h3>
+      <div style="margin:20px 0; font-size:0.95rem; color:#4b5563; line-height:1.5;">
+        <p>You have selected an <strong>external provider</strong> (<span id="modal-provider-name"></span>).</p>
+        <p style="background:#fff7ed; color:#9a3412; padding:12px; border-radius:8px; border:1px solid #ffedd5;">
+          <strong>⚠ Privacy Notice:</strong> Your uploaded media will be sent to an external server for processing. 
+          External providers may have different privacy policies and may consume credits.
+        </p>
+        <p>Do you want to proceed with sending your data to this provider?</p>
+      </div>
+      <div style="display:flex; gap:12px; justify-content:flex-end;">
+        <button class="ai3d-btn" style="background:#e5e7eb; color:#374151;" onclick="closeConsentModal()">Cancel</button>
+        <button class="ai3d-btn" id="confirm-consent-btn" onclick="confirmConsent()">I Consent, Proceed</button>
+      </div>
+    </div>
   </div>
 
   <!-- Provider error banner -->
@@ -148,6 +170,48 @@
   const API = '';
   let selectedFile = null;
   let currentSessionId = null;
+  let externalProviderConsent = false;
+
+  const PROVIDERS = {
+    sf3d: { name: 'Stable Fast 3D (SF3D)', license: 'Stability AI Community License — check before commercial use.', external: false },
+    rodin: { name: 'Rodin / Hyper3D Gen-2', license: 'Hyper3D Gen-2 Commercial License applies.', external: true },
+    meshy: { name: 'Meshy', license: 'Meshy Commercial License applies.', external: true },
+    tripo: { name: 'Tripo P1', license: 'Tripo Commercial License applies.', external: true }
+  };
+
+  function onProviderChange() {
+    const val = document.getElementById('provider-select').value;
+    const p = PROVIDERS[val];
+    document.getElementById('provider-license').textContent = p.license;
+    // Reset consent if provider changes
+    externalProviderConsent = false;
+  }
+
+  function handleGenerateClick() {
+    const providerVal = document.getElementById('provider-select').value;
+    const provider = PROVIDERS[providerVal];
+    
+    if (provider.external && !externalProviderConsent) {
+      openConsentModal(provider.name);
+    } else {
+      startProcess();
+    }
+  }
+
+  function openConsentModal(name) {
+    document.getElementById('modal-provider-name').textContent = name;
+    document.getElementById('consent-modal').style.display = 'flex';
+  }
+
+  function closeConsentModal() {
+    document.getElementById('consent-modal').style.display = 'none';
+  }
+
+  function confirmConsent() {
+    externalProviderConsent = true;
+    closeConsentModal();
+    startProcess();
+  }
 
   function onDragOver(e) { e.preventDefault(); document.getElementById('drop-zone').classList.add('dragover'); }
   function onDragLeave()  { document.getElementById('drop-zone').classList.remove('dragover'); }
@@ -179,6 +243,8 @@
   async function startProcess() {
     if (!selectedFile || !selectedFile.length) return;
     
+    const providerVal = document.getElementById('provider-select').value;
+
     // UI guard for mixed files
     if (selectedFile.length > 1) {
       for (let i = 0; i < selectedFile.length; i++) {
@@ -199,7 +265,7 @@
       if (selectedFile.length === 1) {
         fd.append('file', selectedFile[0], selectedFile[0].name);
       }
-      fd.append('provider', 'sf3d');
+      fd.append('provider', providerVal);
       const endpoint = selectedFile.length > 1 ? '/api/ai-3d/upload-multi' : '/api/ai-3d/upload';
       const ur = await fetch(`${API}${endpoint}`, { method: 'POST', body: fd });
       if (!ur.ok) { const e = await ur.json(); throw new Error(e.detail || ur.statusText); }
@@ -215,7 +281,18 @@
 
   async function processSession() {
     try {
-      const r = await fetch(`${API}/api/ai-3d/process/${currentSessionId}`, { method: 'POST' });
+      const providerVal = document.getElementById('provider-select').value;
+      const opts = {
+        options: {
+          external_provider_consent: externalProviderConsent
+        }
+      };
+
+      const r = await fetch(`${API}/api/ai-3d/process/${currentSessionId}`, { 
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(opts)
+      });
       if (!r.ok) { const e = await r.json(); throw new Error(e.detail || r.statusText); }
       const data = await r.json();
 

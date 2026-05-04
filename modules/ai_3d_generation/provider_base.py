@@ -63,6 +63,95 @@ class AI3DProviderBase(ABC):
             return _failed_result(self.name, self.output_format, str(exc))
 
 
+class AI3DRemoteAsyncProviderBase(AI3DProviderBase):
+    """
+    Base for providers that use an asynchronous remote API (Task -> Poll -> Download).
+    Provides a blocking generate() implementation that performs the polling loop.
+    """
+
+    poll_interval_sec: float = 5.0
+    max_poll_attempts: int = 120  # ~10 minutes by default at 5s intervals
+
+    @abstractmethod
+    def create_task(
+        self,
+        input_image_path: str,
+        options: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """
+        Start the remote task.
+        Returns (task_id: str | None, error: str | None).
+        """
+
+    @abstractmethod
+    def poll_status(self, task_id: str) -> Tuple[str, Optional[str], float]:
+        """
+        Check task status.
+        Returns (status: str, error: str | None, progress: float 0-1).
+        
+        Statuses should include: 'pending', 'processing', 'succeeded', 'failed', 'cancelled'.
+        """
+
+    @abstractmethod
+    def download_result(self, task_id: str, output_dir: str) -> Tuple[Optional[str], Optional[str]]:
+        """
+        Download the final GLB/asset.
+        Returns (local_path: str | None, error: str | None).
+        """
+
+    def generate(
+        self,
+        input_image_path: str,
+        output_dir: str,
+        options: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        import time
+        from pathlib import Path
+
+        # 1. Create Task
+        task_id, err = self.create_task(input_image_path, options)
+        if err or not task_id:
+            return _failed_result(self.name, self.output_format, err or "Task creation failed")
+
+        # 2. Poll
+        status = "pending"
+        attempts = 0
+        error_msg = None
+        
+        while attempts < self.max_poll_attempts:
+            status, error_msg, progress = self.poll_status(task_id)
+            if status == "succeeded":
+                break
+            if status in ("failed", "cancelled"):
+                return _failed_result(
+                    self.name, self.output_format, 
+                    error_msg or f"Task {status}", 
+                    error_code=f"provider_task_{status}"
+                )
+            
+            attempts += 1
+            time.sleep(self.poll_interval_sec)
+        else:
+            return _failed_result(self.name, self.output_format, "Polling timed out", error_code="provider_timeout")
+
+        # 3. Download
+        local_path, err = self.download_result(task_id, output_dir)
+        if err or not local_path:
+            return _failed_result(self.name, self.output_format, err or "Download failed")
+
+        # 4. Success result
+        res = _base_result(self.name, self.output_format)
+        res["status"] = "ok"
+        res["input_image_path"] = input_image_path
+        res["output_path"] = local_path
+        res["metadata"] = {
+            "external_task_id": task_id,
+            "poll_attempts": attempts,
+            "external_status": status,
+        }
+        return res
+
+
 # ── result helpers ────────────────────────────────────────────────────────────
 
 def _base_result(provider: str, output_format: str) -> Dict[str, Any]:

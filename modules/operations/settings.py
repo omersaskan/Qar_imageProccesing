@@ -393,7 +393,19 @@ class Settings(BaseSettings):
 
     meshy_enabled: bool = Field(False, validation_alias="MESHY_ENABLED")
     meshy_api_key: str = Field("", validation_alias="MESHY_API_KEY")
+    meshy_api_base_url: str = Field("https://api.meshy.ai/v1", validation_alias="MESHY_API_BASE_URL")
+    meshy_timeout_sec: int = Field(900, validation_alias="MESHY_TIMEOUT_SEC")
     meshy_require_review: bool = Field(True, validation_alias="MESHY_REQUIRE_REVIEW")
+
+    rodin_enabled: bool = Field(False, validation_alias="RODIN_ENABLED")
+    rodin_api_key: str = Field("", validation_alias="RODIN_API_KEY")
+    rodin_api_base_url: str = Field("https://api.hyper3d.ai/v1", validation_alias="RODIN_API_BASE_URL")
+    rodin_timeout_sec: int = Field(900, validation_alias="RODIN_TIMEOUT_SEC")
+
+    tripo_enabled: bool = Field(False, validation_alias="TRIPO_ENABLED")
+    tripo_api_key: str = Field("", validation_alias="TRIPO_API_KEY")
+    tripo_api_base_url: str = Field("https://api.tripo3d.ai/v1", validation_alias="TRIPO_API_BASE_URL")
+    tripo_timeout_sec: int = Field(900, validation_alias="TRIPO_TIMEOUT_SEC")
 
     # --- PHASE 6.2: DEPTH ANYTHING (scaffold only, disabled) ---
     depth_anything_enabled: bool = Field(False, validation_alias="DEPTH_ANYTHING_ENABLED")

@@ -1535,6 +1535,21 @@ async def ai3d_process(session_id: str, body: Optional[_AI3DProcessRequest] = No
 
     provider_name = info.get("provider") or settings.ai_3d_default_provider
 
+    # Server-side consent enforcement for external providers
+    external_providers = ("rodin", "meshy", "tripo")
+    if provider_name in external_providers:
+        consent = opts.get("external_provider_consent")
+        if not consent:
+            logger.warning(f"[API] Denying external provider '{provider_name}' for session {session_id}: consent missing")
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "external_provider_consent_required",
+                    "message": f"Explicit consent is required to use external provider '{provider_name}'.",
+                    "session_id": session_id,
+                }
+            )
+
     try:
         from modules.ai_3d_generation.pipeline import generate_ai_3d
         manifest = generate_ai_3d(
@@ -1620,7 +1635,11 @@ async def ai3d_process(session_id: str, body: Optional[_AI3DProcessRequest] = No
         return response
     except Exception as e:
         info["status"] = "failed"
-        raise HTTPException(status_code=500, detail=f"AI 3D processing failed: {e}")
+        # Sanitize: never include raw exception that might contain auth headers/keys
+        err_msg = str(e)
+        if "Authorization" in err_msg or "Bearer" in err_msg or "key" in err_msg.lower():
+             err_msg = "An error occurred with a remote provider (sensitive details redacted)"
+        raise HTTPException(status_code=500, detail=f"AI 3D processing failed: {err_msg}")
 
 
 @app.get("/api/ai-3d/status/{session_id}", dependencies=[Depends(verify_api_key)])

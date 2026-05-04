@@ -48,6 +48,19 @@ def build_manifest(
     candidate_ranking: Optional[List[Dict[str, Any]]] = None,
     candidates: Optional[List[Dict[str, Any]]] = None,
     quality_mode: Optional[str] = None,
+    # ── Phase 1.5 External Provider additions ─────────────────────────────────
+    external_provider: bool = False,
+    external_provider_name: Optional[str] = None,
+    external_task_id: Optional[str] = None,
+    external_status: Optional[str] = None,
+    external_model_urls: Optional[List[str]] = None,
+    downloaded_output_glb_path: Optional[str] = None,
+    cost_credits: Optional[float] = None,
+    privacy_notice: Optional[str] = None,
+    external_provider_consent: bool = False,
+    provider_latency_sec: Optional[float] = None,
+    provider_poll_count: Optional[int] = None,
+    sanitized_error: Optional[str] = None,
 ) -> Dict[str, Any]:
     _worker_meta = worker_metadata or {}
     return {
@@ -68,6 +81,20 @@ def build_manifest(
         "model_name": model_name,
         "license_note": license_note,
         "execution_mode": execution_mode,
+
+        # External Provider (Phase 1.5)
+        "external_provider": external_provider,
+        "external_provider_name": external_provider_name,
+        "external_task_id": external_task_id,
+        "external_status": external_status,
+        "external_model_urls": external_model_urls or [],
+        "downloaded_output_glb_path": downloaded_output_glb_path,
+        "cost_credits": cost_credits,
+        "privacy_notice": privacy_notice,
+        "external_provider_consent": external_provider_consent,
+        "provider_latency_sec": provider_latency_sec,
+        "provider_poll_count": provider_poll_count,
+        "sanitized_error": sanitized_error,
 
         # Input
         "source_input_path": source_input_path,

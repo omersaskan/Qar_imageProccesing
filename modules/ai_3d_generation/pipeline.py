@@ -35,7 +35,10 @@ def _get_provider(provider_name: str):
     if provider_name == "sf3d":
         from .sf3d_provider import SF3DProvider
         return SF3DProvider()
-    # Future providers go here
+    if provider_name == "rodin":
+        from .rodin_provider import RodinProvider
+        return RodinProvider()
+    # Fallback
     from .sf3d_provider import SF3DProvider
     return SF3DProvider()
 
@@ -56,6 +59,22 @@ def generate_ai_3d(
     provider_name = provider_name or settings.ai_3d_default_provider
     provider = _get_provider(provider_name)
     opts = options or {}
+
+    # Consent check for external providers
+    external_providers = ("rodin", "meshy", "tripo")
+    if provider.name in external_providers:
+        consent = opts.get("external_provider_consent")
+        if not consent:
+            logger.error(f"Consent missing for external provider: {provider.name}")
+            manifest = _build_failed_manifest(
+                session_id, input_file_path, "image", provider, 
+                ["external_provider_consent_required"], [], None
+            )
+            # Write it so it can be picked up
+            manifests_dir = Path(output_base_dir) / "manifests"
+            manifests_dir.mkdir(parents=True, exist_ok=True)
+            write_manifest(manifest, str(manifests_dir))
+            return manifest
 
     input_dir    = Path(output_base_dir) / "input"
     derived_dir  = Path(output_base_dir) / "derived"
