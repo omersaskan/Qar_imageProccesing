@@ -336,14 +336,14 @@ class Settings(BaseSettings):
     ai_3d_preview_enabled: bool = Field(False, validation_alias="AI_3D_PREVIEW_ENABLED")
 
     # --- AI 3D GENERATION — SF3D integration (all default false) ---
-    ai_3d_generation_enabled: bool = Field(False, validation_alias="AI_3D_GENERATION_ENABLED")
+    ai_3d_generation_enabled: bool = Field(True, validation_alias="AI_3D_GENERATION_ENABLED")
     ai_3d_default_provider: str = Field("sf3d", validation_alias="AI_3D_DEFAULT_PROVIDER")
     ai_3d_output_format: str = Field("glb", validation_alias="AI_3D_OUTPUT_FORMAT")
     ai_3d_require_review: bool = Field(True, validation_alias="AI_3D_REQUIRE_REVIEW")
     ai_3d_preprocess_enabled: bool = Field(True, validation_alias="AI_3D_PREPROCESS_ENABLED")
     ai_3d_postprocess_enabled: bool = Field(True, validation_alias="AI_3D_POSTPROCESS_ENABLED")
 
-    sf3d_enabled: bool = Field(False, validation_alias="SF3D_ENABLED")
+    sf3d_enabled: bool = Field(True, validation_alias="SF3D_ENABLED")
     sf3d_python_path: str = Field(
         "external/stable-fast-3d/.venv_sf3d/Scripts/python.exe",
         validation_alias="SF3D_PYTHON_PATH",
@@ -362,7 +362,7 @@ class Settings(BaseSettings):
 
     # --- SF3D execution mode (Phase 4D) ---
     # disabled | local_windows | wsl_subprocess | remote_http  (default: disabled)
-    sf3d_execution_mode: str = Field("disabled", validation_alias="SF3D_EXECUTION_MODE")
+    sf3d_execution_mode: str = Field("wsl_subprocess", validation_alias="SF3D_EXECUTION_MODE")
     sf3d_wsl_distro: str = Field("Ubuntu-24.04", validation_alias="SF3D_WSL_DISTRO")
     sf3d_wsl_python_path: str = Field(
         "/home/lenovo/sf3d_venv/bin/python",
@@ -374,6 +374,15 @@ class Settings(BaseSettings):
     )
     sf3d_wsl_timeout_sec: int = Field(600, validation_alias="SF3D_WSL_TIMEOUT_SEC")
     sf3d_wsl_output_copy_enabled: bool = Field(True, validation_alias="SF3D_WSL_OUTPUT_COPY_ENABLED")
+
+    # --- Phase 1: Multi-candidate orchestration ---
+    ai_3d_multi_input_enabled: bool = Field(True, validation_alias="AI_3D_MULTI_INPUT_ENABLED")
+    ai_3d_multi_input_max_files: int = Field(10, validation_alias="AI_3D_MULTI_INPUT_MAX_FILES")
+    ai_3d_video_topk_frames: int = Field(5, validation_alias="AI_3D_VIDEO_TOPK_FRAMES")
+    ai_3d_video_frame_min_spacing_sec: float = Field(0.4, validation_alias="AI_3D_VIDEO_FRAME_MIN_SPACING_SEC")
+    ai_3d_multi_candidate_enabled: bool = Field(True, validation_alias="AI_3D_MULTI_CANDIDATE_ENABLED")
+    ai_3d_max_candidates: int = Field(5, validation_alias="AI_3D_MAX_CANDIDATES")
+    ai_3d_quality_mode: str = Field("balanced", validation_alias="AI_3D_QUALITY_MODE")
 
     sam3d_enabled: bool = Field(False, validation_alias="SAM3D_ENABLED")
     sam3d_output_format: str = Field("glb", validation_alias="SAM3D_OUTPUT_FORMAT")

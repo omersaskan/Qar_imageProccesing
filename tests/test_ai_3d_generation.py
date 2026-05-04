@@ -1277,5 +1277,334 @@ class TestManifestTimingFields(unittest.TestCase):
         self.assertEqual(m["path_diagnostics"], {})
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 1 — Multi-input session resolver
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestMultiInput(unittest.TestCase):
+
+    def test_detect_image(self):
+        from modules.ai_3d_generation.multi_input import detect_input_mode
+        self.assertEqual(detect_input_mode("photo.jpg"), "single_image")
+        self.assertEqual(detect_input_mode("photo.PNG"), "single_image")
+
+    def test_detect_video(self):
+        from modules.ai_3d_generation.multi_input import detect_input_mode
+        self.assertEqual(detect_input_mode("clip.mp4"), "video")
+        self.assertEqual(detect_input_mode("CLIP.MOV"), "video")
+
+    def test_write_and_load_session_inputs(self):
+        from modules.ai_3d_generation.multi_input import (
+            write_session_inputs, load_session_inputs,
+        )
+        with tempfile.TemporaryDirectory() as sd:
+            write_session_inputs(sd, "multi_image", ["upload_001.jpg", "upload_002.png"])
+            data = load_session_inputs(sd)
+        self.assertIsNotNone(data)
+        self.assertEqual(data["input_mode"], "multi_image")
+        self.assertEqual(data["uploaded_files_count"], 2)
+        self.assertEqual(len(data["input_files"]), 2)
+
+    def test_load_missing_returns_none(self):
+        from modules.ai_3d_generation.multi_input import load_session_inputs
+        with tempfile.TemporaryDirectory() as sd:
+            self.assertIsNone(load_session_inputs(sd))
+
+    def test_resolve_multi_image_sources(self):
+        import cv2, numpy as np
+        from modules.ai_3d_generation.multi_input import (
+            write_session_inputs, load_session_inputs, resolve_candidate_sources,
+        )
+        with tempfile.TemporaryDirectory() as sd:
+            input_dir = Path(sd) / "input"
+            input_dir.mkdir()
+            # Create two dummy images
+            for name in ["upload_001.jpg", "upload_002.jpg"]:
+                cv2.imwrite(str(input_dir / name),
+                            np.zeros((64, 64, 3), dtype=np.uint8))
+            write_session_inputs(sd, "multi_image", ["upload_001.jpg", "upload_002.jpg"])
+            si = load_session_inputs(sd)
+            result = resolve_candidate_sources(sd, str(input_dir / "upload_001.jpg"), si)
+        self.assertEqual(result["input_mode"], "multi_image")
+        self.assertEqual(len(result["sources"]), 2)
+
+    def test_resolve_single_image_fallback(self):
+        from modules.ai_3d_generation.multi_input import resolve_candidate_sources
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
+            result = resolve_candidate_sources("/tmp/fake_session", f.name)
+        self.assertEqual(result["input_mode"], "single_image")
+        self.assertEqual(len(result["sources"]), 1)
+
+    def test_resolve_video_mode(self):
+        from modules.ai_3d_generation.multi_input import resolve_candidate_sources
+        result = resolve_candidate_sources("/tmp/fake", "/tmp/clip.mp4")
+        self.assertEqual(result["input_mode"], "video")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 1 — Candidate selector
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestCandidateSelector(unittest.TestCase):
+
+    def _make_candidate(self, cand_id="cand_001", status="ok",
+                        provider_status="ok", glb_path=None,
+                        prep_path=None, warnings=None, score=None):
+        meta = {
+            "candidate_id": cand_id,
+            "status": status,
+            "provider_status": provider_status,
+            "output_glb_path": glb_path,
+            "prepared_image_path": prep_path,
+            "warnings": warnings or [],
+        }
+        if score is not None:
+            meta["score"] = score
+        return meta
+
+    def test_score_ok_with_glb(self):
+        from modules.ai_3d_generation.candidate_selector import score_candidate
+        with tempfile.NamedTemporaryFile(suffix=".glb", delete=False) as f:
+            # Write some bytes so size > 0
+            f.write(b"x" * 10240)
+            glb = f.name
+        score, breakdown = score_candidate(self._make_candidate(glb_path=glb))
+        self.assertGreater(score, 50)  # provider_ok + glb_exists + size
+        self.assertEqual(breakdown["provider_ok"], 50.0)
+        self.assertEqual(breakdown["glb_exists"], 20.0)
+
+    def test_score_failed_provider(self):
+        from modules.ai_3d_generation.candidate_selector import score_candidate
+        score, _ = score_candidate(self._make_candidate(
+            provider_status="failed", status="failed"
+        ))
+        self.assertEqual(score, 0.0)
+
+    def test_center_crop_penalty(self):
+        from modules.ai_3d_generation.candidate_selector import score_candidate
+        score_no_penalty, _ = score_candidate(self._make_candidate())
+        score_penalty, bd = score_candidate(self._make_candidate(
+            warnings=["no_mask_or_bbox_using_center_crop"]
+        ))
+        self.assertLess(score_penalty, score_no_penalty)
+        self.assertIn("center_crop_penalty", bd)
+
+    def test_select_best_picks_highest_score(self):
+        from modules.ai_3d_generation.candidate_selector import select_best
+        candidates = [
+            self._make_candidate("cand_001", status="ok", score=60),
+            self._make_candidate("cand_002", status="ok", score=80),
+            self._make_candidate("cand_003", status="failed", score=0),
+        ]
+        best, ranking, reason = select_best(candidates)
+        self.assertIsNotNone(best)
+        self.assertEqual(best["candidate_id"], "cand_002")
+        self.assertIn("cand_002", reason)
+        self.assertEqual(ranking[0]["candidate_id"], "cand_002")
+
+    def test_select_best_all_failed(self):
+        from modules.ai_3d_generation.candidate_selector import select_best
+        candidates = [
+            self._make_candidate("cand_001", status="failed", score=0),
+            self._make_candidate("cand_002", status="failed", score=0),
+        ]
+        best, ranking, reason = select_best(candidates)
+        self.assertIsNone(best)
+        self.assertEqual(reason, "all_candidates_failed")
+
+    def test_select_best_empty(self):
+        from modules.ai_3d_generation.candidate_selector import select_best
+        best, ranking, reason = select_best([])
+        self.assertIsNone(best)
+        self.assertEqual(reason, "no_candidates")
+
+    def test_failed_candidate_does_not_prevent_success(self):
+        """One failed + one successful → session should succeed."""
+        from modules.ai_3d_generation.candidate_selector import select_best
+        candidates = [
+            self._make_candidate("cand_001", status="failed", score=0),
+            self._make_candidate("cand_002", status="ok", score=70),
+        ]
+        best, _, reason = select_best(candidates)
+        self.assertIsNotNone(best)
+        self.assertEqual(best["candidate_id"], "cand_002")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 1 — Video candidates (basic)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestVideoCandidates(unittest.TestCase):
+
+    def _make_test_video(self, frames=30, fps=30, w=64, h=64):
+        """Create a synthetic video file for testing."""
+        import cv2, numpy as np
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as f:
+            video_path = f.name
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        writer = cv2.VideoWriter(video_path, fourcc, fps, (w, h))
+        for i in range(frames):
+            # Vary sharpness: some frames blurry, some sharp
+            frame = np.random.randint(0, 255, (h, w, 3), dtype=np.uint8)
+            if i % 5 == 0:
+                # Make every 5th frame sharper (edges)
+                frame = cv2.Laplacian(frame, cv2.CV_8U)
+                frame = np.clip(frame * 3, 0, 255).astype(np.uint8)
+            writer.write(frame)
+        writer.release()
+        return video_path
+
+    def test_top_k_returns_correct_count(self):
+        from modules.ai_3d_generation.video_candidates import select_top_k_frames
+        video_path = self._make_test_video(frames=60, fps=30)
+        with tempfile.TemporaryDirectory() as out_dir:
+            paths = select_top_k_frames(video_path, out_dir, top_k=3, min_spacing_sec=0.1)
+            self.assertLessEqual(len(paths), 3)
+            self.assertGreater(len(paths), 0)
+            for p in paths:
+                self.assertTrue(Path(p).exists())
+
+    def test_top_k_respects_max(self):
+        from modules.ai_3d_generation.video_candidates import select_top_k_frames
+        video_path = self._make_test_video(frames=10, fps=10)
+        with tempfile.TemporaryDirectory() as out_dir:
+            paths = select_top_k_frames(video_path, out_dir, top_k=20, min_spacing_sec=0.1)
+        # Can't return more frames than the video has
+        self.assertLessEqual(len(paths), 20)
+
+    def test_invalid_video_returns_empty(self):
+        from modules.ai_3d_generation.video_candidates import select_top_k_frames
+        with tempfile.TemporaryDirectory() as out_dir:
+            paths = select_top_k_frames("/nonexistent/video.mp4", out_dir, top_k=3)
+        self.assertEqual(paths, [])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 1 — Candidate runner (mocked provider)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestCandidateRunner(unittest.TestCase):
+
+    def _mock_provider(self, results_iter):
+        """Provider whose safe_generate returns successive results from an iterable."""
+        m = MagicMock()
+        m.name = "sf3d"
+        m.license_note = "test"
+        m.output_format = "glb"
+        m.safe_generate.side_effect = list(results_iter)
+        return m
+
+    def test_sequential_two_ok_candidates(self):
+        import cv2, numpy as np
+        from modules.ai_3d_generation.candidate_runner import run_candidates_sequential
+
+        with tempfile.TemporaryDirectory() as sd:
+            # Create two source images
+            srcs = []
+            for i in range(2):
+                p = Path(sd) / f"src_{i}.jpg"
+                cv2.imwrite(str(p), np.zeros((64, 64, 3), dtype=np.uint8))
+                srcs.append(str(p))
+
+            # Create fake GLB outputs that the provider "produces"
+            glb1 = Path(sd) / "derived" / "candidates" / "cand_001" / "output.glb"
+            glb2 = Path(sd) / "derived" / "candidates" / "cand_002" / "output.glb"
+            glb1.parent.mkdir(parents=True, exist_ok=True)
+            glb2.parent.mkdir(parents=True, exist_ok=True)
+
+            def make_result(idx):
+                glb = glb1 if idx == 0 else glb2
+                glb.write_bytes(b"GLBFAKE" * 100)
+                return {
+                    "status": "ok",
+                    "output_path": str(glb),
+                    "model_name": "sf3d",
+                    "warnings": [],
+                    "error": None,
+                    "metadata": {},
+                    "preview_image_path": None,
+                }
+
+            prov = self._mock_provider([make_result(0), make_result(1)])
+            results = run_candidates_sequential(sd, srcs, prov, input_size=64)
+
+        self.assertEqual(len(results), 2)
+        self.assertEqual(results[0]["status"], "ok")
+        self.assertEqual(results[1]["status"], "ok")
+        self.assertEqual(prov.safe_generate.call_count, 2)
+
+    def test_one_fails_one_succeeds(self):
+        import cv2, numpy as np
+        from modules.ai_3d_generation.candidate_runner import run_candidates_sequential
+
+        with tempfile.TemporaryDirectory() as sd:
+            srcs = []
+            for i in range(2):
+                p = Path(sd) / f"src_{i}.jpg"
+                cv2.imwrite(str(p), np.zeros((64, 64, 3), dtype=np.uint8))
+                srcs.append(str(p))
+
+            glb2 = Path(sd) / "derived" / "candidates" / "cand_002" / "output.glb"
+            glb2.parent.mkdir(parents=True, exist_ok=True)
+
+            fail_result = {
+                "status": "failed",
+                "output_path": None,
+                "model_name": None,
+                "warnings": [],
+                "error": "cuda_oom",
+                "metadata": {},
+                "preview_image_path": None,
+            }
+            ok_result = {
+                "status": "ok",
+                "output_path": str(glb2),
+                "model_name": "sf3d",
+                "warnings": [],
+                "error": None,
+                "metadata": {},
+                "preview_image_path": None,
+            }
+            glb2.write_bytes(b"GLBFAKE" * 100)
+
+            prov = self._mock_provider([fail_result, ok_result])
+            results = run_candidates_sequential(sd, srcs, prov, input_size=64)
+
+            self.assertEqual(results[0]["status"], "failed")
+            self.assertEqual(results[1]["status"], "ok")
+            # Verify candidate_manifest.json written for each
+            for r in results:
+                cand_dir = Path(sd) / "derived" / "candidates" / r["candidate_id"]
+                self.assertTrue((cand_dir / "candidate_manifest.json").exists())
+
+    def test_max_candidates_limit(self):
+        import cv2, numpy as np
+        from modules.ai_3d_generation.candidate_runner import run_candidates_sequential
+
+        with tempfile.TemporaryDirectory() as sd:
+            srcs = []
+            for i in range(5):
+                p = Path(sd) / f"src_{i}.jpg"
+                cv2.imwrite(str(p), np.zeros((64, 64, 3), dtype=np.uint8))
+                srcs.append(str(p))
+
+            def make_fail():
+                return {
+                    "status": "failed", "output_path": None, "model_name": None,
+                    "warnings": [], "error": "test", "metadata": {},
+                    "preview_image_path": None,
+                }
+
+            prov = self._mock_provider([make_fail() for _ in range(3)])
+            results = run_candidates_sequential(
+                sd, srcs, prov, input_size=64, max_candidates=3
+            )
+
+        # Should only process 3, not 5
+        self.assertEqual(len(results), 3)
+        self.assertEqual(prov.safe_generate.call_count, 3)
+
+
 if __name__ == "__main__":
     unittest.main()
+

@@ -91,89 +91,196 @@ def generate_ai_3d(
         shutil.copy2(str(src_resolved), str(dest_input))
     else:
         logger.info("AI 3D input already in session input dir; skipping copy: %s", dest_input)
-    # ── 2. Route & frame selection ────────────────────────────────────────────
+    # ── 2. Route & candidate resolution ───────────────────────────────────────
     from modules.depth_studio.input_router import route_input
     try:
         input_type, _ = route_input(input_file_path)
     except ValueError:
         input_type = "image"
 
-    if input_type == "video":
-        frame_path = str(derived_dir / "selected_frame.jpg")
-        try:
-            from modules.depth_studio.video_frame_selector import select_best_frame
-            ok, reason, _ = select_best_frame(str(dest_input), frame_path)
-            if ok:
-                selected_frame_path = frame_path
-                warnings.append("input_video_best_frame_used")
-                image_path_for_gen = frame_path
-            else:
-                warnings.append(f"frame_selection_failed:{reason}")
-                image_path_for_gen = None
-        except Exception as exc:
-            warnings.append(f"frame_selection_error:{exc}")
-            image_path_for_gen = None
-    else:
-        image_path_for_gen = str(dest_input)
+    from .multi_input import load_session_inputs, resolve_candidate_sources
+    session_inputs = load_session_inputs(output_base_dir)
 
-    if not image_path_for_gen:
-        errors.append("no_usable_input_image")
-        manifest = _build_failed_manifest(
-            session_id, input_file_path, input_type, provider, errors, warnings,
-            selected_frame_path,
-        )
-        write_manifest(manifest, str(manifests_dir))
-        return manifest
+    candidates = []
+    candidate_ranking = []
+    selected_candidate_id = None
+    selected_candidate_reason = None
+    uploaded_files_count = session_inputs.get("uploaded_files_count", 1) if session_inputs else 1
+    generation_input: Optional[str] = None
+    _started_at = None
+    _finished_at = None
+    _duration_sec = None
 
-    # ── 3. Preprocess ─────────────────────────────────────────────────────────
-    if settings.ai_3d_preprocess_enabled:
-        preprocessing_meta = preprocess_input(
-            source_image_path=image_path_for_gen,
-            output_dir=str(derived_dir),
+    if settings.ai_3d_multi_candidate_enabled and (session_inputs or input_type == "video"):
+        logger.info("Using multi-candidate flow for session %s", session_id)
+        
+        res = resolve_candidate_sources(output_base_dir, str(dest_input), session_inputs)
+        input_type = res["input_mode"]
+        sources = res["sources"]
+        
+        if input_type == "video":
+            from .video_candidates import select_top_k_frames
+            sources = select_top_k_frames(
+                video_path=sources[0],
+                out_dir=str(derived_dir / "extracted_frames"),
+                top_k=settings.ai_3d_video_topk_frames,
+                min_spacing_sec=settings.ai_3d_video_frame_min_spacing_sec,
+            )
+            if not sources:
+                errors.append("no_usable_video_frames")
+                manifest = _build_failed_manifest(
+                    session_id, input_file_path, input_type, provider, errors, warnings,
+                    None,
+                )
+                write_manifest(manifest, str(manifests_dir))
+                return manifest
+                
+        from .candidate_runner import run_candidates_sequential
+        
+        _t0 = time.monotonic()
+        _started_at = datetime.now(tz=timezone.utc).isoformat()
+        
+        candidates = run_candidates_sequential(
+            session_dir=output_base_dir,
+            source_paths=sources,
+            provider=provider,
+            options=opts,
+            max_candidates=settings.ai_3d_max_candidates,
             input_size=opts.get("input_size", settings.sf3d_input_size),
         )
-        prepared_image_path = preprocessing_meta.get("prepared_image_path")
-        warnings.extend(preprocessing_meta.get("warnings", []))
+        
+        _t1 = time.monotonic()
+        _finished_at = datetime.now(tz=timezone.utc).isoformat()
+        _duration_sec = round(_t1 - _t0, 2)
+        
+        from .candidate_selector import select_best
+        best, candidate_ranking, selected_candidate_reason = select_best(candidates)
+        
+        if not best:
+            errors.append("all_candidates_failed")
+            provider_result = {
+                "status": "failed",
+                "output_path": None,
+                "preview_image_path": None,
+                "warnings": warnings,
+                "error": "all_candidates_failed",
+                "metadata": {}
+            }
+            output_glb_path = None
+            prepared_image_path = None
+            selected_frame_path = None
+        else:
+            best["selected"] = True
+            selected_candidate_id = best["candidate_id"]
+            
+            if best.get("output_glb_path") and Path(best["output_glb_path"]).exists():
+                shutil.copy2(best["output_glb_path"], str(derived_dir / "output.glb"))
+                output_glb_path = str(derived_dir / "output.glb")
+            else:
+                output_glb_path = None
+                
+            if best.get("prepared_image_path") and Path(best["prepared_image_path"]).exists():
+                shutil.copy2(best["prepared_image_path"], str(derived_dir / "ai3d_input.png"))
+                prepared_image_path = str(derived_dir / "ai3d_input.png")
+            else:
+                prepared_image_path = None
+                
+            provider_result = {
+                "status": best.get("provider_status", "failed"),
+                "output_path": output_glb_path,
+                "preview_image_path": None,
+                "warnings": best.get("warnings", []),
+                "error": None,
+                "metadata": {"peak_mem_mb": best.get("peak_mem_mb")},
+                "model_name": provider.name,
+            }
+            warnings.extend(best.get("warnings", []))
+            if best.get("errors"):
+                errors.extend(best["errors"])
+                
+            selected_frame_path = best.get("source_path") if input_type == "video" else None
+            generation_input = best.get("prepared_image_path") or best.get("source_path")
+            preprocessing_meta = {"enabled": True}
+
     else:
-        prepared_image_path = image_path_for_gen
-        preprocessing_meta = {"enabled": False}
-
-    generation_input = prepared_image_path or image_path_for_gen
-
-    # ── 4. Generate ───────────────────────────────────────────────────────────
-    # Normalise generation_input to absolute path before handing to provider
-    if generation_input:
-        try:
-            generation_input = str(Path(generation_input).resolve())
-        except Exception:
-            pass
-
-    _t0 = time.monotonic()
-    _started_at = datetime.now(tz=timezone.utc).isoformat()
-
-    provider_result = provider.safe_generate(
-        input_image_path=generation_input,
-        output_dir=str(derived_dir_abs),
-        options=opts,
-    )
-
-    _t1 = time.monotonic()
-    _finished_at = datetime.now(tz=timezone.utc).isoformat()
-    _duration_sec = round(_t1 - _t0, 2)
-
-    warnings.extend(provider_result.get("warnings", []))
-    if provider_result.get("error"):
-        errors.append(provider_result["error"])
-
-    output_glb_path    = provider_result.get("output_path")
-    preview_image_path = provider_result.get("preview_image_path")
-
-    # Normalise GLB path to absolute
-    if output_glb_path:
-        try:
-            output_glb_path = str(Path(output_glb_path).resolve())
-        except Exception:
-            pass
+        logger.info("Using single-candidate flow for session %s", session_id)
+        # ── 2 (Legacy). Route & frame selection ───────────────────────────────────
+        if input_type == "video":
+            frame_path = str(derived_dir / "selected_frame.jpg")
+            try:
+                from modules.depth_studio.video_frame_selector import select_best_frame
+                ok, reason, _ = select_best_frame(str(dest_input), frame_path)
+                if ok:
+                    selected_frame_path = frame_path
+                    warnings.append("input_video_best_frame_used")
+                    image_path_for_gen = frame_path
+                else:
+                    warnings.append(f"frame_selection_failed:{reason}")
+                    image_path_for_gen = None
+            except Exception as exc:
+                warnings.append(f"frame_selection_error:{exc}")
+                image_path_for_gen = None
+        else:
+            image_path_for_gen = str(dest_input)
+    
+        if not image_path_for_gen:
+            errors.append("no_usable_input_image")
+            manifest = _build_failed_manifest(
+                session_id, input_file_path, input_type, provider, errors, warnings,
+                selected_frame_path,
+            )
+            write_manifest(manifest, str(manifests_dir))
+            return manifest
+    
+        # ── 3. Preprocess ─────────────────────────────────────────────────────────
+        if settings.ai_3d_preprocess_enabled:
+            preprocessing_meta = preprocess_input(
+                source_image_path=image_path_for_gen,
+                output_dir=str(derived_dir),
+                input_size=opts.get("input_size", settings.sf3d_input_size),
+            )
+            prepared_image_path = preprocessing_meta.get("prepared_image_path")
+            warnings.extend(preprocessing_meta.get("warnings", []))
+        else:
+            prepared_image_path = image_path_for_gen
+            preprocessing_meta = {"enabled": False}
+    
+        generation_input = prepared_image_path or image_path_for_gen
+    
+        # ── 4. Generate ───────────────────────────────────────────────────────────
+        # Normalise generation_input to absolute path before handing to provider
+        if generation_input:
+            try:
+                generation_input = str(Path(generation_input).resolve())
+            except Exception:
+                pass
+    
+        _t0 = time.monotonic()
+        _started_at = datetime.now(tz=timezone.utc).isoformat()
+    
+        provider_result = provider.safe_generate(
+            input_image_path=generation_input,
+            output_dir=str(derived_dir_abs),
+            options=opts,
+        )
+    
+        _t1 = time.monotonic()
+        _finished_at = datetime.now(tz=timezone.utc).isoformat()
+        _duration_sec = round(_t1 - _t0, 2)
+    
+        warnings.extend(provider_result.get("warnings", []))
+        if provider_result.get("error"):
+            errors.append(provider_result["error"])
+    
+        output_glb_path    = provider_result.get("output_path")
+        preview_image_path = provider_result.get("preview_image_path")
+    
+        # Normalise GLB path to absolute
+        if output_glb_path:
+            try:
+                output_glb_path = str(Path(output_glb_path).resolve())
+            except Exception:
+                pass
 
     # ── 5. Postprocess ────────────────────────────────────────────────────────
     postprocessing_meta = run_postprocess(
@@ -255,12 +362,20 @@ def generate_ai_3d(
             if _prov_status != "ok" else None
         ),
         missing_outputs=_missing_outputs,
-        # Phase 4E — timing + diagnostics
         generation_started_at=_started_at,
         generation_finished_at=_finished_at,
         duration_sec=_duration_sec,
         output_size_bytes=_output_size_bytes,
         path_diagnostics=_path_diag,
+        # Phase 1 multi-candidate
+        input_mode=input_type,
+        uploaded_files_count=uploaded_files_count,
+        candidate_count=len(candidates),
+        selected_candidate_id=selected_candidate_id,
+        selected_candidate_reason=selected_candidate_reason,
+        candidate_ranking=candidate_ranking,
+        candidates=candidates,
+        quality_mode=settings.ai_3d_quality_mode,
     )
     write_manifest(manifest, str(manifests_dir))
 

@@ -88,9 +88,9 @@
     <div class="ai3d-drop" id="drop-zone"
          onclick="document.getElementById('file-input').click()"
          ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event)">
-      <input type="file" id="file-input" accept="image/*,video/*" onchange="onFileSelected(event)" />
+      <input type="file" id="file-input" accept="image/*,video/*" multiple onchange="onFileSelected(event)" />
       <div id="drop-label">
-        Drop image or video here, or click to browse<br/>
+        Drop images or video here, or click to browse<br/>
         <small style="color:#9ca3af">JPG, PNG, WebP, MP4, MOV</small>
       </div>
     </div>
@@ -154,16 +154,20 @@
   function onDrop(e) {
     e.preventDefault();
     document.getElementById('drop-zone').classList.remove('dragover');
-    const f = e.dataTransfer.files[0]; if (f) setFile(f);
+    const f = e.dataTransfer.files; if (f && f.length) setFiles(f);
   }
-  function onFileSelected(e) { const f = e.target.files[0]; if (f) setFile(f); }
+  function onFileSelected(e) { const f = e.target.files; if (f && f.length) setFiles(f); }
 
-  function setFile(f) {
-    selectedFile = f;
-    document.getElementById('drop-label').textContent = f.name;
+  function setFiles(fList) {
+    selectedFile = fList;
+    if (fList.length === 1) {
+      document.getElementById('drop-label').textContent = fList[0].name;
+    } else {
+      document.getElementById('drop-label').textContent = `${fList.length} files selected`;
+    }
     document.getElementById('process-btn').disabled = false;
     const p = document.getElementById('image-preview');
-    if (f.type.startsWith('image/')) { p.src = URL.createObjectURL(f); p.style.display = 'block'; }
+    if (fList[0].type.startsWith('image/')) { p.src = URL.createObjectURL(fList[0]); p.style.display = 'block'; }
     else { p.style.display = 'none'; }
   }
 
@@ -173,16 +177,20 @@
   }
 
   async function startProcess() {
-    if (!selectedFile) return;
+    if (!selectedFile || !selectedFile.length) return;
     document.getElementById('process-btn').disabled = true;
     document.getElementById('provider-error-box').style.display = 'none';
     setStatus('Uploading…', 'info');
 
     try {
       const fd = new FormData();
-      fd.append('file', selectedFile, selectedFile.name);
+      Array.from(selectedFile).forEach(f => fd.append('files', f, f.name));
+      if (selectedFile.length === 1) {
+        fd.append('file', selectedFile[0], selectedFile[0].name);
+      }
       fd.append('provider', 'sf3d');
-      const ur = await fetch(`${API}/api/ai-3d/upload`, { method: 'POST', body: fd });
+      const endpoint = selectedFile.length > 1 ? '/api/ai-3d/upload-multi' : '/api/ai-3d/upload';
+      const ur = await fetch(`${API}${endpoint}`, { method: 'POST', body: fd });
       if (!ur.ok) { const e = await ur.json(); throw new Error(e.detail || ur.statusText); }
       const udata = await ur.json();
       currentSessionId = udata.session_id;
@@ -275,6 +283,8 @@
     const fields = [
       ['Provider',       manifest.provider || '—'],
       ['Execution Mode', execMode],
+      ['Input Mode',     manifest.input_mode || '—'],
+      ['Candidates',     manifest.candidate_count ? `${manifest.candidate_count} (Selected: ${manifest.selected_candidate_id || '—'})` : '—'],
       ['Model',          manifest.model_name || '—'],
       ['Device',         _wm.device || '—'],
       ['Status',         manifest.status || '—'],

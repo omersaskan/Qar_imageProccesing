@@ -39,6 +39,15 @@ def build_manifest(
     duration_sec: Optional[float] = None,
     output_size_bytes: Optional[int] = None,
     path_diagnostics: Optional[Dict[str, Any]] = None,
+    # ── Phase 1 multi-candidate additions (all optional for backward compat) ──
+    input_mode: Optional[str] = None,
+    uploaded_files_count: Optional[int] = None,
+    candidate_count: Optional[int] = None,
+    selected_candidate_id: Optional[str] = None,
+    selected_candidate_reason: Optional[str] = None,
+    candidate_ranking: Optional[List[Dict[str, Any]]] = None,
+    candidates: Optional[List[Dict[str, Any]]] = None,
+    quality_mode: Optional[str] = None,
 ) -> Dict[str, Any]:
     _worker_meta = worker_metadata or {}
     return {
@@ -96,6 +105,16 @@ def build_manifest(
         "warnings": warnings,
         "errors": errors,
         "provider_failure_reason": provider_failure_reason,
+
+        # Phase 1 — multi-candidate orchestration
+        "input_mode": input_mode,
+        "uploaded_files_count": uploaded_files_count,
+        "candidate_count": candidate_count,
+        "selected_candidate_id": selected_candidate_id,
+        "selected_candidate_reason": selected_candidate_reason,
+        "candidate_ranking": candidate_ranking or [],
+        "candidates": candidates or [],
+        "quality_mode": quality_mode,
     }
 
 

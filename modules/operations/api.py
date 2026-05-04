@@ -1453,6 +1453,62 @@ async def ai3d_upload(
     }
 
 
+@app.post("/api/ai-3d/upload-multi", dependencies=[Depends(verify_api_key)])
+async def ai3d_upload_multi(
+    files: list[UploadFile] = File(...),
+    provider: str = Form(default="sf3d"),
+):
+    """Accept multiple images or videos, create an AI 3D session."""
+    if not settings.ai_3d_generation_enabled:
+        raise HTTPException(
+            status_code=503,
+            detail="AI 3D Generation is disabled (AI_3D_GENERATION_ENABLED=false)",
+        )
+    if not settings.ai_3d_multi_input_enabled:
+        raise HTTPException(status_code=400, detail="Multi-input is disabled")
+        
+    if len(files) > settings.ai_3d_multi_input_max_files:
+        raise HTTPException(status_code=400, detail=f"Too many files. Max: {settings.ai_3d_multi_input_max_files}")
+
+    session_id = f"ai3d_{uuid.uuid4().hex[:12]}"
+    session_dir = _ai3d_session_dir(session_id)
+    input_dir = session_dir / "input"
+    input_dir.mkdir(parents=True, exist_ok=True)
+
+    input_files = []
+    # Save the first file to upload.ext for backward compatibility of process endpoint
+    first_suffix = Path(files[0].filename or "upload.jpg").suffix or ".jpg"
+    dest_first = input_dir / f"upload{first_suffix}"
+    
+    for i, file in enumerate(files):
+        suffix = Path(file.filename or f"upload_{i:03d}.jpg").suffix or ".jpg"
+        dest = input_dir / f"upload_{i:03d}{suffix}"
+        with open(str(dest), "wb") as f_out:
+            shutil.copyfileobj(file.file, f_out)
+        input_files.append(dest.name)
+        
+        if i == 0:
+            shutil.copy2(str(dest), str(dest_first))
+
+    from modules.ai_3d_generation.multi_input import write_session_inputs
+    write_session_inputs(str(session_dir), "multi_image", input_files)
+
+    _ai3d_sessions[session_id] = {
+        "session_id": session_id,
+        "status": "uploaded",
+        "input_path": str(dest_first),
+        "provider": provider,
+        "manifest_path": None,
+    }
+    return {
+        "session_id": session_id,
+        "status": "uploaded",
+        "provider": provider,
+        "input_path": str(dest_first),
+        "uploaded_files_count": len(files),
+    }
+
+
 class _AI3DProcessRequest(BaseModel):
     options: Optional[dict] = None
 
@@ -1546,6 +1602,12 @@ async def ai3d_process(session_id: str, body: Optional[_AI3DProcessRequest] = No
             "warnings": manifest.get("warnings", []),
             "errors": manifest.get("errors", []),
             "manifest": manifest,
+            
+            # Phase 1: multi-candidate fields
+            "input_mode": manifest.get("input_mode"),
+            "uploaded_files_count": manifest.get("uploaded_files_count"),
+            "candidate_count": manifest.get("candidate_count"),
+            "selected_candidate_id": manifest.get("selected_candidate_id"),
         }
         if provider_failure_reason:
             response["provider_failure_reason"] = provider_failure_reason
