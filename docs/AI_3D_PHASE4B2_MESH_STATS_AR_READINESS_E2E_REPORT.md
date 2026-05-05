@@ -5,6 +5,11 @@
 - **Branch**: main (clean, in sync with origin/main)
 - **Environment**: Local Windows 11 / WSL2 Ubuntu-24.04 / SF3D wsl_subprocess mode
 
+> **Artifact separation (Phase 4B.3):** The 1-run validation artifacts are stored under
+> `reports/ai3d_validation/phase4b2/` and do not overwrite canonical Phase 3B benchmark
+> artifacts. Canonical Phase 3B results (30 runs, 5 inputs × balanced/high/ultra × bg-off/on)
+> remain at `reports/ai3d_benchmark/results.json` and `reports/ai3d_benchmark/results.csv`.
+
 ---
 
 ## 1. Test Suite

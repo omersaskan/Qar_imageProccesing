@@ -13,6 +13,12 @@ Usage:
 Flags:
     --allow-unavailable   Allow writing a report even if SF3D is disabled.
                           Report will be stamped "DRY RUN / PROVIDER UNAVAILABLE".
+
+Output directory conventions:
+    Canonical benchmark  → --output-dir reports/ai3d_benchmark   (default)
+    E2E / smoke tests    → --output-dir reports/ai3d_validation/phase4b2
+    Always use a custom --output-dir for validation or smoke runs to avoid
+    overwriting the canonical 30-run Phase 3B benchmark artifacts.
 """
 import os
 import sys
