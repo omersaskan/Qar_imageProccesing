@@ -1,0 +1,30 @@
+[
+  {
+    "benchmark_id": "bench_002559_noisy_background_object_balanced_bgoff",
+    "input_filename": "noisy_background_object.png",
+    "quality_mode": "balanced",
+    "background_removal_enabled": false,
+    "session_id": "bench_002559_noisy_background_object",
+    "status": "unavailable",
+    "provider_status": "unavailable",
+    "input_mode": "single_image",
+    "candidate_count": 0,
+    "selected_candidate_id": null,
+    "duration_sec": 0.0,
+    "output_size_bytes": 0,
+    "peak_mem_mb": 0,
+    "device": null,
+    "input_size": 768,
+    "bg_removed": false,
+    "mask_source": "fallback_center_crop",
+    "foreground_ratio": null,
+    "score": null,
+    "vertex_count": 0,
+    "face_count": 0,
+    "mesh_stats_available": false,
+    "output_glb_path": null,
+    "prepared_image_path": "reports\\ai3d_benchmark\\bench_002559_noisy_background_object\\derived\\ai3d_input.png",
+    "warnings_count": 3,
+    "errors_count": 1
+  }
+]
