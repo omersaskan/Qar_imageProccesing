@@ -2,6 +2,45 @@ import pytest
 from unittest.mock import MagicMock
 from modules.ai_3d_generation.quality_profiles import resolve_quality_profile
 
+
+# ── Phase 3C: benchmark-driven defaults ─────────────────────────────────────
+
+def test_default_quality_mode_is_high():
+    """settings.ai_3d_quality_mode must default to 'high' per Phase 3B benchmark."""
+    from modules.operations.settings import Settings
+    fresh = Settings(_env_file=None)
+    assert fresh.ai_3d_quality_mode == "high"
+
+
+def test_default_background_removal_is_enabled():
+    """settings.ai_3d_background_removal_enabled must default to True per Phase 3B benchmark."""
+    from modules.operations.settings import Settings
+    fresh = Settings(_env_file=None)
+    assert fresh.ai_3d_background_removal_enabled is True
+
+
+def test_remote_providers_still_disabled_by_default():
+    """External providers must remain disabled by default — Phase 3C must not change this."""
+    from modules.operations.settings import Settings
+    fresh = Settings(_env_file=None)
+    assert fresh.ai_3d_remote_providers_enabled is False
+    assert fresh.meshy_enabled is False
+    assert fresh.rodin_enabled is False
+
+
+def test_high_profile_is_valid_default():
+    """Resolving the default mode 'high' must succeed and return correct profile values."""
+    settings = MagicMock()
+    settings.ai_3d_max_candidates = 10
+    res = resolve_quality_profile("high", settings)
+    assert res["input_size"] == 1024
+    assert res["texture_resolution"] == 1024
+    assert res["quality_mode"] == "high"
+    assert res["max_candidates"] == 5
+
+
+# ── End Phase 3C ─────────────────────────────────────────────────────────────
+
 def test_balanced_profile():
     settings = MagicMock()
     settings.ai_3d_max_candidates = 5

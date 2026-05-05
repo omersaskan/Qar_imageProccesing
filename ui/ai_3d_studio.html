@@ -85,6 +85,30 @@
     </div>
   </div>
 
+  <!-- Quality Settings -->
+  <div class="ai3d-card">
+    <h2>Quality Settings</h2>
+    <div style="display:flex; flex-direction:column; gap:12px;">
+      <div style="display:flex; gap:12px; align-items:center;">
+        <label for="quality-select" style="font-size:0.9rem; color:#374151; min-width:110px;">Quality mode</label>
+        <select id="quality-select" class="ai3d-btn" style="background:#fff; color:#374151; border:1px solid #d1d5db; padding:8px 12px; flex:1;" onchange="onQualityChange()">
+          <option value="balanced">Balanced — fast preview (768px input, ~17s)</option>
+          <option value="high" selected>High — recommended default (1024px input, ~17s)</option>
+          <option value="ultra">Ultra — texture-critical assets (1024px input + 2048px texture, ~25s)</option>
+        </select>
+      </div>
+      <div id="ultra-warning" style="display:none; background:#fff7ed; color:#9a3412; padding:10px 12px; border-radius:8px; border:1px solid #ffedd5; font-size:0.85rem;">
+        <strong>Ultra mode:</strong> Uses more VRAM, is slower, and creates larger files. Use only for texture-critical assets.
+      </div>
+      <div style="display:flex; align-items:center; gap:10px;">
+        <input type="checkbox" id="bg-removal-checkbox" checked style="width:16px; height:16px; cursor:pointer;" />
+        <label for="bg-removal-checkbox" style="font-size:0.9rem; color:#374151; cursor:pointer;">
+          Background removal <span style="color:#6b7280; font-size:0.82rem;">(recommended — isolates foreground object)</span>
+        </label>
+      </div>
+    </div>
+  </div>
+
   <!-- Upload -->
   <div class="ai3d-card">
     <h2>Upload Image or Video</h2>
@@ -279,12 +303,21 @@
     }
   }
 
+  function onQualityChange() {
+    const val = document.getElementById('quality-select').value;
+    document.getElementById('ultra-warning').style.display = val === 'ultra' ? 'block' : 'none';
+  }
+
   async function processSession() {
     try {
       const providerVal = document.getElementById('provider-select').value;
+      const qualityMode = document.getElementById('quality-select').value;
+      const bgRemoval = document.getElementById('bg-removal-checkbox').checked;
       const opts = {
         options: {
-          external_provider_consent: externalProviderConsent
+          external_provider_consent: externalProviderConsent,
+          quality_mode: qualityMode,
+          background_removal_enabled: bgRemoval
         }
       };
 
