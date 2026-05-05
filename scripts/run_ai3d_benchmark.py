@@ -207,6 +207,7 @@ def run_benchmark():
                     ranking = manifest.get("candidate_ranking") or []
                     top_score = ranking[0].get("score") if ranking else None
 
+                    ar = manifest.get("ar_readiness") or {}
                     row = {
                         "benchmark_id": bench_id,
                         "commit_sha": sha,
@@ -235,6 +236,9 @@ def run_benchmark():
                         "prepared_image_path": manifest.get("prepared_image_path"),
                         "warnings_count": len(manifest.get("warnings") or []),
                         "errors_count": len(manifest.get("errors") or []),
+                        "ar_score": ar.get("score"),
+                        "ar_verdict": ar.get("verdict"),
+                        "ar_warnings_count": len(ar.get("warnings") or []),
                     }
                     results.append(row)
                     logger.info(
@@ -297,11 +301,11 @@ def run_benchmark():
         f.write(f"- **Phase Status**: {phase_status}\n\n")
 
         f.write("## Results Summary\n\n")
-        f.write("| Input | Mode | BG | Status | Provider | Duration | GLB Size | Peak VRAM | Score |\n")
-        f.write("| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n")
+        f.write("| Input | Mode | BG | Status | Provider | Duration | GLB Size | Peak VRAM | Score | AR Score | AR Verdict |\n")
+        f.write("| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n")
         for r in results:
             if "error" in r and "status" not in r:
-                f.write(f"| {r.get('input_filename','-')} | {r.get('quality_mode','-')} | - | EXCEPTION | - | - | - | - | - |\n")
+                f.write(f"| {r.get('input_filename','-')} | {r.get('quality_mode','-')} | - | EXCEPTION | - | - | - | - | - | - | - |\n")
                 continue
             bg_str = "ON" if r.get("background_removal_enabled") else "OFF"
             size_bytes = r.get("output_size_bytes") or 0
@@ -310,7 +314,8 @@ def run_benchmark():
                 f"| {r['input_filename']} | {r['quality_mode']} | {bg_str} "
                 f"| {r['status']} | {r.get('provider_status','-')} "
                 f"| {r['duration_sec']}s | {size_mb} MB "
-                f"| {r.get('peak_mem_mb', 0)} MB | {r.get('score')} |\n"
+                f"| {r.get('peak_mem_mb', 0)} MB | {r.get('score')} "
+                f"| {r.get('ar_score', '-')} | {r.get('ar_verdict', '-')} |\n"
             )
 
         f.write("\n## Notes\n\n")

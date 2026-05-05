@@ -223,6 +223,133 @@ def test_external_providers_not_enabled():
         assert provider not in source.lower().replace("# ", "").replace('"rodin"', "").replace('"meshy"', "").replace('"tripo"', "").replace('"hunyuan"', "")
 
 
+# ── Phase 4B: AR readiness columns in benchmark runner ───────────────────────
+
+def _mock_manifest_with_ar(tmp_path):
+    """Return a mock manifest that already includes ar_readiness."""
+    glb = tmp_path / "output.glb"
+    glb.write_bytes(b"x" * 1024)
+    return {
+        "session_id": "test_sess",
+        "status": "ok",
+        "provider_status": "ok",
+        "duration_sec": 15.0,
+        "output_glb_path": str(glb),
+        "output_size_bytes": 1024,
+        "peak_mem_mb": 500.0,
+        "worker_metadata": {"device": "cuda"},
+        "preprocessing": {
+            "background_removed": True,
+            "mask_source": "rembg",
+            "foreground_ratio_estimate": 0.35,
+        },
+        "candidate_ranking": [{"score": 95.0}],
+        "resolved_quality": {"input_size": 1024},
+        "input_mode": "single_image",
+        "candidate_count": 1,
+        "selected_candidate_id": "cand_001",
+        "prepared_image_path": "prep.png",
+        "warnings": [],
+        "errors": [],
+        "ar_readiness": {
+            "enabled": True,
+            "score": 85,
+            "verdict": "mobile_ready",
+            "checks": {},
+            "warnings": [],
+            "recommendations": [],
+        },
+    }
+
+
+def test_benchmark_row_includes_ar_columns(tmp_path):
+    """Benchmark result rows must include ar_score, ar_verdict, ar_warnings_count."""
+    input_dir = tmp_path / "inputs"
+    input_dir.mkdir()
+    (input_dir / "test.png").touch()
+    output_dir = tmp_path / "outputs"
+
+    manifest = _mock_manifest_with_ar(tmp_path)
+
+    with patch("scripts.run_ai3d_benchmark.generate_ai_3d", return_value=manifest), \
+         patch("scripts.run_ai3d_benchmark.get_mesh_stats", return_value={
+             "vertex_count": 0, "face_count": 0, "mesh_stats_available": False, "geometry_count": 0
+         }), \
+         patch("scripts.run_ai3d_benchmark._check_sf3d_enabled", return_value=(True, "ok")), \
+         patch("scripts.run_ai3d_benchmark._git_sha", return_value="abc1234"), \
+         patch("sys.argv", ["s", "--input-dir", str(input_dir), "--output-dir", str(output_dir),
+                            "--modes", "high", "--bg-modes", "off"]):
+        run_benchmark()
+
+    with open(output_dir / "results.json") as f:
+        data = json.load(f)
+
+    row = data[0]
+    assert "ar_score" in row
+    assert "ar_verdict" in row
+    assert "ar_warnings_count" in row
+    assert row["ar_score"] == 85
+    assert row["ar_verdict"] == "mobile_ready"
+    assert row["ar_warnings_count"] == 0
+
+
+def test_benchmark_row_ar_columns_present_without_ar_readiness(tmp_path):
+    """If manifest has no ar_readiness, row columns should still exist (None)."""
+    input_dir = tmp_path / "inputs"
+    input_dir.mkdir()
+    (input_dir / "test.png").touch()
+    output_dir = tmp_path / "outputs"
+
+    manifest = _mock_manifest(tmp_path)   # no ar_readiness key
+
+    with patch("scripts.run_ai3d_benchmark.generate_ai_3d", return_value=manifest), \
+         patch("scripts.run_ai3d_benchmark.get_mesh_stats", return_value={
+             "vertex_count": 0, "face_count": 0, "mesh_stats_available": False, "geometry_count": 0
+         }), \
+         patch("scripts.run_ai3d_benchmark._check_sf3d_enabled", return_value=(True, "ok")), \
+         patch("scripts.run_ai3d_benchmark._git_sha", return_value="abc1234"), \
+         patch("sys.argv", ["s", "--input-dir", str(input_dir), "--output-dir", str(output_dir),
+                            "--modes", "high", "--bg-modes", "off"]):
+        run_benchmark()
+
+    with open(output_dir / "results.json") as f:
+        data = json.load(f)
+
+    row = data[0]
+    assert "ar_score" in row
+    assert "ar_verdict" in row
+    assert row["ar_score"] is None
+    assert row["ar_verdict"] is None
+
+
+def test_benchmark_markdown_includes_ar_columns(tmp_path):
+    """Markdown report must include AR Score and AR Verdict column headers."""
+    input_dir = tmp_path / "inputs"
+    input_dir.mkdir()
+    (input_dir / "test.png").touch()
+    output_dir = tmp_path / "outputs"
+
+    manifest = _mock_manifest_with_ar(tmp_path)
+
+    with patch("scripts.run_ai3d_benchmark.generate_ai_3d", return_value=manifest), \
+         patch("scripts.run_ai3d_benchmark.get_mesh_stats", return_value={
+             "vertex_count": 0, "face_count": 0, "mesh_stats_available": False, "geometry_count": 0
+         }), \
+         patch("scripts.run_ai3d_benchmark._check_sf3d_enabled", return_value=(True, "ok")), \
+         patch("scripts.run_ai3d_benchmark._git_sha", return_value="abc1234"), \
+         patch("sys.argv", ["s", "--input-dir", str(input_dir), "--output-dir", str(output_dir),
+                            "--modes", "high", "--bg-modes", "off"]):
+        run_benchmark()
+
+    content = (output_dir / "AI_3D_PHASE3A_SF3D_BENCHMARK_REPORT.md").read_text(encoding="utf-8")
+    assert "AR Score" in content
+    assert "AR Verdict" in content
+    assert "mobile_ready" in content
+
+
+# ── End Phase 4B ─────────────────────────────────────────────────────────────
+
+
 def test_report_encoding_em_dash(tmp_path):
     input_dir = tmp_path / "inputs"
     input_dir.mkdir()

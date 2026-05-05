@@ -28,6 +28,7 @@ from .input_preprocessor import preprocess_input
 from .postprocess import run_postprocess
 from .quality_gate import evaluate as quality_evaluate
 from .quality_profiles import resolve_quality_profile
+from .ar_readiness import assess_ar_readiness
 
 logger = logging.getLogger("ai_3d_generation.pipeline")
 
@@ -453,11 +454,18 @@ def generate_ai_3d(
         quality_mode=resolved_quality["quality_mode"],
         resolved_quality=resolved_quality,
     )
+    # ── 8. AR readiness ───────────────────────────────────────────────────────
+    try:
+        manifest["ar_readiness"] = assess_ar_readiness(manifest)
+    except Exception:
+        manifest["ar_readiness"] = {"enabled": False, "score": None, "verdict": "unknown"}
+
     write_manifest(manifest, str(manifests_dir))
 
     logger.info(
-        "AI 3D generation: provider=%s status=%s gate=%s",
+        "AI 3D generation: provider=%s status=%s gate=%s ar=%s",
         provider.name, provider_result.get("status"), final_status,
+        manifest["ar_readiness"].get("verdict", "unknown"),
     )
     return manifest
 

@@ -1898,6 +1898,128 @@ class TestInputSizePropagation(unittest.TestCase):
             self.assertEqual(cmd[input_size_idx + 1], "1024")  # clamped to max
 
 
+# ── Phase 4B: AR readiness assessment ────────────────────────────────────────
+
+class TestArReadiness(unittest.TestCase):
+    """Unit tests for modules.ai_3d_generation.ar_readiness.assess_ar_readiness."""
+
+    def _manifest(self, **overrides):
+        """Return a minimal passing manifest; override any key."""
+        base = {
+            "output_glb_path": None,   # caller should patch or use tmp
+            "output_size_bytes": 512 * 1024,   # 0.5 MB
+            "provider_status": "ok",
+            "quality_gate": {"verdict": "review"},
+            "worker_metadata": {"texture_resolution": 1024, "device": "cuda"},
+            "review_required": True,
+        }
+        base.update(overrides)
+        return base
+
+    def test_missing_glb_returns_not_ready_score_zero(self):
+        from modules.ai_3d_generation.ar_readiness import assess_ar_readiness
+        m = self._manifest(output_glb_path=None, output_size_bytes=0)
+        r = assess_ar_readiness(m)
+        self.assertEqual(r["verdict"], "not_ready")
+        self.assertEqual(r["score"], 0)
+        self.assertFalse(r["checks"]["glb_exists"]["ok"])
+        self.assertIn("glb_output_missing", r["warnings"])
+
+    def test_nonexistent_glb_path_returns_not_ready(self):
+        from modules.ai_3d_generation.ar_readiness import assess_ar_readiness
+        m = self._manifest(output_glb_path="/nonexistent/path/out.glb")
+        r = assess_ar_readiness(m)
+        self.assertEqual(r["verdict"], "not_ready")
+        self.assertEqual(r["score"], 0)
+
+    def test_small_glb_provider_ok_returns_mobile_ready(self, tmp_path=None):
+        import tempfile, os
+        from modules.ai_3d_generation.ar_readiness import assess_ar_readiness
+        with tempfile.TemporaryDirectory() as td:
+            glb = os.path.join(td, "out.glb")
+            open(glb, "wb").write(b"x" * (512 * 1024))   # 0.5 MB
+            m = self._manifest(
+                output_glb_path=glb,
+                output_size_bytes=512 * 1024,
+                review_required=False,
+            )
+            r = assess_ar_readiness(m)
+        self.assertEqual(r["verdict"], "mobile_ready")
+        self.assertGreaterEqual(r["score"], 80)
+        self.assertTrue(r["checks"]["glb_exists"]["ok"])
+        self.assertTrue(r["checks"]["provider_status"]["ok"])
+
+    def test_large_file_over_10mb_penalised(self, tmp_path=None):
+        import tempfile, os
+        from modules.ai_3d_generation.ar_readiness import assess_ar_readiness
+        size = 11 * 1024 * 1024  # 11 MB
+        with tempfile.TemporaryDirectory() as td:
+            glb = os.path.join(td, "out.glb")
+            open(glb, "wb").write(b"x" * size)
+            m = self._manifest(output_glb_path=glb, output_size_bytes=size)
+            r = assess_ar_readiness(m)
+        self.assertIn("file_size_too_large", r["warnings"])
+        self.assertFalse(r["checks"]["file_size_mb"]["ok"])
+        self.assertLess(r["score"], 80)
+
+    def test_texture_2048_adds_warning_and_penalty(self, tmp_path=None):
+        import tempfile, os
+        from modules.ai_3d_generation.ar_readiness import assess_ar_readiness
+        with tempfile.TemporaryDirectory() as td:
+            glb = os.path.join(td, "out.glb")
+            open(glb, "wb").write(b"x" * 1024)
+            m = self._manifest(
+                output_glb_path=glb,
+                output_size_bytes=1024,
+                worker_metadata={"texture_resolution": 2048, "device": "cuda"},
+            )
+            r = assess_ar_readiness(m)
+        self.assertIn("texture_resolution_2048", r["warnings"])
+        self.assertFalse(r["checks"]["texture_resolution"]["ok"])
+
+    def test_provider_status_failed_caps_score(self, tmp_path=None):
+        import tempfile, os
+        from modules.ai_3d_generation.ar_readiness import assess_ar_readiness
+        with tempfile.TemporaryDirectory() as td:
+            glb = os.path.join(td, "out.glb")
+            open(glb, "wb").write(b"x" * 1024)
+            m = self._manifest(
+                output_glb_path=glb,
+                output_size_bytes=1024,
+                provider_status="failed",
+            )
+            r = assess_ar_readiness(m)
+        self.assertLessEqual(r["score"], 30)
+        self.assertIn(r["verdict"], ("not_ready", "review"))
+        self.assertIn("provider_status_not_ok", r["warnings"])
+
+    def test_vertex_count_null_handled_gracefully(self, tmp_path=None):
+        import tempfile, os
+        from modules.ai_3d_generation.ar_readiness import assess_ar_readiness
+        with tempfile.TemporaryDirectory() as td:
+            glb = os.path.join(td, "out.glb")
+            open(glb, "wb").write(b"x" * 1024)
+            m = self._manifest(output_glb_path=glb, output_size_bytes=1024)
+            # vertex_count and face_count not in manifest — must not raise
+            r = assess_ar_readiness(m)
+        self.assertIsNone(r["checks"]["vertex_count"]["ok"])
+        self.assertIsNone(r["checks"]["vertex_count"]["value"])
+
+    def test_return_structure_has_required_keys(self, tmp_path=None):
+        import tempfile, os
+        from modules.ai_3d_generation.ar_readiness import assess_ar_readiness
+        with tempfile.TemporaryDirectory() as td:
+            glb = os.path.join(td, "out.glb")
+            open(glb, "wb").write(b"x" * 1024)
+            m = self._manifest(output_glb_path=glb, output_size_bytes=1024)
+            r = assess_ar_readiness(m)
+        for key in ("enabled", "score", "verdict", "checks", "warnings", "recommendations"):
+            self.assertIn(key, r)
+        for check in ("glb_exists", "file_size_mb", "vertex_count", "face_count",
+                      "texture_resolution", "provider_status", "quality_gate"):
+            self.assertIn(check, r["checks"])
+
+
 # ── Phase 4A: postprocessing optional-module reporting ───────────────────────
 
 class TestPostprocessCleanReporting(unittest.TestCase):
