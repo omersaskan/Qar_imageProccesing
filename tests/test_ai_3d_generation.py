@@ -1898,6 +1898,94 @@ class TestInputSizePropagation(unittest.TestCase):
             self.assertEqual(cmd[input_size_idx + 1], "1024")  # clamped to max
 
 
+# ── Phase 4A: postprocessing optional-module reporting ───────────────────────
+
+class TestPostprocessCleanReporting(unittest.TestCase):
+    """Verify that missing optimizer/validator produce clean structured reasons."""
+
+    def _dummy_glb(self, tmp_path):
+        p = tmp_path / "out.glb"
+        p.write_bytes(b"glTF")
+        return str(p)
+
+    def test_missing_optimizer_class_returns_clean_reason(self, tmp_path=None):
+        import tempfile, os
+        from modules.ai_3d_generation.postprocess import optimize_glb_if_available
+        with tempfile.TemporaryDirectory() as td:
+            glb = os.path.join(td, "out.glb")
+            open(glb, "wb").write(b"glTF")
+            result = optimize_glb_if_available(glb)
+        self.assertFalse(result["applied"])
+        self.assertEqual(result["reason"], "optimizer_not_configured")
+
+    def test_missing_validator_class_returns_clean_reason(self, tmp_path=None):
+        import tempfile, os
+        from modules.ai_3d_generation.postprocess import validate_glb_if_available
+        with tempfile.TemporaryDirectory() as td:
+            glb = os.path.join(td, "out.glb")
+            open(glb, "wb").write(b"glTF")
+            result = validate_glb_if_available(glb)
+        self.assertFalse(result["applied"])
+        self.assertEqual(result["reason"], "validator_not_configured")
+
+    def test_no_raw_import_error_text_in_optimize_reason(self):
+        import tempfile, os, json
+        from modules.ai_3d_generation.postprocess import optimize_glb_if_available
+        with tempfile.TemporaryDirectory() as td:
+            glb = os.path.join(td, "out.glb")
+            open(glb, "wb").write(b"glTF")
+            result = optimize_glb_if_available(glb)
+        reason = result.get("reason", "")
+        self.assertNotIn("cannot import", reason)
+        self.assertNotIn("ImportError", reason)
+        self.assertNotIn("\\Users\\", reason)
+        self.assertNotIn("\\Lenovo\\", reason)
+
+    def test_no_raw_import_error_text_in_validate_reason(self):
+        import tempfile, os
+        from modules.ai_3d_generation.postprocess import validate_glb_if_available
+        with tempfile.TemporaryDirectory() as td:
+            glb = os.path.join(td, "out.glb")
+            open(glb, "wb").write(b"glTF")
+            result = validate_glb_if_available(glb)
+        reason = result.get("reason", "")
+        self.assertNotIn("cannot import", reason)
+        self.assertNotIn("ImportError", reason)
+        self.assertNotIn("\\Users\\", reason)
+
+    def test_run_postprocess_produces_clean_block(self):
+        import tempfile, os, json
+        from modules.ai_3d_generation.postprocess import run_postprocess
+        with tempfile.TemporaryDirectory() as td:
+            glb = os.path.join(td, "out.glb")
+            open(glb, "wb").write(b"glTF")
+            result = run_postprocess(glb, enabled=True)
+        self.assertTrue(result["enabled"])
+        self.assertFalse(result["optimize"]["applied"])
+        self.assertFalse(result["validate"]["applied"])
+        self.assertEqual(result["optimize"]["reason"], "optimizer_not_configured")
+        self.assertEqual(result["validate"]["reason"], "validator_not_configured")
+        # Serialise to JSON to catch any path leakage
+        serialised = json.dumps(result)
+        self.assertNotIn("cannot import", serialised)
+        self.assertNotIn("\\Lenovo\\", serialised)
+
+    def test_missing_glb_returns_glb_missing_not_import_error(self):
+        from modules.ai_3d_generation.postprocess import optimize_glb_if_available, validate_glb_if_available
+        opt = optimize_glb_if_available("/nonexistent/path/out.glb")
+        val = validate_glb_if_available("/nonexistent/path/out.glb")
+        self.assertEqual(opt["reason"], "glb_missing")
+        self.assertEqual(val["reason"], "glb_missing")
+
+    def test_postprocess_disabled_returns_enabled_false(self):
+        from modules.ai_3d_generation.postprocess import run_postprocess
+        result = run_postprocess("/any/path.glb", enabled=False)
+        self.assertFalse(result["enabled"])
+
+
+# ── End Phase 4A ─────────────────────────────────────────────────────────────
+
+
 if __name__ == "__main__":
     unittest.main()
 

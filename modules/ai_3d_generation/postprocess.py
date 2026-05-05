@@ -31,9 +31,12 @@ def optimize_glb_if_available(glb_path: Optional[str]) -> Dict[str, Any]:
             return {"applied": False, "reason": "gltf_transform_unavailable"}
         result = opt.optimize(glb_path, glb_path)
         return {"applied": True, "result": result}
+    except ImportError:
+        logger.debug("GLB optimizer not configured (class not found)")
+        return {"applied": False, "reason": "optimizer_not_configured"}
     except Exception as exc:
         logger.debug("GLB optimize skipped: %s", exc)
-        return {"applied": False, "reason": str(exc)}
+        return {"applied": False, "reason": "optimizer_not_configured"}
 
 
 def validate_glb_if_available(glb_path: Optional[str]) -> Dict[str, Any]:
@@ -47,9 +50,12 @@ def validate_glb_if_available(glb_path: Optional[str]) -> Dict[str, Any]:
             return {"applied": False, "reason": "gltf_validator_unavailable"}
         result = v.validate(glb_path)
         return {"applied": True, "result": result}
+    except ImportError:
+        logger.debug("GLB validator not configured (class not found)")
+        return {"applied": False, "reason": "validator_not_configured"}
     except Exception as exc:
         logger.debug("GLB validate skipped: %s", exc)
-        return {"applied": False, "reason": str(exc)}
+        return {"applied": False, "reason": "validator_not_configured"}
 
 
 def run_postprocess(
