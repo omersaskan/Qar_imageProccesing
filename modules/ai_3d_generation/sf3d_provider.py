@@ -399,13 +399,15 @@ class SF3DProvider(AI3DProviderBase):
         # Ensure absolute paths before passing to subprocess
         img_abs = str(Path(input_image_path).resolve())
         out_abs = str(Path(output_dir).resolve())
+        raw_input_size = opts.get("input_size", s.sf3d_input_size)
+        clamped_input_size = max(64, min(1024, int(raw_input_size)))
         cmd = [
             str(Path(s.sf3d_python_path).resolve()),
             str(Path(s.sf3d_worker_script).resolve()),
             "--image",              img_abs,
             "--output-dir",         out_abs,
             "--device",             opts.get("device", s.sf3d_device),
-            "--input-size",         str(opts.get("input_size", s.sf3d_input_size)),
+            "--input-size",         str(clamped_input_size),
             "--texture-resolution", str(opts.get("texture_resolution", s.sf3d_texture_resolution)),
             "--remesh",             opts.get("remesh", s.sf3d_remesh),
             "--output-format",      opts.get("output_format", s.sf3d_output_format),
@@ -433,6 +435,8 @@ class SF3DProvider(AI3DProviderBase):
         repo_root  = getattr(s, "sf3d_wsl_repo_root", "")
         worker_path = f"{repo_root}/scripts/sf3d_worker.py"
 
+        raw_input_size = opts.get("input_size", s.sf3d_input_size)
+        clamped_input_size = max(64, min(1024, int(raw_input_size)))
         cmd = [
             "wsl.exe",
             "-d", getattr(s, "sf3d_wsl_distro", "Ubuntu-24.04"),
@@ -442,7 +446,7 @@ class SF3DProvider(AI3DProviderBase):
             "--image",              wsl_image,
             "--output-dir",         wsl_outdir,
             "--device",             opts.get("device", s.sf3d_device),
-            "--input-size",         str(opts.get("input_size", s.sf3d_input_size)),
+            "--input-size",         str(clamped_input_size),
             "--texture-resolution", str(opts.get("texture_resolution", s.sf3d_texture_resolution)),
             "--remesh",             opts.get("remesh", s.sf3d_remesh),
             "--output-format",      opts.get("output_format", s.sf3d_output_format),

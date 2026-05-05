@@ -81,6 +81,7 @@ def generate_ai_3d(
         }
     
     # Inject resolved quality into options for provider
+    opts["input_size"] = resolved_quality["input_size"]
     opts["texture_resolution"] = resolved_quality["texture_resolution"]
     opts["remesh"] = resolved_quality["remesh"]
 

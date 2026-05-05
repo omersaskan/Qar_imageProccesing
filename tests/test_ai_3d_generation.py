@@ -1782,6 +1782,122 @@ class TestPipelinePolish(unittest.TestCase):
                 self.assertTrue(kwargs["selected_frame_path"].endswith("derived\\selected_frame.jpg") or
                                 kwargs["selected_frame_path"].endswith("derived/selected_frame.jpg"))
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 3A.1 — input_size propagation from quality profiles to provider
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestInputSizePropagation(unittest.TestCase):
+
+    def _mock_settings(self):
+        s = MagicMock()
+        s.ai_3d_max_candidates = 5
+        s.ai_3d_video_topk_frames = 5
+        return s
+
+    def test_balanced_quality_input_size_768(self):
+        from modules.ai_3d_generation.quality_profiles import resolve_quality_profile
+        profile = resolve_quality_profile("balanced", self._mock_settings())
+        self.assertEqual(profile["input_size"], 768)
+
+    def test_high_quality_input_size_1024(self):
+        from modules.ai_3d_generation.quality_profiles import resolve_quality_profile
+        profile = resolve_quality_profile("high", self._mock_settings())
+        self.assertEqual(profile["input_size"], 1024)
+
+    def test_ultra_quality_input_size_1024(self):
+        from modules.ai_3d_generation.quality_profiles import resolve_quality_profile
+        profile = resolve_quality_profile("ultra", self._mock_settings())
+        self.assertEqual(profile["input_size"], 1024)
+
+    def test_pipeline_injects_input_size_into_opts(self):
+        """Resolved quality input_size must end up in opts for the provider."""
+        from modules.ai_3d_generation.quality_profiles import resolve_quality_profile
+
+        # Simulate what pipeline.py does: resolve then inject
+        opts = {"quality_mode": "balanced"}
+        resolved = resolve_quality_profile(
+            opts.get("quality_mode"), self._mock_settings(), opts
+        )
+        # This is the line we added to pipeline.py:
+        opts["input_size"] = resolved["input_size"]
+        opts["texture_resolution"] = resolved["texture_resolution"]
+        opts["remesh"] = resolved["remesh"]
+
+        self.assertEqual(opts["input_size"], 768)
+        self.assertEqual(opts["texture_resolution"], 1024)
+
+        # Now high
+        opts_h = {"quality_mode": "high"}
+        resolved_h = resolve_quality_profile("high", self._mock_settings(), opts_h)
+        opts_h["input_size"] = resolved_h["input_size"]
+        self.assertEqual(opts_h["input_size"], 1024)
+
+    def test_sf3d_provider_passes_input_size_to_cmd(self):
+        """SF3D provider must include --input-size from options in the subprocess command."""
+        from modules.ai_3d_generation.sf3d_provider import SF3DProvider
+
+        provider = SF3DProvider()
+        # Mock settings
+        provider._settings = MagicMock()
+        provider._settings.sf3d_enabled = True
+        provider._settings.sf3d_execution_mode = "wsl_subprocess"
+        provider._settings.sf3d_device = "auto"
+        provider._settings.sf3d_input_size = 512
+        provider._settings.sf3d_texture_resolution = 1024
+        provider._settings.sf3d_remesh = "none"
+        provider._settings.sf3d_output_format = "glb"
+        provider._settings.sf3d_wsl_distro = "Ubuntu-24.04"
+        provider._settings.sf3d_wsl_python_path = "/usr/bin/python3"
+        provider._settings.sf3d_wsl_repo_root = "/mnt/c/test"
+        provider._settings.sf3d_wsl_timeout_sec = 600
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout='{"status": "ok", "output_path": "/tmp/out.glb", "metadata": {"input_size": 768}, "warnings": []}',
+                stderr="",
+            )
+            with patch("pathlib.Path.exists", return_value=True):
+                result = provider.generate("/fake/img.png", "/fake/out", {"input_size": 768})
+
+            # Check that --input-size 768 appears in the command
+            cmd = mock_run.call_args[0][0]
+            input_size_idx = cmd.index("--input-size")
+            self.assertEqual(cmd[input_size_idx + 1], "768")
+
+    def test_sf3d_provider_clamps_input_size(self):
+        """SF3D provider must clamp input_size to [64, 1024]."""
+        from modules.ai_3d_generation.sf3d_provider import SF3DProvider
+
+        provider = SF3DProvider()
+        provider._settings = MagicMock()
+        provider._settings.sf3d_enabled = True
+        provider._settings.sf3d_execution_mode = "wsl_subprocess"
+        provider._settings.sf3d_device = "auto"
+        provider._settings.sf3d_input_size = 512
+        provider._settings.sf3d_texture_resolution = 1024
+        provider._settings.sf3d_remesh = "none"
+        provider._settings.sf3d_output_format = "glb"
+        provider._settings.sf3d_wsl_distro = "Ubuntu-24.04"
+        provider._settings.sf3d_wsl_python_path = "/usr/bin/python3"
+        provider._settings.sf3d_wsl_repo_root = "/mnt/c/test"
+        provider._settings.sf3d_wsl_timeout_sec = 600
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout='{"status": "ok", "output_path": "/tmp/out.glb", "metadata": {}, "warnings": []}',
+                stderr="",
+            )
+            with patch("pathlib.Path.exists", return_value=True):
+                # Pass out-of-range input_size
+                provider.generate("/fake/img.png", "/fake/out", {"input_size": 9999})
+
+            cmd = mock_run.call_args[0][0]
+            input_size_idx = cmd.index("--input-size")
+            self.assertEqual(cmd[input_size_idx + 1], "1024")  # clamped to max
+
+
 if __name__ == "__main__":
     unittest.main()
 
