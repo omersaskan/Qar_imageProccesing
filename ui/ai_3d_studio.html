@@ -187,6 +187,18 @@
     <div class="ai3d-outputs" id="outputs-grid"></div>
     <div id="warnings-box" style="margin-top:8px"></div>
     <div id="errors-box" style="margin-top:6px"></div>
+
+    <!-- Phase 4C: Mesh Stats -->
+    <div id="mesh-stats-section" style="display:none;margin-top:20px">
+      <h3 style="font-size:.85rem;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Mesh Stats</h3>
+      <div id="mesh-stats-grid" class="ai3d-outputs"></div>
+    </div>
+
+    <!-- Phase 4C: AR Readiness -->
+    <div id="ar-readiness-section" style="display:none;margin-top:20px">
+      <h3 style="font-size:.85rem;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">AR Readiness</h3>
+      <div id="ar-readiness-content"></div>
+    </div>
   </div>
 </div>
 
@@ -432,6 +444,57 @@
     (manifest.errors || []).forEach(e => {
       eb.innerHTML += `<span class="ai3d-warn-tag" style="background:#fee2e2;color:#991b1b">${e}</span>`;
     });
+
+    // Mesh stats (Phase 4C)
+    const ms = manifest.mesh_stats || {};
+    const msSection = document.getElementById('mesh-stats-section');
+    const msGrid = document.getElementById('mesh-stats-grid');
+    msGrid.innerHTML = '';
+    if (ms.enabled) {
+      const msFields = [
+        ['Available',      ms.available ? '✓ Yes' : '✗ No (trimesh unavailable or no GLB)'],
+        ['Vertex Count',   ms.available ? (ms.vertex_count || 0).toLocaleString() : '—'],
+        ['Face Count',     ms.available ? (ms.face_count  || 0).toLocaleString() : '—'],
+        ['Geometry Count', ms.available ? (ms.geometry_count != null ? ms.geometry_count : '—') : '—'],
+      ];
+      msFields.forEach(([l, v]) => {
+        msGrid.innerHTML += `<div class="ai3d-out-box"><h3>${l}</h3><p>${v}</p></div>`;
+      });
+      msSection.style.display = 'block';
+    } else {
+      msSection.style.display = 'none';
+    }
+
+    // AR readiness (Phase 4C)
+    const ar = manifest.ar_readiness || {};
+    const arSection = document.getElementById('ar-readiness-section');
+    const arContent = document.getElementById('ar-readiness-content');
+    arContent.innerHTML = '';
+    if (ar.enabled) {
+      const _vColor = ar.verdict === 'mobile_ready' ? {bg:'#d1fae5',fg:'#065f46'}
+                    : ar.verdict === 'review'        ? {bg:'#fef9c3',fg:'#854d0e'}
+                    :                                  {bg:'#fee2e2',fg:'#991b1b'};
+      arContent.innerHTML = `
+        <div style="display:flex;gap:12px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
+          <span style="background:${_vColor.bg};color:${_vColor.fg};border-radius:4px;padding:4px 12px;font-weight:700;font-size:.9rem">${ar.verdict || '—'}</span>
+          <span style="font-size:.9rem">Score: <strong>${ar.score != null ? ar.score + ' / 100' : '—'}</strong></span>
+        </div>`;
+      if (ar.warnings && ar.warnings.length) {
+        ar.warnings.forEach(w => {
+          arContent.innerHTML += `<span class="ai3d-warn-tag">${w}</span> `;
+        });
+      }
+      if (ar.recommendations && ar.recommendations.length) {
+        arContent.innerHTML += `<ul style="margin:8px 0 0;padding-left:18px;font-size:.85rem;color:#cbd5e1">`;
+        ar.recommendations.forEach(rec => {
+          arContent.innerHTML += `<li>${rec}</li>`;
+        });
+        arContent.innerHTML += `</ul>`;
+      }
+      arSection.style.display = 'block';
+    } else {
+      arSection.style.display = 'none';
+    }
   }
 </script>
 </body>

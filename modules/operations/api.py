@@ -1651,6 +1651,10 @@ async def ai3d_process(session_id: str, body: Optional[_AI3DProcessRequest] = No
             "candidate_count": manifest.get("candidate_count"),
             "selected_candidate_id": manifest.get("selected_candidate_id"),
             "candidate_summary": manifest.get("candidate_ranking"),
+
+            # Phase 4C: mesh geometry + AR readiness (top-level for easy consumption)
+            "mesh_stats": manifest.get("mesh_stats"),
+            "ar_readiness": manifest.get("ar_readiness"),
         }
         if provider_failure_reason:
             response["provider_failure_reason"] = provider_failure_reason
