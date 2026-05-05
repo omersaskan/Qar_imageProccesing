@@ -59,10 +59,13 @@ def assess_ar_readiness(manifest: Dict[str, Any]) -> Dict[str, Any]:
     texture_resolution = worker_meta.get("texture_resolution")
     review_required    = manifest.get("review_required", True)
 
-    # Vertex/face counts are NOT in the pipeline manifest (they're computed by
-    # the benchmark runner via trimesh externally). Accept null gracefully.
-    vertex_count: Optional[int] = manifest.get("vertex_count")
-    face_count:   Optional[int] = manifest.get("face_count")
+    # Vertex/face: prefer top-level manifest fields; fall back to manifest["mesh_stats"]
+    # populated by the pipeline via extract_mesh_stats().
+    _mesh_stats = manifest.get("mesh_stats") or {}
+    _vc = manifest.get("vertex_count")
+    vertex_count: Optional[int] = _vc if _vc is not None else _mesh_stats.get("vertex_count")
+    _fc = manifest.get("face_count")
+    face_count:   Optional[int] = _fc if _fc is not None else _mesh_stats.get("face_count")
 
     # ── Check: GLB exists ─────────────────────────────────────────────────────
     glb_exists = bool(output_glb_path and Path(output_glb_path).exists())

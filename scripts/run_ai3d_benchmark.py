@@ -202,7 +202,16 @@ def run_benchmark():
                     peak_mem = manifest.get("peak_mem_mb") or 0
                     duration = manifest.get("duration_sec", 0)
                     pre = manifest.get("preprocessing", {})
-                    mesh_stats = get_mesh_stats(glb_path)
+                    _ms = manifest.get("mesh_stats") or {}
+                    if _ms.get("available"):
+                        mesh_stats = {
+                            "vertex_count": _ms.get("vertex_count") or 0,
+                            "face_count": _ms.get("face_count") or 0,
+                            "geometry_count": _ms.get("geometry_count") or 0,
+                            "mesh_stats_available": True,
+                        }
+                    else:
+                        mesh_stats = get_mesh_stats(glb_path)
 
                     ranking = manifest.get("candidate_ranking") or []
                     top_score = ranking[0].get("score") if ranking else None

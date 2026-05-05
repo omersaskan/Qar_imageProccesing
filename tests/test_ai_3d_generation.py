@@ -2108,6 +2108,139 @@ class TestPostprocessCleanReporting(unittest.TestCase):
 # ── End Phase 4A ─────────────────────────────────────────────────────────────
 
 
+# ── Phase 4B.1: Mesh stats module + AR readiness fallback ────────────────────
+
+class TestMeshStatsModule(unittest.TestCase):
+    """Unit tests for modules.ai_3d_generation.mesh_stats.extract_mesh_stats."""
+
+    def test_none_path_returns_unavailable(self):
+        from modules.ai_3d_generation.mesh_stats import extract_mesh_stats
+        result = extract_mesh_stats(None)
+        self.assertFalse(result["available"])
+        self.assertEqual(result["error"], "glb_missing")
+
+    def test_nonexistent_path_returns_unavailable(self):
+        from modules.ai_3d_generation.mesh_stats import extract_mesh_stats
+        result = extract_mesh_stats("/no/such/file.glb")
+        self.assertFalse(result["available"])
+        self.assertEqual(result["error"], "glb_missing")
+
+    def test_trimesh_import_error_returns_clean_error(self):
+        import sys, tempfile, os
+        from modules.ai_3d_generation.mesh_stats import extract_mesh_stats
+        with tempfile.TemporaryDirectory() as td:
+            glb = os.path.join(td, "out.glb")
+            open(glb, "wb").write(b"glTF")
+            with patch.dict(sys.modules, {"trimesh": None}):
+                result = extract_mesh_stats(glb)
+        self.assertFalse(result["available"])
+        self.assertEqual(result["error"], "trimesh_unavailable")
+
+    def test_mocked_scene_returns_correct_counts(self):
+        import tempfile, os, trimesh
+        from modules.ai_3d_generation.mesh_stats import extract_mesh_stats
+        with tempfile.TemporaryDirectory() as td:
+            glb = os.path.join(td, "out.glb")
+            open(glb, "wb").write(b"glTF")
+            mock_mesh = MagicMock()
+            mock_mesh.vertices = list(range(100))
+            mock_mesh.faces = list(range(50))
+            mock_scene = MagicMock(spec=trimesh.Scene)
+            mock_scene.geometry = {"mesh1": mock_mesh}
+            with patch("trimesh.load", return_value=mock_scene):
+                result = extract_mesh_stats(glb)
+        self.assertTrue(result["available"])
+        self.assertEqual(result["vertex_count"], 100)
+        self.assertEqual(result["face_count"], 50)
+        self.assertEqual(result["geometry_count"], 1)
+        self.assertIsNone(result["error"])
+
+    def test_result_has_required_keys(self):
+        from modules.ai_3d_generation.mesh_stats import extract_mesh_stats
+        result = extract_mesh_stats(None)
+        for key in ("enabled", "available", "vertex_count", "face_count", "geometry_count", "error"):
+            self.assertIn(key, result)
+
+
+class TestArReadinessMeshStatsFallback(unittest.TestCase):
+    """AR readiness reads vertex/face from manifest['mesh_stats'] when top-level fields absent."""
+
+    def _glb(self, td):
+        import os
+        glb = os.path.join(td, "out.glb")
+        open(glb, "wb").write(b"x" * 1024)
+        return glb
+
+    def _base_manifest(self, glb):
+        return {
+            "output_glb_path": glb,
+            "output_size_bytes": 1024,
+            "provider_status": "ok",
+            "quality_gate": {"verdict": "ok"},
+            "worker_metadata": {"texture_resolution": 1024},
+            "review_required": False,
+        }
+
+    def test_mesh_stats_high_vertex_lowers_score(self):
+        import tempfile
+        from modules.ai_3d_generation.ar_readiness import assess_ar_readiness
+        with tempfile.TemporaryDirectory() as td:
+            m = self._base_manifest(self._glb(td))
+            m["mesh_stats"] = {"available": True, "vertex_count": 100_000, "face_count": 10_000}
+            r = assess_ar_readiness(m)
+        self.assertIn("vertex_count_high", r["warnings"])
+        self.assertEqual(r["checks"]["vertex_count"]["value"], 100_000)
+        self.assertFalse(r["checks"]["vertex_count"]["ok"])
+
+    def test_mesh_stats_high_face_lowers_score(self):
+        import tempfile
+        from modules.ai_3d_generation.ar_readiness import assess_ar_readiness
+        with tempfile.TemporaryDirectory() as td:
+            m = self._base_manifest(self._glb(td))
+            m["mesh_stats"] = {"available": True, "vertex_count": 10_000, "face_count": 200_000}
+            r = assess_ar_readiness(m)
+        self.assertIn("face_count_high", r["warnings"])
+        self.assertEqual(r["checks"]["face_count"]["value"], 200_000)
+        self.assertFalse(r["checks"]["face_count"]["ok"])
+
+    def test_mesh_stats_unavailable_does_not_penalise(self):
+        import tempfile
+        from modules.ai_3d_generation.ar_readiness import assess_ar_readiness
+        with tempfile.TemporaryDirectory() as td:
+            m = self._base_manifest(self._glb(td))
+            m["mesh_stats"] = {"available": False, "vertex_count": None, "face_count": None}
+            r = assess_ar_readiness(m)
+        self.assertNotIn("vertex_count_high", r["warnings"])
+        self.assertNotIn("face_count_high", r["warnings"])
+        self.assertIsNone(r["checks"]["vertex_count"]["ok"])
+
+    def test_top_level_vertex_count_takes_precedence(self):
+        import tempfile
+        from modules.ai_3d_generation.ar_readiness import assess_ar_readiness
+        with tempfile.TemporaryDirectory() as td:
+            m = self._base_manifest(self._glb(td))
+            m["vertex_count"] = 1_000   # well under threshold
+            m["mesh_stats"] = {"available": True, "vertex_count": 999_999, "face_count": 0}
+            r = assess_ar_readiness(m)
+        # top-level wins — no high-vertex warning
+        self.assertNotIn("vertex_count_high", r["warnings"])
+        self.assertEqual(r["checks"]["vertex_count"]["value"], 1_000)
+
+    def test_zero_vertex_count_not_treated_as_missing(self):
+        import tempfile
+        from modules.ai_3d_generation.ar_readiness import assess_ar_readiness
+        with tempfile.TemporaryDirectory() as td:
+            m = self._base_manifest(self._glb(td))
+            m["vertex_count"] = 0
+            m["mesh_stats"] = {"available": True, "vertex_count": 999_999, "face_count": 0}
+            r = assess_ar_readiness(m)
+        # 0 is a valid value — should not fall through to mesh_stats
+        self.assertEqual(r["checks"]["vertex_count"]["value"], 0)
+
+
+# ── End Phase 4B.1 ───────────────────────────────────────────────────────────
+
+
 if __name__ == "__main__":
     unittest.main()
 

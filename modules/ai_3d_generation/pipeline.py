@@ -29,6 +29,7 @@ from .postprocess import run_postprocess
 from .quality_gate import evaluate as quality_evaluate
 from .quality_profiles import resolve_quality_profile
 from .ar_readiness import assess_ar_readiness
+from .mesh_stats import extract_mesh_stats
 
 logger = logging.getLogger("ai_3d_generation.pipeline")
 
@@ -454,6 +455,16 @@ def generate_ai_3d(
         quality_mode=resolved_quality["quality_mode"],
         resolved_quality=resolved_quality,
     )
+    # ── 7.5 Mesh stats ────────────────────────────────────────────────────────
+    try:
+        _mesh_stats = extract_mesh_stats(output_glb_path)
+        manifest["mesh_stats"] = _mesh_stats
+        if _mesh_stats.get("available"):
+            manifest["vertex_count"] = _mesh_stats["vertex_count"]
+            manifest["face_count"] = _mesh_stats["face_count"]
+    except Exception:
+        manifest["mesh_stats"] = {"enabled": True, "available": False, "error": "mesh_stats_failed"}
+
     # ── 8. AR readiness ───────────────────────────────────────────────────────
     try:
         manifest["ar_readiness"] = assess_ar_readiness(manifest)
