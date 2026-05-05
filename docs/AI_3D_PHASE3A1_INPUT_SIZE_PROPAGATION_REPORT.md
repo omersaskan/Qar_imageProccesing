@@ -3,7 +3,7 @@
 ## Overview
 This report documents the fix for the `input_size` mismatch between `resolved_quality` and `worker_metadata` in the AI 3D generation pipeline.
 
-- **Commit SHA**: Post-fix (pending commit)
+- **Commit SHA**: `3c2765c` — fix: propagate quality input size to SF3D worker
 - **Date**: 2026-05-05
 - **Test Result**: 203 passed
 
@@ -45,8 +45,12 @@ No changes needed — worker already reports `args.input_size` in metadata.
 | balanced | 768 | **768** | Yes |
 | high | 1024 | **1024** | Yes |
 
+The benchmark was re-run after the input_size propagation fix and confirmed:
+balanced `resolved_quality.input_size=768` equals `worker_metadata.input_size=768`;
+high `resolved_quality.input_size=1024` equals `worker_metadata.input_size=1024`.
+
 ### SF3D Accepted 1024
-- SF3D successfully processed input_size=1024 without errors.
+- SF3D accepted `input_size=1024` successfully.
 - Both runs completed with `provider_status=ok` and valid GLB output.
 
 ## Notes
