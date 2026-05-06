@@ -1655,6 +1655,9 @@ async def ai3d_process(session_id: str, body: Optional[_AI3DProcessRequest] = No
             # Phase 4C: mesh geometry + AR readiness (top-level for easy consumption)
             "mesh_stats": manifest.get("mesh_stats"),
             "ar_readiness": manifest.get("ar_readiness"),
+
+            # Phase 4D: GLB structural validation summary
+            "glb_validation": manifest.get("glb_validation"),
         }
         if provider_failure_reason:
             response["provider_failure_reason"] = provider_failure_reason

@@ -25,6 +25,7 @@ _PENALTY_TEXTURE_2048 = 10   # texture_resolution == 2048
 _PENALTY_VERTEX_HIGH  = 20   # vertex_count > 50 000
 _PENALTY_FACE_HIGH    = 10   # face_count   > 100 000
 _PENALTY_REVIEW       = 5    # review_required
+_PENALTY_GLB_INVALID  = 40   # GLB failed structural validation
 _CAP_PROVIDER_FAILED  = 30   # hard cap when provider_status != ok
 
 # Verdict thresholds
@@ -66,6 +67,10 @@ def assess_ar_readiness(manifest: Dict[str, Any]) -> Dict[str, Any]:
     vertex_count: Optional[int] = _vc if _vc is not None else _mesh_stats.get("vertex_count")
     _fc = manifest.get("face_count")
     face_count:   Optional[int] = _fc if _fc is not None else _mesh_stats.get("face_count")
+
+    # GLB validation: None = not run, True = passed, False = failed
+    _glb_val = manifest.get("glb_validation") or {}
+    glb_valid: Optional[bool] = _glb_val.get("valid")  # None when absent
 
     # ── Check: GLB exists ─────────────────────────────────────────────────────
     glb_exists = bool(output_glb_path and Path(output_glb_path).exists())
@@ -156,6 +161,14 @@ def assess_ar_readiness(manifest: Dict[str, Any]) -> Dict[str, Any]:
     # ── Check: quality_gate ───────────────────────────────────────────────────
     gate_ok = quality_gate_verdict in ("ok", "review")
 
+    # ── Check: GLB validation ─────────────────────────────────────────────────
+    if glb_valid is False:
+        score -= _PENALTY_GLB_INVALID
+        warnings.append("glb_validation_failed")
+        recommendations.append(
+            "GLB failed structural validation. Inspect issues before AR delivery."
+        )
+
     # ── Review penalty ────────────────────────────────────────────────────────
     if review_required:
         score -= _PENALTY_REVIEW
@@ -164,7 +177,8 @@ def assess_ar_readiness(manifest: Dict[str, Any]) -> Dict[str, Any]:
     score = max(0, min(100, score))
 
     # ── Verdict ───────────────────────────────────────────────────────────────
-    required_ok = glb_exists and provider_ok
+    # glb_valid=False (failed validation) blocks mobile_ready regardless of score
+    required_ok = glb_exists and provider_ok and (glb_valid is not False)
     if required_ok and score >= _VERDICT_MOBILE_READY_MIN:
         verdict = "mobile_ready"
     elif score >= _VERDICT_REVIEW_MIN:
@@ -177,13 +191,15 @@ def assess_ar_readiness(manifest: Dict[str, Any]) -> Dict[str, Any]:
         "score": score,
         "verdict": verdict,
         "checks": {
-            "glb_exists":         {"ok": glb_exists,    "value": output_glb_path},
-            "file_size_mb":       {"ok": size_ok,        "value": file_size_mb},
-            "vertex_count":       {"ok": vertex_ok,      "value": vertex_count},
-            "face_count":         {"ok": face_ok,        "value": face_count},
-            "texture_resolution": {"ok": texture_ok,     "value": texture_resolution},
-            "provider_status":    {"ok": provider_ok,    "value": provider_status},
-            "quality_gate":       {"ok": gate_ok,        "value": quality_gate_verdict},
+            "glb_exists":         {"ok": glb_exists,              "value": output_glb_path},
+            "file_size_mb":       {"ok": size_ok,                  "value": file_size_mb},
+            "vertex_count":       {"ok": vertex_ok,                "value": vertex_count},
+            "face_count":         {"ok": face_ok,                  "value": face_count},
+            "texture_resolution": {"ok": texture_ok,               "value": texture_resolution},
+            "provider_status":    {"ok": provider_ok,              "value": provider_status},
+            "quality_gate":       {"ok": gate_ok,                  "value": quality_gate_verdict},
+            "glb_validation":     {"ok": None if glb_valid is None else glb_valid,
+                                   "value": glb_valid},
         },
         "warnings": warnings,
         "recommendations": recommendations,

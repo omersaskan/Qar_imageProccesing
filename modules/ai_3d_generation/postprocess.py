@@ -40,22 +40,16 @@ def optimize_glb_if_available(glb_path: Optional[str]) -> Dict[str, Any]:
 
 
 def validate_glb_if_available(glb_path: Optional[str]) -> Dict[str, Any]:
-    """Stub: run gltf-validator. No-op for now."""
+    """Run pure-Python structural GLB validation."""
     if not glb_path or not Path(glb_path).exists():
         return {"applied": False, "reason": "glb_missing"}
     try:
-        from modules.qa_validation.gltf_validator import GltfValidator
-        v = GltfValidator()
-        if not v.is_available():
-            return {"applied": False, "reason": "gltf_validator_unavailable"}
-        result = v.validate(glb_path)
+        from modules.qa_validation.gltf_validator import validate_glb_content
+        result = validate_glb_content(glb_path)
         return {"applied": True, "result": result}
-    except ImportError:
-        logger.debug("GLB validator not configured (class not found)")
-        return {"applied": False, "reason": "validator_not_configured"}
     except Exception as exc:
-        logger.debug("GLB validate skipped: %s", exc)
-        return {"applied": False, "reason": "validator_not_configured"}
+        logger.warning("GLB validation failed unexpectedly: %s", exc)
+        return {"applied": False, "reason": "validator_error"}
 
 
 def run_postprocess(

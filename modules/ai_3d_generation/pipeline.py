@@ -465,6 +465,19 @@ def generate_ai_3d(
     except Exception:
         manifest["mesh_stats"] = {"enabled": True, "available": False, "error": "mesh_stats_failed"}
 
+    # ── 7.6 GLB validation summary ────────────────────────────────────────────
+    try:
+        _val = postprocessing_meta.get("validate", {})
+        _val_result = _val.get("result") if isinstance(_val, dict) else None
+        if _val_result and _val_result.get("available"):
+            manifest["glb_validation"] = {
+                "valid":    _val_result.get("valid"),
+                "issues":   _val_result.get("issues", []),
+                "warnings": _val_result.get("warnings", []),
+            }
+    except Exception:
+        pass
+
     # ── 8. AR readiness ───────────────────────────────────────────────────────
     try:
         manifest["ar_readiness"] = assess_ar_readiness(manifest)

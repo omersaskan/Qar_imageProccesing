@@ -2040,15 +2040,17 @@ class TestPostprocessCleanReporting(unittest.TestCase):
         self.assertFalse(result["applied"])
         self.assertEqual(result["reason"], "optimizer_not_configured")
 
-    def test_missing_validator_class_returns_clean_reason(self, tmp_path=None):
+    def test_validator_runs_and_reports_invalid_glb(self, tmp_path=None):
+        # Phase 4D: validate_glb_if_available now calls the real pure-Python
+        # validator; applied=True and result.valid reflects structural check.
         import tempfile, os
         from modules.ai_3d_generation.postprocess import validate_glb_if_available
         with tempfile.TemporaryDirectory() as td:
             glb = os.path.join(td, "out.glb")
-            open(glb, "wb").write(b"glTF")
+            open(glb, "wb").write(b"glTF")   # 4 bytes — too small, invalid
             result = validate_glb_if_available(glb)
-        self.assertFalse(result["applied"])
-        self.assertEqual(result["reason"], "validator_not_configured")
+        self.assertTrue(result["applied"])
+        self.assertFalse(result["result"]["valid"])
 
     def test_no_raw_import_error_text_in_optimize_reason(self):
         import tempfile, os, json
@@ -2076,17 +2078,19 @@ class TestPostprocessCleanReporting(unittest.TestCase):
         self.assertNotIn("\\Users\\", reason)
 
     def test_run_postprocess_produces_clean_block(self):
+        # Phase 4D: validate now runs (applied=True); optimizer is still a stub.
         import tempfile, os, json
         from modules.ai_3d_generation.postprocess import run_postprocess
         with tempfile.TemporaryDirectory() as td:
             glb = os.path.join(td, "out.glb")
-            open(glb, "wb").write(b"glTF")
+            open(glb, "wb").write(b"glTF")   # invalid GLB — validator runs but reports invalid
             result = run_postprocess(glb, enabled=True)
         self.assertTrue(result["enabled"])
         self.assertFalse(result["optimize"]["applied"])
-        self.assertFalse(result["validate"]["applied"])
         self.assertEqual(result["optimize"]["reason"], "optimizer_not_configured")
-        self.assertEqual(result["validate"]["reason"], "validator_not_configured")
+        # Validator runs (not a stub anymore)
+        self.assertTrue(result["validate"]["applied"])
+        self.assertIn("result", result["validate"])
         # Serialise to JSON to catch any path leakage
         serialised = json.dumps(result)
         self.assertNotIn("cannot import", serialised)
