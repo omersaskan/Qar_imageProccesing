@@ -377,6 +377,22 @@ class Settings(BaseSettings):
     sf3d_wsl_timeout_sec: int = Field(600, validation_alias="SF3D_WSL_TIMEOUT_SEC")
     sf3d_wsl_output_copy_enabled: bool = Field(True, validation_alias="SF3D_WSL_OUTPUT_COPY_ENABLED")
 
+    # --- HUNYUAN3D-2.1 LOCAL PROVIDER ---
+    # Disabled by default. All 5 gates must be true before any inference runs.
+    hunyuan3d_21_enabled: bool = Field(False, validation_alias="HUNYUAN3D_21_ENABLED")
+    hunyuan3d_21_repo_path: str = Field("", validation_alias="HUNYUAN3D_21_REPO_PATH")
+    hunyuan3d_21_python: str = Field("", validation_alias="HUNYUAN3D_21_PYTHON")
+    hunyuan3d_21_legal_ack: bool = Field(False, validation_alias="HUNYUAN3D_21_LEGAL_ACK")
+    hunyuan3d_21_device: str = Field("cuda", validation_alias="HUNYUAN3D_21_DEVICE")
+    hunyuan3d_21_steps: int = Field(50, validation_alias="HUNYUAN3D_21_STEPS")
+    hunyuan3d_21_guidance_scale: float = Field(7.5, validation_alias="HUNYUAN3D_21_GUIDANCE_SCALE")
+    hunyuan3d_21_seed: int = Field(-1, validation_alias="HUNYUAN3D_21_SEED")
+    hunyuan3d_21_texture_enabled: bool = Field(False, validation_alias="HUNYUAN3D_21_TEXTURE_ENABLED")
+    hunyuan3d_21_texture_steps: int = Field(20, validation_alias="HUNYUAN3D_21_TEXTURE_STEPS")
+    hunyuan3d_21_timeout_sec: int = Field(600, validation_alias="HUNYUAN3D_21_TIMEOUT_SEC")
+    hunyuan3d_21_output_format: str = Field("glb", validation_alias="HUNYUAN3D_21_OUTPUT_FORMAT")
+    hunyuan3d_21_require_review: bool = Field(True, validation_alias="HUNYUAN3D_21_REQUIRE_REVIEW")
+
     # --- Phase 1: Multi-candidate orchestration ---
     ai_3d_multi_input_enabled: bool = Field(True, validation_alias="AI_3D_MULTI_INPUT_ENABLED")
     ai_3d_multi_input_max_files: int = Field(10, validation_alias="AI_3D_MULTI_INPUT_MAX_FILES")
