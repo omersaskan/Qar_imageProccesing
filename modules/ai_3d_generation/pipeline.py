@@ -30,6 +30,7 @@ from .quality_gate import evaluate as quality_evaluate
 from .quality_profiles import resolve_quality_profile
 from .ar_readiness import assess_ar_readiness
 from .mesh_stats import extract_mesh_stats
+from .asset_quality import run_asset_quality_pipeline
 
 logger = logging.getLogger("ai_3d_generation.pipeline")
 
@@ -486,6 +487,34 @@ def generate_ai_3d(
         manifest["ar_readiness"] = assess_ar_readiness(manifest)
     except Exception:
         manifest["ar_readiness"] = {"enabled": False, "score": None, "verdict": "unknown"}
+
+    # ── 9. Asset quality pipeline ─────────────────────────────────────────────
+    try:
+        _aq = run_asset_quality_pipeline(output_glb_path, manifest)
+        manifest["asset_quality"] = _aq
+        # Promote sub-checks to top level for easy manifest/API consumption
+        _aq_checks = _aq.get("checks") or {}
+        manifest["normalization"]  = _aq_checks.get("scale_orientation") or {}
+        manifest["mesh_cleanup"]   = _aq_checks.get("mesh_cleanup") or {}
+        manifest["lod"]            = _aq_checks.get("lod") or {}
+        manifest["pbr_textures"]   = _aq_checks.get("pbr_textures") or {}
+        manifest["export_profiles"] = _aq_checks.get("export_profiles") or {}
+        # Conservative quality gate downgrade: never let status stay "ok" if AQ flags issues
+        _aq_verdict = _aq.get("verdict", "")
+        if _aq_verdict in ("needs_review", "not_ready") and manifest.get("status") == "ok":
+            manifest["status"] = "review"
+            manifest.setdefault("warnings", []).append("asset_quality_review_required")
+    except Exception as _aq_exc:
+        manifest["asset_quality"] = {
+            "enabled": True, "available": False, "status": "review",
+            "score": None, "verdict": "needs_review", "provider_neutral": True,
+            "checks": {}, "warnings": ["asset_quality_pipeline_error"], "error": str(_aq_exc)[:200],
+        }
+        manifest["normalization"]   = {}
+        manifest["mesh_cleanup"]    = {}
+        manifest["lod"]             = {}
+        manifest["pbr_textures"]    = {}
+        manifest["export_profiles"] = {}
 
     write_manifest(manifest, str(manifests_dir))
 

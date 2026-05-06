@@ -195,10 +195,51 @@
       <div id="mesh-stats-grid" class="ai3d-outputs"></div>
     </div>
 
-    <!-- Phase 4C: AR Readiness -->
+    <!-- Phase 4C: AR Technical Readiness -->
     <div id="ar-readiness-section" style="display:none;margin-top:20px">
-      <h3 style="font-size:.85rem;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">AR Readiness</h3>
+      <h3 style="font-size:.85rem;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">AR Technical Readiness</h3>
       <div id="ar-readiness-content"></div>
+    </div>
+
+    <!-- AQ1: Asset Quality -->
+    <div id="asset-quality-section" style="display:none;margin-top:20px">
+      <h3 style="font-size:.85rem;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Asset Quality</h3>
+      <div id="asset-quality-content"></div>
+    </div>
+
+    <!-- AQ1: Normalization -->
+    <div id="normalization-section" style="display:none;margin-top:20px">
+      <h3 style="font-size:.85rem;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Normalization</h3>
+      <div id="normalization-content"></div>
+    </div>
+
+    <!-- AQ1: Mesh Cleanup -->
+    <div id="mesh-cleanup-section" style="display:none;margin-top:20px">
+      <h3 style="font-size:.85rem;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Mesh Cleanup</h3>
+      <div id="mesh-cleanup-content"></div>
+    </div>
+
+    <!-- AQ1: LOD Plan -->
+    <div id="lod-section" style="display:none;margin-top:20px">
+      <h3 style="font-size:.85rem;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">LOD Plan</h3>
+      <div id="lod-content"></div>
+    </div>
+
+    <!-- AQ1: PBR / Textures -->
+    <div id="pbr-section" style="display:none;margin-top:20px">
+      <h3 style="font-size:.85rem;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">PBR / Textures</h3>
+      <div id="pbr-content"></div>
+    </div>
+
+    <!-- AQ1: Export Profiles -->
+    <div id="export-profiles-section" style="display:none;margin-top:20px">
+      <h3 style="font-size:.85rem;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Export Profiles</h3>
+      <div id="export-profiles-content"></div>
+    </div>
+
+    <!-- Hunyuan local safety note -->
+    <div id="hunyuan-warning-section" style="display:none;margin-top:16px;padding:10px 14px;background:#1e293b;border-left:3px solid #f59e0b;border-radius:4px;font-size:.82rem;color:#fbbf24">
+      &#9888; Hunyuan local inference may require large RAM/VRAM. Use a GPU server for real production tests.
     </div>
   </div>
 </div>
@@ -517,6 +558,161 @@
       arSection.style.display = 'block';
     } else {
       arSection.style.display = 'none';
+    }
+
+    // AQ1: Asset Quality
+    const aq = manifest.asset_quality || {};
+    const aqSection = document.getElementById('asset-quality-section');
+    const aqContent = document.getElementById('asset-quality-content');
+    aqContent.innerHTML = '';
+    if (aq.enabled) {
+      const _vc = aq.verdict === 'production_ready' ? {bg:'#d1fae5',fg:'#065f46'}
+                : aq.verdict === 'mobile_ready'     ? {bg:'#dbeafe',fg:'#1e40af'}
+                : aq.verdict === 'needs_review'     ? {bg:'#fef9c3',fg:'#854d0e'}
+                :                                     {bg:'#fee2e2',fg:'#991b1b'};
+      const verdictLabel = (aq.verdict || '—').replace(/_/g,' ');
+      aqContent.innerHTML = `
+        <div style="display:flex;gap:12px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
+          <span style="background:${_vc.bg};color:${_vc.fg};border-radius:4px;padding:4px 12px;font-weight:700;font-size:.9rem">${verdictLabel}</span>
+          <span style="font-size:.9rem">Score: <strong>${aq.score != null ? aq.score + ' / 100' : '—'}</strong></span>
+          <span style="font-size:.82rem;color:#94a3b8">Status: ${aq.status || '—'}</span>
+          ${aq.provider_neutral ? '<span style="font-size:.75rem;color:#64748b;background:#0f172a;border-radius:3px;padding:2px 6px">provider-neutral</span>' : ''}
+        </div>`;
+      (aq.warnings || []).forEach(w => {
+        aqContent.innerHTML += `<span class="ai3d-warn-tag">${w}</span> `;
+      });
+      if (aq.recommendations && aq.recommendations.length) {
+        aqContent.innerHTML += `<ul style="margin:8px 0 0;padding-left:18px;font-size:.85rem;color:#cbd5e1">`;
+        aq.recommendations.forEach(r => { aqContent.innerHTML += `<li>${r}</li>`; });
+        aqContent.innerHTML += `</ul>`;
+      }
+      aqSection.style.display = 'block';
+    } else {
+      aqSection.style.display = 'none';
+    }
+
+    // AQ1: Normalization
+    const nm = manifest.normalization || {};
+    const nmSection = document.getElementById('normalization-section');
+    const nmContent = document.getElementById('normalization-content');
+    nmContent.innerHTML = '';
+    if (nm.enabled) {
+      const a = nm.analysis || {};
+      const dims = a.dimensions || {};
+      nmContent.innerHTML = `<div class="ai3d-outputs">`;
+      if (a.dimensions) {
+        nmContent.innerHTML += `<div class="ai3d-out-box"><h3>Dimensions</h3><p>X: ${dims.x ?? '—'} &nbsp; Y: ${dims.y ?? '—'} &nbsp; Z: ${dims.z ?? '—'}</p></div>`;
+      }
+      nmContent.innerHTML += `<div class="ai3d-out-box"><h3>Ground Offset</h3><p>${a.ground_offset != null ? a.ground_offset : '—'}</p></div>`;
+      nmContent.innerHTML += `<div class="ai3d-out-box"><h3>Likely On Ground</h3><p>${a.likely_flat_on_ground != null ? (a.likely_flat_on_ground ? 'Yes' : 'No') : '—'}</p></div>`;
+      nmContent.innerHTML += `<div class="ai3d-out-box"><h3>Largest Axis</h3><p>${a.largest_axis || '—'}</p></div>`;
+      nmContent.innerHTML += `<div class="ai3d-out-box"><h3>Normalization Applied</h3><p>${nm.applied ? 'Yes' : 'No'}</p></div>`;
+      nmContent.innerHTML += `</div>`;
+      (nm.warnings || []).forEach(w => { nmContent.innerHTML += `<span class="ai3d-warn-tag">${w}</span> `; });
+      nmSection.style.display = 'block';
+    } else {
+      nmSection.style.display = 'none';
+    }
+
+    // AQ1: Mesh Cleanup
+    const mc = manifest.mesh_cleanup || {};
+    const mcSection = document.getElementById('mesh-cleanup-section');
+    const mcContent = document.getElementById('mesh-cleanup-content');
+    mcContent.innerHTML = '';
+    if (mc.enabled) {
+      const met = mc.metrics || {};
+      const _sc = mc.status === 'ok' ? {bg:'#d1fae5',fg:'#065f46'} : mc.status === 'review' ? {bg:'#fef9c3',fg:'#854d0e'} : {bg:'#fee2e2',fg:'#991b1b'};
+      mcContent.innerHTML = `<span style="background:${_sc.bg};color:${_sc.fg};border-radius:4px;padding:3px 10px;font-weight:700;font-size:.85rem;margin-bottom:8px;display:inline-block">${mc.status || '—'}</span>`;
+      mcContent.innerHTML += `<div class="ai3d-outputs" style="margin-top:8px">`;
+      mcContent.innerHTML += `<div class="ai3d-out-box"><h3>Components</h3><p>${met.component_count ?? '—'}</p></div>`;
+      mcContent.innerHTML += `<div class="ai3d-out-box"><h3>Degenerate Faces</h3><p>${met.degenerate_face_count ?? '—'}</p></div>`;
+      mcContent.innerHTML += `<div class="ai3d-out-box"><h3>Boundary Edges</h3><p>${met.boundary_edge_count ?? '—'}</p></div>`;
+      mcContent.innerHTML += `<div class="ai3d-out-box"><h3>Non-manifold</h3><p>${met.non_manifold_estimate != null ? (met.non_manifold_estimate ? 'Detected' : 'None') : '—'}</p></div>`;
+      mcContent.innerHTML += `</div>`;
+      (mc.issues || []).forEach(i => { mcContent.innerHTML += `<span class="ai3d-warn-tag" style="background:#fee2e2;color:#991b1b">${i}</span> `; });
+      (mc.warnings || []).forEach(w => { mcContent.innerHTML += `<span class="ai3d-warn-tag">${w}</span> `; });
+      if ((mc.recommendations || []).length) {
+        mcContent.innerHTML += `<p style="font-size:.82rem;color:#f59e0b;margin-top:6px">&#9888; Manual cleanup recommended</p>`;
+      }
+      mcSection.style.display = 'block';
+    } else {
+      mcSection.style.display = 'none';
+    }
+
+    // AQ1: LOD Plan
+    const lod = manifest.lod || {};
+    const lodSection = document.getElementById('lod-section');
+    const lodContent = document.getElementById('lod-content');
+    lodContent.innerHTML = '';
+    if (lod.enabled) {
+      lodContent.innerHTML = `<div style="font-size:.82rem;color:#94a3b8;margin-bottom:8px">Strategy: <strong>${lod.strategy || '—'}</strong> &nbsp;|&nbsp; Generated: <strong>${lod.generated ? 'Yes' : 'No'}</strong></div>`;
+      lodContent.innerHTML += `<div class="ai3d-outputs">`;
+      (lod.tiers || []).forEach(t => {
+        const badge = t.recommended ? ' <span style="font-size:.7rem;background:#1e40af;color:#dbeafe;border-radius:3px;padding:1px 5px">recommended</span>' : '';
+        const pathLine = t.path ? `<br><span style="font-size:.72rem;color:#4ade80">&#10003; generated</span>` : '';
+        lodContent.innerHTML += `<div class="ai3d-out-box"><h3>${t.name}${badge}</h3><p>${(t.target_faces || 0).toLocaleString()} faces${pathLine}</p></div>`;
+      });
+      lodContent.innerHTML += `</div>`;
+      lodSection.style.display = 'block';
+    } else {
+      lodSection.style.display = 'none';
+    }
+
+    // AQ1: PBR / Textures
+    const pbr = manifest.pbr_textures || {};
+    const pbrSection = document.getElementById('pbr-section');
+    const pbrContent = document.getElementById('pbr-content');
+    pbrContent.innerHTML = '';
+    if (pbr.enabled) {
+      const _yn = v => v == null ? '—' : (v ? '&#10003;' : '&#10007;');
+      pbrContent.innerHTML = `<div class="ai3d-outputs">`;
+      pbrContent.innerHTML += `<div class="ai3d-out-box"><h3>Materials</h3><p>${pbr.material_count ?? 0}</p></div>`;
+      pbrContent.innerHTML += `<div class="ai3d-out-box"><h3>Textures</h3><p>${pbr.texture_count ?? 0}</p></div>`;
+      pbrContent.innerHTML += `<div class="ai3d-out-box"><h3>Images</h3><p>${pbr.image_count ?? 0}</p></div>`;
+      pbrContent.innerHTML += `<div class="ai3d-out-box"><h3>Base Color</h3><p>${_yn(pbr.has_base_color)}</p></div>`;
+      pbrContent.innerHTML += `<div class="ai3d-out-box"><h3>Metal/Rough</h3><p>${_yn(pbr.has_metallic_roughness)}</p></div>`;
+      pbrContent.innerHTML += `<div class="ai3d-out-box"><h3>Normal Map</h3><p>${_yn(pbr.has_normal)}</p></div>`;
+      pbrContent.innerHTML += `<div class="ai3d-out-box"><h3>Max Tex Res</h3><p>${pbr.max_texture_resolution ? pbr.max_texture_resolution + 'px' : '—'}</p></div>`;
+      pbrContent.innerHTML += `</div>`;
+      (pbr.warnings || []).forEach(w => { pbrContent.innerHTML += `<span class="ai3d-warn-tag">${w}</span> `; });
+      pbrSection.style.display = 'block';
+    } else {
+      pbrSection.style.display = 'none';
+    }
+
+    // AQ1: Export Profiles
+    const ep = manifest.export_profiles || {};
+    const epSection = document.getElementById('export-profiles-section');
+    const epContent = document.getElementById('export-profiles-content');
+    epContent.innerHTML = '';
+    if (ep.raw !== undefined || ep.web_preview !== undefined) {
+      const _profile = (label, data) => {
+        if (!data) return '';
+        const ready = data.ready !== undefined ? data.ready : data.available;
+        const col = ready ? {bg:'#d1fae5',fg:'#065f46'} : {bg:'#fee2e2',fg:'#991b1b'};
+        const st = ready ? 'Ready' : 'Not Ready';
+        let html = `<div class="ai3d-out-box"><h3>${label}</h3><p style="background:${col.bg};color:${col.fg};border-radius:3px;padding:2px 8px;display:inline-block;font-weight:700">${st}</p>`;
+        (data.blocking_reasons || []).forEach(r => { html += `<br><span style="font-size:.72rem;color:#f87171">${r}</span>`; });
+        html += `</div>`;
+        return html;
+      };
+      epContent.innerHTML = `<div class="ai3d-outputs">`;
+      epContent.innerHTML += _profile('Raw', ep.raw);
+      epContent.innerHTML += _profile('Web Preview', ep.web_preview);
+      epContent.innerHTML += _profile('Mobile AR', ep.mobile_ar);
+      epContent.innerHTML += _profile('Desktop High', ep.desktop_high);
+      epContent.innerHTML += `</div>`;
+      epSection.style.display = 'block';
+    } else {
+      epSection.style.display = 'none';
+    }
+
+    // Hunyuan warning: show when provider is hunyuan
+    const hwSection = document.getElementById('hunyuan-warning-section');
+    if (manifest.provider && manifest.provider.includes('hunyuan')) {
+      hwSection.style.display = 'block';
+    } else {
+      hwSection.style.display = 'none';
     }
   }
 </script>
