@@ -8,13 +8,13 @@ Contract:
   - Exits 0; manifest status field ("ok" / "failed") carries the result.
   - Texture mode (shape_and_texture) is NOT implemented here.
   - Never imports main-process modules; runs in Hunyuan's own Python env.
-  - PYTHONPATH is set by the provider to point at the Hunyuan repo root.
+  - BackgroundRemover (hy3dshape.rembg) is optional: a warning is added if
+    unavailable, but inference continues with the original RGBA image.
 """
 import argparse
 import json
 import os
 import sys
-import time
 from pathlib import Path
 
 
@@ -26,6 +26,9 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Hunyuan3D-2.1 Shape-Only Runner")
     parser.add_argument("--input-image", required=True)
     parser.add_argument("--output-dir", required=True)
+    parser.add_argument("--repo-path", default="",
+                        help="Root of the Hunyuan3D-2.1 repo; "
+                             "hy3dshape/ and hy3dpaint/ sub-roots are inserted to sys.path")
     parser.add_argument("--mode", choices=["shape_only", "shape_and_texture"],
                         default="shape_only")
     parser.add_argument("--model-path", default="tencent/Hunyuan3D-2.1")
@@ -42,6 +45,33 @@ def parse_args():
 
 
 # ---------------------------------------------------------------------------
+# Package root setup
+# ---------------------------------------------------------------------------
+
+def _setup_package_roots(repo_path: str) -> list:
+    """
+    Insert Hunyuan package roots into sys.path.
+
+    Inserts (in order, if the path exists on disk):
+      <repo_path>/hy3dshape
+      <repo_path>/hy3dpaint
+      <repo_path>
+
+    Returns the list of paths actually inserted.
+    """
+    inserted = []
+    if not repo_path:
+        return inserted
+    repo = Path(repo_path)
+    for candidate in (repo / "hy3dshape", repo / "hy3dpaint", repo):
+        s = str(candidate)
+        if candidate.exists() and s not in sys.path:
+            sys.path.insert(0, s)
+            inserted.append(s)
+    return inserted
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -51,13 +81,19 @@ def write_manifest(path: str, data: dict) -> None:
 
 
 def _sanitize_error(exc: Exception) -> str:
-    """Return a safe, non-leaking error string for the manifest."""
+    """
+    Return a safe, non-leaking error string for the manifest.
+
+    Import errors include the actual module name so operators can diagnose
+    missing packages (e.g. ``import_error:No module named 'hy3dshape.pipelines'``).
+    """
     msg = str(exc)
     t = type(exc).__name__
     if "out of memory" in msg.lower() or "CUDA out of memory" in msg:
         return "cuda_oom"
     if "ModuleNotFoundError" in t or "ImportError" in t:
-        return f"import_error:{t}"
+        first_line = msg.splitlines()[0][:200] if msg else t
+        return f"import_error:{first_line}"
     first_line = msg.splitlines()[0] if msg else ""
     return f"{t}: {first_line[:120]}"
 
@@ -69,20 +105,23 @@ def _alpha_is_all_opaque(image) -> bool:
         stat = ImageStat.Stat(image.split()[3])
         return stat.extrema[0][0] == 255
     except Exception:
-        return True  # conservative: assume no mask → remove background
+        return True  # conservative: assume no mask → attempt BG removal
 
 
-def _remove_background(image):
+def _try_remove_background(image):
     """
-    Apply BackgroundRemover from hy3dshape.rembg.
-    Returns RGBA image.  Falls back to original on any error.
+    Lazily import and apply BackgroundRemover from hy3dshape.rembg.
+
+    Returns ``(rgba_image, warning_str_or_None)``.  If the import fails or
+    the remover raises, the original image is returned with a warning string
+    so the caller can append it to the manifest's warnings list and continue.
     """
     try:
         from hy3dshape.rembg import BackgroundRemover
         remover = BackgroundRemover()
-        return remover(image.convert("RGB")).convert("RGBA")
-    except Exception:
-        return image
+        return remover(image.convert("RGB")).convert("RGBA"), None
+    except Exception as exc:
+        return image, f"background_remover_unavailable:{_sanitize_error(exc)}"
 
 
 # ---------------------------------------------------------------------------
@@ -92,12 +131,10 @@ def _remove_background(image):
 def main() -> None:
     args = parse_args()
 
-    # The provider sets PYTHONPATH to the Hunyuan repo root.  Python processes
-    # PYTHONPATH automatically at startup, but on some Windows configurations
-    # it may not be reflected in sys.path until we do so explicitly.
-    _pythonpath = os.environ.get("PYTHONPATH", "")
-    if _pythonpath and _pythonpath not in sys.path:
-        sys.path.insert(0, _pythonpath)
+    # ── Package roots ─────────────────────────────────────────────────────────
+    # Insert hy3dshape/, hy3dpaint/, and the repo root itself so imports
+    # work regardless of how PYTHONPATH was propagated by the provider.
+    _setup_package_roots(args.repo_path)
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -113,7 +150,7 @@ def main() -> None:
     # ── Mock mode (test-only) ─────────────────────────────────────────────────
     if args.mock_runner:
         output_glb = output_dir / "output.glb"
-        # Minimal syntactically plausible GLB header (12-byte magic+version+length)
+        # Minimal syntactically plausible GLB header
         output_glb.write_bytes(b"glTF\x02\x00\x00\x00\x14\x00\x00\x00\x00\x00\x00\x00")
         manifest.update({
             "status": "ok",
@@ -134,6 +171,7 @@ def main() -> None:
         sys.exit(0)
 
     # ── Import Hunyuan + PIL ──────────────────────────────────────────────────
+    # BackgroundRemover is NOT imported here; it is loaded lazily below.
     try:
         from PIL import Image
         from hy3dshape.pipelines import Hunyuan3DDiTFlowMatchingPipeline
@@ -144,13 +182,13 @@ def main() -> None:
 
     # ── Real shape-only inference ─────────────────────────────────────────────
     try:
-        # Load pipeline from pretrained weights
+        # Load pipeline
         pipeline_shapegen = Hunyuan3DDiTFlowMatchingPipeline.from_pretrained(
             args.model_path,
             subfolder=args.subfolder,
         )
 
-        # Low-VRAM mode: prefer fp16 if the pipeline supports it
+        # Low-VRAM mode: prefer fp16 when the pipeline supports it
         if args.low_vram_mode:
             try:
                 import torch
@@ -163,11 +201,15 @@ def main() -> None:
         # Open input image
         image = Image.open(args.input_image).convert("RGBA")
 
-        # Apply background removal when the image carries no alpha mask
+        # Apply background removal only when the image has no meaningful alpha
+        # mask (all pixels fully opaque).  If BackgroundRemover is unavailable
+        # (e.g. missing CuPy / CUDA_PATH), add a warning and continue.
         if _alpha_is_all_opaque(image):
-            image = _remove_background(image)
+            image, bg_warn = _try_remove_background(image)
+            if bg_warn:
+                manifest["warnings"].append(bg_warn)
 
-        # Reset VRAM peak counter before inference
+        # Reset VRAM peak counter
         if args.device == "cuda":
             try:
                 import torch
@@ -199,7 +241,7 @@ def main() -> None:
         manifest.update({
             "status": "ok",
             "output_glb_path": str(output_glb_path.resolve()),
-            "warnings": ["ai_generated_not_true_scan"],
+            "warnings": manifest["warnings"] + ["ai_generated_not_true_scan"],
             "error": None,
             "peak_mem_mb": peak_mem_mb,
             "mode": "shape_only",

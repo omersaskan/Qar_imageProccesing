@@ -355,6 +355,143 @@ def test_api_no_500_on_hunyuan_provider_failure(tmp_path):
     assert body.get("provider_status") == "failed" or body.get("status") == "failed"
 
 
+# ── Package roots / import path tests ─────────────────────────────────────────
+
+@patch("subprocess.run")
+def test_provider_cmd_includes_repo_path(mock_run, mock_settings, tmp_path):
+    """Provider command must pass --repo-path with the configured repo path."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    py = tmp_path / "python"
+    py.touch()
+
+    mock_settings.hunyuan3d_21_enabled = True
+    mock_settings.hunyuan3d_21_legal_ack = True
+    mock_settings.hunyuan3d_21_repo_path = str(repo)
+    mock_settings.hunyuan3d_21_python = str(py)
+    mock_settings.hunyuan3d_21_mock_runner = False
+
+    mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="no manifest")
+
+    provider = Hunyuan3D21Provider()
+    provider.generate("tests/test_data/ai_3d/test_input.png", str(tmp_path))
+
+    cmd = mock_run.call_args[0][0]
+    assert "--repo-path" in cmd
+    # The value following --repo-path must resolve to the configured repo
+    idx = cmd.index("--repo-path")
+    assert Path(cmd[idx + 1]).resolve() == repo.resolve()
+
+
+def test_runner_setup_inserts_existing_package_roots(tmp_path):
+    """_setup_package_roots inserts hy3dshape, hy3dpaint, and repo root when present."""
+    import importlib.util, types
+    spec = importlib.util.spec_from_file_location(
+        "run_hunyuan3d_21",
+        str(Path("scripts/run_hunyuan3d_21.py").resolve()),
+    )
+    runner = types.ModuleType("run_hunyuan3d_21")
+    spec.loader.exec_module(runner)  # type: ignore[union-attr]
+
+    repo = tmp_path / "myrepo"
+    (repo / "hy3dshape").mkdir(parents=True)
+    (repo / "hy3dpaint").mkdir(parents=True)
+    repo.mkdir(exist_ok=True)
+
+    before = list(sys.path)
+    inserted = runner._setup_package_roots(str(repo))
+    # Remove what we inserted so we don't pollute other tests
+    for p in inserted:
+        sys.path.remove(p)
+
+    assert str(repo / "hy3dshape") in inserted
+    assert str(repo / "hy3dpaint") in inserted
+    assert str(repo) in inserted
+
+
+def test_runner_setup_skips_missing_subdirs(tmp_path):
+    """_setup_package_roots only inserts paths that actually exist on disk."""
+    import importlib.util, types
+    spec = importlib.util.spec_from_file_location(
+        "run_hunyuan3d_21",
+        str(Path("scripts/run_hunyuan3d_21.py").resolve()),
+    )
+    runner = types.ModuleType("run_hunyuan3d_21")
+    spec.loader.exec_module(runner)  # type: ignore[union-attr]
+
+    repo = tmp_path / "emptyrepo"
+    repo.mkdir()  # exists but no hy3dshape/ or hy3dpaint/
+
+    inserted = runner._setup_package_roots(str(repo))
+    for p in inserted:
+        if p in sys.path:
+            sys.path.remove(p)
+
+    # Only the repo root itself should be inserted (it exists); subdirs should not
+    assert str(repo / "hy3dshape") not in inserted
+    assert str(repo / "hy3dpaint") not in inserted
+    assert str(repo) in inserted
+
+
+def test_sanitize_error_import_includes_module_name():
+    """_sanitize_error must embed the actual module name for ImportError."""
+    import importlib.util, types
+    spec = importlib.util.spec_from_file_location(
+        "run_hunyuan3d_21",
+        str(Path("scripts/run_hunyuan3d_21.py").resolve()),
+    )
+    runner = types.ModuleType("run_hunyuan3d_21")
+    spec.loader.exec_module(runner)  # type: ignore[union-attr]
+
+    exc = ModuleNotFoundError("No module named 'hy3dshape.pipelines'")
+    result = runner._sanitize_error(exc)
+    assert result == "import_error:No module named 'hy3dshape.pipelines'"
+
+
+def test_real_runner_import_error_includes_module_name(mock_settings, tmp_path):
+    """Running the real runner (no hy3dshape installed) must emit import_error:<module>."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    mock_settings.hunyuan3d_21_enabled = True
+    mock_settings.hunyuan3d_21_legal_ack = True
+    mock_settings.hunyuan3d_21_repo_path = str(repo)
+    mock_settings.hunyuan3d_21_python = sys.executable  # test-env Python, no hy3dshape
+    mock_settings.hunyuan3d_21_mock_runner = False
+
+    provider = Hunyuan3D21Provider()
+    result = provider.generate("tests/test_data/ai_3d/test_input.png", str(tmp_path))
+
+    assert result["status"] == "failed"
+    err = result.get("error", "")
+    assert err.startswith("import_error:"), f"Expected import_error prefix, got: {err!r}"
+    assert "hy3dshape" in err or "PIL" in err or "module" in err.lower()
+
+
+def test_background_remover_failure_adds_warning_not_error():
+    """_try_remove_background must return (original_image, warning) when import fails."""
+    import importlib.util, types
+    from unittest.mock import MagicMock, patch as _patch
+
+    spec = importlib.util.spec_from_file_location(
+        "run_hunyuan3d_21",
+        str(Path("scripts/run_hunyuan3d_21.py").resolve()),
+    )
+    runner = types.ModuleType("run_hunyuan3d_21")
+    spec.loader.exec_module(runner)  # type: ignore[union-attr]
+
+    fake_image = MagicMock()
+    fake_image.convert.return_value = fake_image
+
+    with _patch.dict("sys.modules", {"hy3dshape.rembg": None}):
+        result_image, warning = runner._try_remove_background(fake_image)
+
+    # Original image returned, warning is set
+    assert result_image is fake_image
+    assert warning is not None
+    assert warning.startswith("background_remover_unavailable:")
+
+
 # ── Existing whitelist tests ────────────────────────────────────────────────────
 
 def test_write_session_inputs_sf3d_unchanged(tmp_path):
