@@ -46,6 +46,9 @@ def _get_provider(provider_name: str):
     if provider_name == "rodin":
         from .rodin_provider import RodinProvider
         return RodinProvider()
+    if provider_name == "hunyuan3d_21":
+        from .hunyuan3d_21_provider import Hunyuan3D21Provider
+        return Hunyuan3D21Provider()
     raise ValueError(f"unknown_ai3d_provider:{provider_name}")
 
 

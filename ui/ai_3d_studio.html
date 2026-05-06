@@ -73,6 +73,7 @@
     <div style="display:flex; gap:12px; align-items:center;">
       <select id="provider-select" class="ai3d-btn" style="background:#fff; color:#374151; border:1px solid #d1d5db; padding:8px 12px; flex:1;" onchange="onProviderChange()">
         <option value="sf3d" selected>Stable Fast 3D (Default Baseline)</option>
+        <option value="hunyuan3d_21">Hunyuan3D-2.1 Premium Local/Server</option>
         <option value="rodin">Rodin / Hyper3D Gen-2 (Premium Benchmark)</option>
         <option value="meshy" disabled>Meshy (All-around Benchmark - Coming Soon)</option>
         <option value="tripo" disabled>Tripo P1 (Multiview Benchmark - Coming Soon)</option>
@@ -210,6 +211,12 @@
 
   const PROVIDERS = {
     sf3d: { name: 'Stable Fast 3D (SF3D)', license: 'Stability AI Community License — check before commercial use.', external: false },
+    hunyuan3d_21: { 
+      name: 'Hunyuan3D-2.1 Premium', 
+      license: 'Tencent Hunyuan3D-2.1 Community License — check before commercial use.', 
+      external: false,
+      warning: 'Hunyuan3D-2.1 requires a configured GPU environment and license acknowledgement. Full shape+texture mode may require around 29 GB VRAM.'
+    },
     rodin: { name: 'Rodin / Hyper3D Gen-2', license: 'Hyper3D Gen-2 Commercial License applies.', external: true },
     meshy: { name: 'Meshy', license: 'Meshy Commercial License applies.', external: true },
     tripo: { name: 'Tripo P1', license: 'Tripo Commercial License applies.', external: true }
@@ -219,6 +226,22 @@
     const val = document.getElementById('provider-select').value;
     const p = PROVIDERS[val];
     document.getElementById('provider-license').textContent = p.license;
+    
+    // Show/hide specific warnings
+    const eb = document.getElementById('provider-error-box');
+    if (p.warning) {
+      eb.innerHTML = `<strong>ℹ Provider Note:</strong> ${p.warning}`;
+      eb.style.display = 'block';
+      eb.style.background = '#f0f9ff';
+      eb.style.borderColor = '#bae6fd';
+      eb.style.color = '#0369a1';
+    } else {
+      eb.style.display = 'none';
+      eb.style.background = '';
+      eb.style.borderColor = '';
+      eb.style.color = '';
+    }
+
     // Reset consent if provider changes
     externalProviderConsent = false;
   }
