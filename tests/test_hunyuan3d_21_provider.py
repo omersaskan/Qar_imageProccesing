@@ -187,3 +187,48 @@ def test_external_providers_disabled_by_default():
     assert settings.ai_3d_remote_providers_enabled is False
 
 import sys
+
+
+# ── Whitelist fix tests ────────────────────────────────────────────────────────
+
+def test_write_session_inputs_accepts_hunyuan(tmp_path):
+    """write_session_inputs must accept provider='hunyuan3d_21' without raising."""
+    from modules.ai_3d_generation.multi_input import write_session_inputs
+    f = tmp_path / "img.png"
+    f.touch()
+    # Must not raise
+    out = write_session_inputs(str(tmp_path), "single_image", [str(f)], provider="hunyuan3d_21")
+    import json
+    data = json.loads(open(out, encoding="utf-8").read())
+    assert data["provider"] == "hunyuan3d_21"
+
+
+def test_load_session_inputs_with_hunyuan_provider(tmp_path):
+    """load_session_inputs must accept a JSON file that names provider='hunyuan3d_21'."""
+    from modules.ai_3d_generation.multi_input import load_session_inputs, write_session_inputs
+    f = tmp_path / "img.png"
+    f.touch()
+    write_session_inputs(str(tmp_path), "single_image", [str(f)], provider="hunyuan3d_21")
+    data = load_session_inputs(str(tmp_path))
+    assert data is not None
+    assert data["provider"] == "hunyuan3d_21"
+
+
+def test_write_session_inputs_rejects_unknown_provider(tmp_path):
+    """write_session_inputs must still reject arbitrary provider strings."""
+    from modules.ai_3d_generation.multi_input import write_session_inputs
+    f = tmp_path / "img.png"
+    f.touch()
+    with pytest.raises(ValueError, match="Invalid provider"):
+        write_session_inputs(str(tmp_path), "single_image", [str(f)], provider="evil_cloud_api")
+
+
+def test_write_session_inputs_sf3d_unchanged(tmp_path):
+    """SF3D provider must still be accepted (regression guard)."""
+    from modules.ai_3d_generation.multi_input import write_session_inputs
+    f = tmp_path / "img.png"
+    f.touch()
+    import json
+    out = write_session_inputs(str(tmp_path), "single_image", [str(f)], provider="sf3d")
+    data = json.loads(open(out, encoding="utf-8").read())
+    assert data["provider"] == "sf3d"

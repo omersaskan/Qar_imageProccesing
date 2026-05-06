@@ -21,7 +21,7 @@ logger = logging.getLogger("ai_3d_generation.multi_input")
 _VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".webm", ".mkv"}
 _IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 _VALID_INPUT_MODES = {"single_image", "video", "multi_image"}
-_VALID_PROVIDERS = {"sf3d", "rodin", "meshy", "tripo"}
+_VALID_PROVIDERS = {"sf3d", "rodin", "meshy", "tripo", "hunyuan3d_21"}
 
 
 
