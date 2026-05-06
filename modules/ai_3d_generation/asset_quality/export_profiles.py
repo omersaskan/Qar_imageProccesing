@@ -53,7 +53,7 @@ def assess_export_profiles(
     # ── Raw ───────────────────────────────────────────────────────────────────
     raw = {
         "available": glb_exists,
-        "path": output_glb_path if glb_exists else None,
+        "path": None,  # never expose server-side filesystem paths in API responses
         "valid": glb_valid if glb_valid is not None else glb_exists,
     }
 

@@ -189,7 +189,7 @@ def audit_mesh_cleanup(glb_path: Optional[str]) -> Dict[str, Any]:
         # Suspicious bounds
         try:
             all_v = np.concatenate([m.vertices for m in meshes], axis=0)
-            span = float(np.ptp(all_v))
+            span = float(np.max(all_v) - np.min(all_v)) if len(all_v) > 0 else 0.0
             if span < _BOUNDS_MIN:
                 result["issues"].append("suspiciously_small_bounds")
             elif span > _BOUNDS_MAX:

@@ -601,3 +601,90 @@ class TestInvalidProviderRejected(unittest.TestCase):
             self.assertEqual(detail.get("error"), "unknown_ai3d_provider")
         else:
             self.assertIn("unknown_ai3d_provider", str(detail))
+
+
+# ── Fix-commit regression tests ───────────────────────────────────────────────
+
+
+class TestExportProfilesNoPathLeak(unittest.TestCase):
+    """export_profiles.raw.path must never contain a server-side filesystem path."""
+
+    def test_raw_path_is_none_when_glb_exists(self):
+        from modules.ai_3d_generation.asset_quality.export_profiles import assess_export_profiles
+        with tempfile.TemporaryDirectory() as td:
+            glb_path = _write_glb(td)
+            manifest = {
+                "output_glb_path": glb_path,
+                "glb_validation": {"valid": True, "issues": [], "warnings": []},
+                "mesh_stats": {},
+                "ar_readiness": {},
+                "output_size_bytes": 128,
+            }
+            result = assess_export_profiles(manifest)
+        raw = result["raw"]
+        self.assertIsNone(raw["path"], "raw.path must be None to avoid server path leak")
+        self.assertTrue(raw["available"])
+        self.assertTrue(raw["valid"])
+
+    def test_raw_path_is_none_when_glb_missing(self):
+        from modules.ai_3d_generation.asset_quality.export_profiles import assess_export_profiles
+        manifest = {
+            "output_glb_path": "/nonexistent/path.glb",
+            "glb_validation": {"valid": None},
+            "mesh_stats": {},
+            "ar_readiness": {},
+            "output_size_bytes": 0,
+        }
+        result = assess_export_profiles(manifest)
+        self.assertIsNone(result["raw"]["path"])
+        self.assertFalse(result["raw"]["available"])
+
+
+class TestPipelineExceptionSanitization(unittest.TestCase):
+    """Outer asset_quality exception must strip filesystem paths from error message."""
+
+    def test_exception_with_path_in_message_is_sanitized(self):
+        from modules.ai_3d_generation.asset_quality.quality_pipeline import _sanitize_error
+        # Simulate a FileNotFoundError whose str() contains an absolute path
+        exc = FileNotFoundError("/home/app/uploads/job_abc123/model.glb: No such file")
+        result = _sanitize_error(exc)
+        self.assertNotIn("/home/app", result)
+        self.assertNotIn("\\Users\\", result)
+        # Result should be the tail segment after the last separator
+        self.assertIn("model.glb", result)
+
+    def test_exception_without_path_is_unchanged(self):
+        from modules.ai_3d_generation.asset_quality.quality_pipeline import _sanitize_error
+        exc = RuntimeError("trimesh parse error: unexpected EOF")
+        result = _sanitize_error(exc)
+        self.assertEqual(result, "trimesh parse error: unexpected EOF")
+
+    def test_exception_message_capped_at_200_chars(self):
+        from modules.ai_3d_generation.asset_quality.quality_pipeline import _sanitize_error
+        exc = ValueError("x" * 500)
+        result = _sanitize_error(exc)
+        self.assertLessEqual(len(result), 200)
+
+
+class TestMeshCleanupSpanNoPtp(unittest.TestCase):
+    """mesh_cleanup_audit span calculation must not use np.ptp (removed in NumPy 2)."""
+
+    def test_span_calculation_with_simple_vertices(self):
+        """Directly call the bounds check path via a real GLB with known geometry."""
+        import numpy as np
+        from modules.ai_3d_generation.asset_quality.mesh_cleanup_audit import audit_mesh_cleanup
+
+        with tempfile.TemporaryDirectory() as td:
+            glb_path = _write_glb(td)
+            # Must not raise AttributeError on np.ptp regardless of numpy version
+            result = audit_mesh_cleanup(glb_path)
+        self.assertIn("status", result)
+        # If trimesh is available, metrics should be populated
+        if result.get("available") and result["metrics"].get("component_count") is not None:
+            self.assertNotIn("mesh_cleanup_audit_failed", result.get("warnings", []))
+
+    def test_np_ptp_not_used_in_source(self):
+        """Guard: the source file must not contain np.ptp after the fix."""
+        src = Path(__file__).parent.parent / "modules" / "ai_3d_generation" / "asset_quality" / "mesh_cleanup_audit.py"
+        content = src.read_text(encoding="utf-8")
+        self.assertNotIn("np.ptp", content, "np.ptp is deprecated in NumPy 2.x and must not be used")

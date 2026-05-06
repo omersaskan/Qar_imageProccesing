@@ -209,7 +209,11 @@ def _decimate_scene(scene: Any, target_faces: int) -> Optional[Any]:
             except Exception:
                 new_geometries[name] = geom
 
-        return trimesh.Scene(geometry=new_geometries)
+        try:
+            return trimesh.Scene(geometry=new_geometries, graph=scene.graph)
+        except TypeError:
+            # older trimesh versions that do not accept graph kwarg
+            return trimesh.Scene(geometry=new_geometries)
 
     except Exception as exc:
         log.warning("_decimate_scene failed: %s", exc)

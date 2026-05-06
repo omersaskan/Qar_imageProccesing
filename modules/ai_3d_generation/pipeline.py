@@ -31,6 +31,7 @@ from .quality_profiles import resolve_quality_profile
 from .ar_readiness import assess_ar_readiness
 from .mesh_stats import extract_mesh_stats
 from .asset_quality import run_asset_quality_pipeline
+from .asset_quality.quality_pipeline import _sanitize_error as _aq_sanitize_error
 
 logger = logging.getLogger("ai_3d_generation.pipeline")
 
@@ -508,7 +509,7 @@ def generate_ai_3d(
         manifest["asset_quality"] = {
             "enabled": True, "available": False, "status": "review",
             "score": None, "verdict": "needs_review", "provider_neutral": True,
-            "checks": {}, "warnings": ["asset_quality_pipeline_error"], "error": str(_aq_exc)[:200],
+            "checks": {}, "warnings": ["asset_quality_pipeline_error"], "error": _aq_sanitize_error(_aq_exc),
         }
         manifest["normalization"]   = {}
         manifest["mesh_cleanup"]    = {}
