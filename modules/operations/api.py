@@ -1608,7 +1608,7 @@ async def ai3d_process(session_id: str, body: Optional[_AI3DProcessRequest] = No
 
         provider_failure_reason: Optional[str] = None
         if provider_status in ("unavailable", "failed", "disabled", "error"):
-            p_name = manifest.get("provider", provider_name)
+            p_name = manifest.get("provider", resolved_provider)
             if "sf3d" in (p_name or ""):
                 errors = manifest.get("errors", [])
                 err_str = errors[0] if errors else provider_status
