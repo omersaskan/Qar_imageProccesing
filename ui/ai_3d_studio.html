@@ -237,6 +237,15 @@
       <div id="export-profiles-content"></div>
     </div>
 
+    <!-- AQ2: Artifacts -->
+    <div id="aq2-artifacts-section" style="display:none;margin-top:20px">
+      <h3 style="font-size:.85rem;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">AQ2 Artifacts</h3>
+      <div style="font-size:.76rem;color:#f59e0b;padding:6px 10px;background:#1c1917;border-left:3px solid #f59e0b;border-radius:3px;margin-bottom:10px">
+        &#9432; Normalized copy is a safe derived artifact. Raw provider GLB is preserved.
+      </div>
+      <div id="aq2-content"></div>
+    </div>
+
     <!-- Hunyuan local safety note -->
     <div id="hunyuan-warning-section" style="display:none;margin-top:16px;padding:10px 14px;background:#1e293b;border-left:3px solid #f59e0b;border-radius:4px;font-size:.82rem;color:#fbbf24">
       &#9888; Hunyuan local inference may require large RAM/VRAM. Use a GPU server for real production tests.
@@ -708,6 +717,63 @@
       epSection.style.display = 'block';
     } else {
       epSection.style.display = 'none';
+    }
+
+    // AQ2: Artifacts
+    const aq2 = manifest.aq2 || {};
+    const aq2Section = document.getElementById('aq2-artifacts-section');
+    const aq2Content = document.getElementById('aq2-content');
+    aq2Content.innerHTML = '';
+    if (aq2.enabled) {
+      const nc = aq2.normalized_copy || {};
+      const cr = aq2.cleanup_report || {};
+      const epkg = aq2.export_package || {};
+      const _avail = v => v ? '<span style="color:#4ade80">&#10003; Available</span>' : '<span style="color:#94a3b8">— Not available</span>';
+      const _yn = v => v == null ? '—' : (v ? '&#10003; Yes' : '&#10007; No');
+
+      aq2Content.innerHTML += `<div class="ai3d-outputs">`;
+
+      // Normalized Copy
+      aq2Content.innerHTML += `<div class="ai3d-out-box" style="min-width:180px"><h3>Normalized Copy</h3>`;
+      aq2Content.innerHTML += `<p style="font-size:.8rem">${_avail(nc.available)}</p>`;
+      aq2Content.innerHTML += `<p style="font-size:.78rem;color:#94a3b8">Applied: ${_yn(nc.applied)}</p>`;
+      const valValid = (nc.validation || {}).valid;
+      aq2Content.innerHTML += `<p style="font-size:.78rem;color:#94a3b8">Valid: ${_yn(valValid)}</p>`;
+      aq2Content.innerHTML += `<p style="font-size:.78rem;color:#4ade80">Raw preserved: &#10003; Yes</p>`;
+      if (nc.transform_applied) {
+        const t = nc.transform_applied;
+        const parts = [];
+        if (t.centered) parts.push('centered');
+        if (t.ground_aligned) parts.push('ground-aligned');
+        if (parts.length) aq2Content.innerHTML += `<p style="font-size:.72rem;color:#60a5fa">&#8594; ${parts.join(', ')}</p>`;
+      }
+      (nc.warnings || []).forEach(w => { aq2Content.innerHTML += `<br><span style="font-size:.7rem;color:#f59e0b">${w}</span>`; });
+      aq2Content.innerHTML += `</div>`;
+
+      // Cleanup Report
+      aq2Content.innerHTML += `<div class="ai3d-out-box" style="min-width:180px"><h3>Cleanup Report</h3>`;
+      aq2Content.innerHTML += `<p style="font-size:.8rem">${_avail(cr.available)}</p>`;
+      aq2Content.innerHTML += `<p style="font-size:.78rem;color:#94a3b8">Manual cleanup: ${_yn(cr.manual_cleanup_required)}</p>`;
+      aq2Content.innerHTML += `<p style="font-size:.78rem;color:#94a3b8">Retopology: ${_yn(cr.retopology_recommended)}</p>`;
+      if (cr.blocking_issue_count != null) aq2Content.innerHTML += `<p style="font-size:.78rem;color:#f87171">Blocking issues: ${cr.blocking_issue_count}</p>`;
+      aq2Content.innerHTML += `</div>`;
+
+      // Export Package
+      aq2Content.innerHTML += `<div class="ai3d-out-box" style="min-width:180px"><h3>Export Package</h3>`;
+      aq2Content.innerHTML += `<p style="font-size:.8rem">${_avail(epkg.available)}</p>`;
+      if (epkg.files) {
+        const fmap = { raw_glb:'Raw GLB', normalized_glb:'Normalized GLB', cleanup_report_json:'Cleanup Report (JSON)', cleanup_report_md:'Cleanup Report (MD)', asset_quality_json:'Asset Quality', export_manifest_json:'Export Manifest' };
+        Object.entries(fmap).forEach(([k,label]) => {
+          const f = epkg.files[k] || {};
+          aq2Content.innerHTML += `<p style="font-size:.72rem;color:${f.available ? '#4ade80' : '#94a3b8'}">${f.available ? '&#10003;' : '&#9675;'} ${label}</p>`;
+        });
+      }
+      aq2Content.innerHTML += `</div>`;
+
+      aq2Content.innerHTML += `</div>`;
+      aq2Section.style.display = 'block';
+    } else {
+      aq2Section.style.display = 'none';
     }
 
     // Hunyuan warning: show when provider is hunyuan

@@ -32,6 +32,7 @@ from .ar_readiness import assess_ar_readiness
 from .mesh_stats import extract_mesh_stats
 from .asset_quality import run_asset_quality_pipeline
 from .asset_quality.quality_pipeline import _sanitize_error as _aq_sanitize_error
+from .asset_quality.artifacts import run_aq2_pipeline, update_export_profiles_recommended_artifact
 
 logger = logging.getLogger("ai_3d_generation.pipeline")
 
@@ -516,6 +517,33 @@ def generate_ai_3d(
         manifest["lod"]             = {}
         manifest["pbr_textures"]    = {}
         manifest["export_profiles"] = {}
+
+    # ── 10. AQ2 artifacts ─────────────────────────────────────────────────────
+    try:
+        _aq2 = run_aq2_pipeline(
+            output_glb_path,
+            str(derived_dir_abs),
+            manifest,
+            manifest.get("asset_quality") or {},
+        )
+        manifest["aq2"] = _aq2
+        manifest["normalized_copy"] = _aq2.get("normalized_copy") or {}
+        manifest["cleanup_report"]  = _aq2.get("cleanup_report") or {}
+        manifest["export_package"]  = _aq2.get("export_package") or {}
+        # Update export_profiles with recommended_artifact based on normalized copy
+        _ep = manifest.get("export_profiles") or {}
+        if _ep:
+            _nc = _aq2.get("normalized_copy") or {}
+            manifest["export_profiles"] = update_export_profiles_recommended_artifact(_ep, _nc)
+    except Exception as _aq2_exc:
+        manifest["aq2"] = {
+            "enabled": True, "status": "review",
+            "normalized_copy": {}, "cleanup_report": {}, "export_package": {},
+            "warnings": ["aq2_pipeline_error"], "error": _aq_sanitize_error(_aq2_exc),
+        }
+        manifest["normalized_copy"] = {}
+        manifest["cleanup_report"]  = {}
+        manifest["export_package"]  = {}
 
     write_manifest(manifest, str(manifests_dir))
 

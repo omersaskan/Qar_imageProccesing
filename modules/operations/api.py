@@ -1666,6 +1666,12 @@ async def ai3d_process(session_id: str, body: Optional[_AI3DProcessRequest] = No
             "lod": manifest.get("lod"),
             "pbr_textures": manifest.get("pbr_textures"),
             "export_profiles": manifest.get("export_profiles"),
+
+            # AQ2: artifact pipeline
+            "aq2": manifest.get("aq2"),
+            "normalized_copy": manifest.get("normalized_copy"),
+            "cleanup_report": manifest.get("cleanup_report"),
+            "export_package": manifest.get("export_package"),
         }
         if provider_failure_reason:
             response["provider_failure_reason"] = provider_failure_reason
