@@ -40,6 +40,7 @@ def assess_export_profiles(
     aq_checks = aq.get("checks") or {}
     mesh_cleanup = aq_checks.get("mesh_cleanup") or {}
     pbr = aq_checks.get("pbr_textures") or {}
+    normalization_check = aq_checks.get("scale_orientation") or {}
 
     face_count: Optional[int] = mesh_stats.get("face_count")
     output_size_bytes: int = manifest.get("output_size_bytes") or 0
@@ -50,6 +51,16 @@ def assess_export_profiles(
     pbr_issues: List[str] = pbr.get("issues") or []
     ar_verdict = ar_readiness.get("verdict", "")
 
+    mc_warnings: List[str] = mesh_cleanup.get("warnings") or []
+    norm_warnings: List[str] = normalization_check.get("warnings") or []
+
+    # Mesh topology signals
+    floating_parts = "floating_parts_detected" in mc_warnings
+    non_manifold = "non_manifold_geometry" in mc_warnings
+    high_component = any(w.startswith("high_component_count") for w in mc_warnings)
+    # Normalization signals
+    ground_uncertain = "ground_alignment_uncertain" in norm_warnings
+
     # ── Raw ───────────────────────────────────────────────────────────────────
     raw = {
         "available": glb_exists,
@@ -59,6 +70,7 @@ def assess_export_profiles(
 
     # ── Web Preview ───────────────────────────────────────────────────────────
     web_blocking: List[str] = []
+    web_warn: List[str] = []
     web_recs: List[str] = []
     if not glb_exists:
         web_blocking.append("glb_missing")
@@ -70,10 +82,18 @@ def assess_export_profiles(
         web_blocking.append("face_count_too_high_for_web")
     if not web_blocking and face_count and face_count > 200_000:
         web_recs.append("Consider mesh decimation for better web loading performance.")
+    # Advisory warnings — do not block web preview but surface for awareness
+    if cleanup_status in ("review", "failed"):
+        web_warn.append("mesh_cleanup_review")
+    if floating_parts:
+        web_warn.append("floating_parts_detected")
+    if non_manifold:
+        web_warn.append("non_manifold_geometry")
 
     web_preview = {
         "ready": len(web_blocking) == 0,
         "blocking_reasons": web_blocking,
+        "warnings": web_warn,
         "recommendations": web_recs,
     }
 
@@ -92,6 +112,17 @@ def assess_export_profiles(
         mobile_blocking.append("ar_readiness_not_ready")
     if cleanup_status == "failed":
         mobile_blocking.append("mesh_cleanup_failed")
+    # Quality-gating: mesh topology and normalization signals block mobile AR delivery
+    if cleanup_status == "review":
+        mobile_blocking.append("mesh_cleanup_required")
+    if floating_parts:
+        mobile_blocking.append("floating_parts_detected")
+    if non_manifold:
+        mobile_blocking.append("non_manifold_geometry")
+    if high_component:
+        mobile_blocking.append("high_component_count")
+    if ground_uncertain:
+        mobile_blocking.append("ground_alignment_uncertain")
     if "no_materials" in pbr_issues:
         mobile_recs.append(
             "No materials found — model will render untextured on AR platforms."
@@ -105,12 +136,14 @@ def assess_export_profiles(
 
     # ── Desktop High ──────────────────────────────────────────────────────────
     desktop_blocking: List[str] = []
+    desktop_warn: List[str] = []
     desktop_recs: List[str] = []
     if not glb_exists:
         desktop_blocking.append("glb_missing")
     if glb_valid is False:
         desktop_blocking.append("glb_validation_failed")
-    if cleanup_status == "failed":
+    if cleanup_status in ("review", "failed"):
+        desktop_warn.append("mesh_cleanup_review")
         desktop_recs.append(
             "Mesh cleanup issues detected — review before desktop delivery."
         )
@@ -118,6 +151,7 @@ def assess_export_profiles(
     desktop_high = {
         "ready": len(desktop_blocking) == 0,
         "blocking_reasons": desktop_blocking,
+        "warnings": desktop_warn,
         "recommendations": desktop_recs,
     }
 

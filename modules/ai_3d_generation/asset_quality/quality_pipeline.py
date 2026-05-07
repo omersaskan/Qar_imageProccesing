@@ -114,9 +114,11 @@ def _run_pipeline(
 
     pbr_textures = audit_pbr_textures(glb_path)
 
-    # Preliminary assembly for export profiles
+    # Preliminary assembly for export profiles (include normalization so
+    # assess_export_profiles can gate on ground-alignment signals)
     _prelim: Dict[str, Any] = {
         "checks": {
+            "scale_orientation": normalization,
             "mesh_cleanup": mesh_cleanup,
             "pbr_textures": pbr_textures,
         }

@@ -26,7 +26,7 @@ import tempfile
 import os
 import unittest
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -688,3 +688,169 @@ class TestMeshCleanupSpanNoPtp(unittest.TestCase):
         src = Path(__file__).parent.parent / "modules" / "ai_3d_generation" / "asset_quality" / "mesh_cleanup_audit.py"
         content = src.read_text(encoding="utf-8")
         self.assertNotIn("np.ptp", content, "np.ptp is deprecated in NumPy 2.x and must not be used")
+
+
+# ── AQ1.1 Export Profile Quality Gating tests ─────────────────────────────────
+
+
+def _aq_prelim(
+    cleanup_status: str = "ok",
+    mc_warnings: Optional[list] = None,
+    mc_issues: Optional[list] = None,
+    norm_warnings: Optional[list] = None,
+) -> dict:
+    """Build a minimal _prelim dict as passed from quality_pipeline to assess_export_profiles."""
+    return {
+        "checks": {
+            "scale_orientation": {
+                "enabled": True,
+                "available": True,
+                "applied": False,
+                "warnings": norm_warnings or [],
+                "issues": [],
+                "analysis": {
+                    "likely_flat_on_ground": "ground_alignment_uncertain" not in (norm_warnings or []),
+                },
+            },
+            "mesh_cleanup": {
+                "enabled": True,
+                "available": True,
+                "status": cleanup_status,
+                "warnings": mc_warnings or [],
+                "issues": mc_issues or [],
+                "metrics": {},
+                "recommendations": [],
+            },
+            "pbr_textures": {
+                "enabled": True,
+                "available": True,
+                "issues": [],
+                "warnings": [],
+            },
+        }
+    }
+
+
+def _ep_manifest(glb_path: str, glb_valid: bool = True) -> dict:
+    return {
+        "output_glb_path": glb_path,
+        "glb_validation": {"valid": glb_valid, "issues": [], "warnings": []},
+        "mesh_stats": {"face_count": 50_000},
+        "ar_readiness": {"enabled": True, "score": 85, "verdict": "mobile_ready", "warnings": []},
+        "output_size_bytes": 512 * 1024,
+    }
+
+
+class TestExportProfileQualityGating(unittest.TestCase):
+    """AQ1.1 — export profiles must reflect asset_quality/mesh_cleanup signals."""
+
+    def test_mobile_ar_not_ready_when_cleanup_review_and_floating_parts(self):
+        from modules.ai_3d_generation.asset_quality.export_profiles import assess_export_profiles
+        with tempfile.TemporaryDirectory() as td:
+            glb_path = _write_glb(td)
+            manifest = _ep_manifest(glb_path)
+            aq = _aq_prelim(
+                cleanup_status="review",
+                mc_warnings=["floating_parts_detected", "non_manifold_geometry"],
+            )
+            result = assess_export_profiles(manifest, aq)
+        mobile = result["mobile_ar"]
+        self.assertFalse(mobile["ready"])
+        self.assertIn("mesh_cleanup_required", mobile["blocking_reasons"])
+        self.assertIn("floating_parts_detected", mobile["blocking_reasons"])
+        self.assertIn("non_manifold_geometry", mobile["blocking_reasons"])
+
+    def test_mobile_ar_not_ready_when_high_component_count(self):
+        from modules.ai_3d_generation.asset_quality.export_profiles import assess_export_profiles
+        with tempfile.TemporaryDirectory() as td:
+            glb_path = _write_glb(td)
+            manifest = _ep_manifest(glb_path)
+            aq = _aq_prelim(
+                cleanup_status="review",
+                mc_warnings=["high_component_count:844", "floating_parts_detected"],
+            )
+            result = assess_export_profiles(manifest, aq)
+        mobile = result["mobile_ar"]
+        self.assertFalse(mobile["ready"])
+        self.assertIn("high_component_count", mobile["blocking_reasons"])
+
+    def test_mobile_ar_not_ready_when_ground_alignment_uncertain(self):
+        from modules.ai_3d_generation.asset_quality.export_profiles import assess_export_profiles
+        with tempfile.TemporaryDirectory() as td:
+            glb_path = _write_glb(td)
+            manifest = _ep_manifest(glb_path)
+            aq = _aq_prelim(norm_warnings=["ground_alignment_uncertain"])
+            result = assess_export_profiles(manifest, aq)
+        mobile = result["mobile_ar"]
+        self.assertFalse(mobile["ready"])
+        self.assertIn("ground_alignment_uncertain", mobile["blocking_reasons"])
+
+    def test_web_preview_ready_but_includes_cleanup_warnings(self):
+        from modules.ai_3d_generation.asset_quality.export_profiles import assess_export_profiles
+        with tempfile.TemporaryDirectory() as td:
+            glb_path = _write_glb(td)
+            manifest = _ep_manifest(glb_path)
+            aq = _aq_prelim(
+                cleanup_status="review",
+                mc_warnings=["floating_parts_detected", "non_manifold_geometry"],
+            )
+            result = assess_export_profiles(manifest, aq)
+        web = result["web_preview"]
+        self.assertTrue(web["ready"], "web_preview should remain ready despite cleanup warnings")
+        self.assertIn("mesh_cleanup_review", web["warnings"])
+        self.assertIn("floating_parts_detected", web["warnings"])
+        self.assertIn("non_manifold_geometry", web["warnings"])
+        self.assertEqual(web["blocking_reasons"], [])
+
+    def test_raw_available_valid_no_path(self):
+        from modules.ai_3d_generation.asset_quality.export_profiles import assess_export_profiles
+        with tempfile.TemporaryDirectory() as td:
+            glb_path = _write_glb(td)
+            manifest = _ep_manifest(glb_path)
+            result = assess_export_profiles(manifest)
+        raw = result["raw"]
+        self.assertTrue(raw["available"])
+        self.assertTrue(raw["valid"])
+        self.assertIsNone(raw["path"], "raw.path must never expose a server-side path")
+
+    def test_ar_technical_readiness_separate_from_export_mobile_ar(self):
+        """AR Technical Readiness can be mobile_ready while export Mobile AR is not ready."""
+        from modules.ai_3d_generation.asset_quality.export_profiles import assess_export_profiles
+        with tempfile.TemporaryDirectory() as td:
+            glb_path = _write_glb(td)
+            # AR readiness says mobile_ready — this must not be changed
+            manifest = _ep_manifest(glb_path)
+            self.assertEqual(manifest["ar_readiness"]["verdict"], "mobile_ready")
+            # But mesh cleanup issues block the export profile
+            aq = _aq_prelim(
+                cleanup_status="review",
+                mc_warnings=["floating_parts_detected", "high_component_count:844"],
+            )
+            result = assess_export_profiles(manifest, aq)
+        # AR readiness is untouched (it lives in manifest, not export_profiles)
+        self.assertEqual(manifest["ar_readiness"]["verdict"], "mobile_ready")
+        # Export Mobile AR is blocked
+        self.assertFalse(result["mobile_ar"]["ready"])
+        self.assertIn("mesh_cleanup_required", result["mobile_ar"]["blocking_reasons"])
+
+    def test_desktop_high_ready_but_warns_cleanup(self):
+        from modules.ai_3d_generation.asset_quality.export_profiles import assess_export_profiles
+        with tempfile.TemporaryDirectory() as td:
+            glb_path = _write_glb(td)
+            manifest = _ep_manifest(glb_path)
+            aq = _aq_prelim(cleanup_status="review")
+            result = assess_export_profiles(manifest, aq)
+        desktop = result["desktop_high"]
+        self.assertTrue(desktop["ready"], "desktop_high remains ready despite cleanup warnings")
+        self.assertIn("mesh_cleanup_review", desktop["warnings"])
+        self.assertGreater(len(desktop["recommendations"]), 0)
+
+    def test_mobile_ar_ready_when_no_issues(self):
+        """Baseline: clean mesh with no warnings keeps mobile_ar ready."""
+        from modules.ai_3d_generation.asset_quality.export_profiles import assess_export_profiles
+        with tempfile.TemporaryDirectory() as td:
+            glb_path = _write_glb(td)
+            manifest = _ep_manifest(glb_path)
+            result = assess_export_profiles(manifest, _aq_prelim(cleanup_status="ok"))
+        self.assertTrue(result["mobile_ar"]["ready"])
+        self.assertEqual(result["mobile_ar"]["blocking_reasons"], [])

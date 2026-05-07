@@ -686,13 +686,16 @@
     const epContent = document.getElementById('export-profiles-content');
     epContent.innerHTML = '';
     if (ep.raw !== undefined || ep.web_preview !== undefined) {
+      const _cleanupBlocks = ['mesh_cleanup_required','mesh_cleanup_failed','floating_parts_detected','non_manifold_geometry','high_component_count','ground_alignment_uncertain'];
       const _profile = (label, data) => {
         if (!data) return '';
         const ready = data.ready !== undefined ? data.ready : data.available;
-        const col = ready ? {bg:'#d1fae5',fg:'#065f46'} : {bg:'#fee2e2',fg:'#991b1b'};
-        const st = ready ? 'Ready' : 'Not Ready';
+        const hasCleanupBlock = !ready && (data.blocking_reasons || []).some(r => _cleanupBlocks.includes(r));
+        const col = ready ? {bg:'#d1fae5',fg:'#065f46'} : (hasCleanupBlock ? {bg:'#fef3c7',fg:'#92400e'} : {bg:'#fee2e2',fg:'#991b1b'});
+        const st = ready ? 'Ready' : (hasCleanupBlock ? 'Needs cleanup before delivery' : 'Not Ready');
         let html = `<div class="ai3d-out-box"><h3>${label}</h3><p style="background:${col.bg};color:${col.fg};border-radius:3px;padding:2px 8px;display:inline-block;font-weight:700">${st}</p>`;
         (data.blocking_reasons || []).forEach(r => { html += `<br><span style="font-size:.72rem;color:#f87171">${r}</span>`; });
+        (data.warnings || []).forEach(w => { html += `<br><span style="font-size:.72rem;color:#f59e0b">${w}</span>`; });
         html += `</div>`;
         return html;
       };
