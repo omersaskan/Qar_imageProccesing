@@ -1608,7 +1608,7 @@ async def ai3d_process(session_id: str, body: Optional[_AI3DProcessRequest] = No
 
         provider_failure_reason: Optional[str] = None
         if provider_status in ("unavailable", "failed", "disabled", "error"):
-            p_name = manifest.get("provider", provider_name)
+            p_name = manifest.get("provider", resolved_provider)
             if "sf3d" in (p_name or ""):
                 errors = manifest.get("errors", [])
                 err_str = errors[0] if errors else provider_status
@@ -1658,6 +1658,14 @@ async def ai3d_process(session_id: str, body: Optional[_AI3DProcessRequest] = No
 
             # Phase 4D: GLB structural validation summary
             "glb_validation": manifest.get("glb_validation"),
+
+            # AQ1: Asset quality pipeline (provider-neutral)
+            "asset_quality": manifest.get("asset_quality"),
+            "normalization": manifest.get("normalization"),
+            "mesh_cleanup": manifest.get("mesh_cleanup"),
+            "lod": manifest.get("lod"),
+            "pbr_textures": manifest.get("pbr_textures"),
+            "export_profiles": manifest.get("export_profiles"),
         }
         if provider_failure_reason:
             response["provider_failure_reason"] = provider_failure_reason

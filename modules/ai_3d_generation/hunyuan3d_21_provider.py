@@ -125,6 +125,7 @@ class Hunyuan3D21Provider(AI3DProviderBase):
             "--texture-resolution", str(s.hunyuan3d_21_texture_resolution),
             "--max-num-view", str(s.hunyuan3d_21_max_num_view),
             "--device", device,
+            "--repo-path", str(Path(s.hunyuan3d_21_repo_path).resolve()),
             "--manifest-out", str(output_manifest_path.resolve()),
         ]
         
