@@ -348,6 +348,12 @@ def generate_ai_3d(
             except Exception:
                 pass
 
+        # Strip stale preprocess_failed warnings when generation produced output.
+        # cv2.imread may fail on the source image while the provider (via WSL path
+        # translation) still succeeds — the warning is spurious in that case.
+        if output_glb_path and Path(output_glb_path).exists():
+            warnings = [w for w in warnings if not w.startswith("preprocess_failed:")]
+
     # ── 5. Postprocess ────────────────────────────────────────────────────────
     postprocessing_meta = run_postprocess(
         glb_path=output_glb_path,
